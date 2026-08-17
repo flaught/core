@@ -126,6 +126,11 @@ describe("resolveSpecifier", () => {
     expect(result).toBe("src/utils.ts");
   });
 
+  it("resolves .js specifier to .ts source file (TypeScript ESM convention)", () => {
+    const result = resolveSpecifier("./config.js", "src/index.ts", allFiles);
+    expect(result).toBe("src/config.ts");
+  });
+
   it("resolves parent directory imports", () => {
     const result = resolveSpecifier("../config", "src/routes/search.ts", allFiles);
     expect(result).toBe("src/config.ts");

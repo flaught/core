@@ -197,16 +197,27 @@ function resolveJsRelative(
   allFilePaths: Set<string>,
 ): string | null {
   const dir = pathDirname(sourceFile);
+
+  // TypeScript ESM imports commonly use .js extensions even though the
+  // source file is .ts. Strip .js/.jsx from the specifier so our
+  // extension-adding candidates don't produce double extensions.
+  const stripped = specifier.replace(/\.(js|jsx|mjs|cjs)$/, "");
+
   const candidates = [
     specifier,
+    stripped,
     `${specifier}.ts`,
     `${specifier}.tsx`,
     `${specifier}.js`,
     `${specifier}.jsx`,
+    `${stripped}.ts`,
+    `${stripped}.tsx`,
     `${specifier}/index.ts`,
     `${specifier}/index.tsx`,
     `${specifier}/index.js`,
     `${specifier}/index.jsx`,
+    `${stripped}/index.ts`,
+    `${stripped}/index.tsx`,
   ];
 
   for (const candidate of candidates) {

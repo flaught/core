@@ -4,12 +4,13 @@
  *
  * Usage:
  *   flaught review            # full adversarial review
- *   flaught review --diff     # review a specific diff
+ *   flaught review --json     # dump context as JSON
+ *   flaught review --base main --head feature-branch
  *   flaught init              # scaffold .advreview.yml
  */
 
 import { Command } from "commander";
-import { assembleContext, type ContextOptions } from "./context/assembler.js";
+import { assembleContext, contextToJSON, type ContextOptions } from "./context/assembler.js";
 import { initConfig } from "./config.js";
 import * as path from "node:path";
 
@@ -37,6 +38,7 @@ program
   .option("-h, --head <ref>", "Head ref (default: HEAD)")
   .option("-c, --config <path>", "Path to .advreview.yml")
   .option("--diff <path>", "Path to a diff file (instead of git diff)")
+  .option("--json", "Output full context as JSON (for debugging/integration)")
   .action(async (opts) => {
     try {
       await runReview(opts);
@@ -53,13 +55,8 @@ async function runReview(opts: {
   head?: string;
   config?: string;
   diff?: string;
+  json?: boolean;
 }): Promise<void> {
-  console.log("Flaught — adversarial code review");
-  console.log("─".repeat(40));
-
-  // Stage 1: Context assembly
-  console.log("\n📋 Stage 1: Assembling context...");
-
   const contextOptions: ContextOptions = {
     repoPath: opts.repo ? path.resolve(opts.repo) : undefined,
     baseRef: opts.base,
@@ -69,6 +66,19 @@ async function runReview(opts: {
 
   const context = await assembleContext(contextOptions);
 
+  // JSON mode: dump full context and exit
+  if (opts.json) {
+    const json = contextToJSON(context);
+    console.log(JSON.stringify(json, null, 2));
+    return;
+  }
+
+  // Human-readable output
+  console.log("Flaught — adversarial code review");
+  console.log("─".repeat(40));
+
+  // Stage 1: Context assembly
+  console.log("\n📋 Stage 1: Assembling context...");
   console.log(`  Base: ${context.baseSha.slice(0, 8)} → Head: ${context.headSha.slice(0, 8)}`);
   console.log(`  Changed files: ${context.changedFiles.length}`);
   console.log(`  Neighborhood files: ${context.neighborhoodFiles.length}`);

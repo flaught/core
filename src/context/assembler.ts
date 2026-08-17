@@ -49,6 +49,22 @@ export interface ReviewContext {
   repoRoot: string;
 }
 
+/** JSON-safe representation of ReviewContext (Maps converted to objects) */
+export interface ReviewContextJSON {
+  diff: string;
+  changedFiles: ChangedFile[];
+  neighborhoodFiles: string[];
+  changedFileContents: Record<string, string>;
+  neighborhoodFileContents: Record<string, string>;
+  dependencyGraph: {
+    forwardDeps: Record<string, string[]>;
+    reverseDeps: Record<string, string[]>;
+  };
+  baseSha: string;
+  headSha: string;
+  repoRoot: string;
+}
+
 // ─── Options ─────────────────────────────────────────────────────────────────
 
 export interface ContextOptions {
@@ -304,6 +320,29 @@ export async function assembleContext(
     baseSha,
     headSha,
     repoRoot: repoPath,
+  };
+}
+
+/** Convert a ReviewContext to a JSON-serializable object (Maps -> Records) */
+export function contextToJSON(ctx: ReviewContext): ReviewContextJSON {
+  const forwardDeps: Record<string, string[]> = {};
+  const reverseDeps: Record<string, string[]> = {};
+
+  for (const file of ctx.dependencyGraph.getAllFiles()) {
+    forwardDeps[file] = ctx.dependencyGraph.getDependenciesOf(file);
+    reverseDeps[file] = ctx.dependencyGraph.getDependentsOf(new Set([file]));
+  }
+
+  return {
+    diff: ctx.diff,
+    changedFiles: ctx.changedFiles,
+    neighborhoodFiles: ctx.neighborhoodFiles,
+    changedFileContents: Object.fromEntries(ctx.changedFileContents),
+    neighborhoodFileContents: Object.fromEntries(ctx.neighborhoodFileContents),
+    dependencyGraph: { forwardDeps, reverseDeps },
+    baseSha: ctx.baseSha,
+    headSha: ctx.headSha,
+    repoRoot: ctx.repoRoot,
   };
 }
 
