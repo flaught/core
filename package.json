@@ -1,0 +1,47 @@
+{
+  "name": "@flaught/core",
+  "version": "0.1.0",
+  "description": "Adversarial PR/code review tool — structured, skeptical scrutiny for CI",
+  "main": "dist/index.js",
+  "bin": {
+    "flaught": "dist/cli.js"
+  },
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc --watch",
+    "lint": "eslint src/",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "review": "node dist/cli.js review"
+  },
+  "keywords": [
+    "code-review",
+    "adversarial",
+    "pr-review",
+    "ci",
+    "security",
+    "governance"
+  ],
+  "author": "Flaught contributors",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/flaught/core.git"
+  },
+  "dependencies": {
+    "commander": "^12.1.0",
+    "js-yaml": "^4.1.0",
+    "simple-git": "^3.25.0",
+    "zod": "^3.23.8"
+  },
+  "devDependencies": {
+    "@types/js-yaml": "^4.0.9",
+    "@types/node": "^22.0.0",
+    "typescript": "^5.5.0",
+    "vitest": "^2.0.0"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}
