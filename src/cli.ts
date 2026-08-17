@@ -60,7 +60,7 @@ async function runCliReview(opts: {
   config?: string;
   json?: boolean;
   output?: string;
-  noLlm?: boolean;
+  llm?: boolean;
   prDescription?: string;
 }): Promise<void> {
   // --json: output stage 1 context only
@@ -83,7 +83,7 @@ async function runCliReview(opts: {
     headRef: opts.head,
     configPath: opts.config,
     prDescription: opts.prDescription,
-    skipLlm: opts.noLlm,
+    skipLlm: !opts.llm,
   });
 
   // Output markdown report to stdout
