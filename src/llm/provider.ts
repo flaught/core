@@ -326,39 +326,21 @@ export class OllamaProvider implements LLMProvider {
 
 async function classifyHttpError(
   response: Response,
-  baseUrl: string,
+  _baseUrl: string,
   model: string,
   providerName: string,
 ): Promise<LLMError> {
   const status = response.status;
-  let errorBody = "";
-  try {
-    errorBody = await response.text();
-  } catch {
-    // Can't read body — that's fine, we have the status
-  }
-
-  // Try to parse the error body for a more specific message
-  let apiMessage = "";
-  let apiCode = "";
-  try {
-    // If errorBody is a promise (from response.text()), we can't await here,
-    // but we already have what we need from the status code
-    if (typeof errorBody === "string" && errorBody) {
-      const parsed = JSON.parse(errorBody);
-      apiMessage = parsed?.error?.message ?? parsed?.message ?? "";
-      apiCode = parsed?.error?.code ?? parsed?.code ?? "";
-    }
-  } catch {
-    // Not JSON, ignore
-  }
 
   switch (status) {
     case 401:
       return new LLMError(
-        `Authentication failed for ${model} at ${baseUrl}.\n\n` +
-        `Your API key is invalid or expired. Check that ${providerName === "openai-compatible" ? "the correct key" : "your API key"} is set correctly.\n\n` +
-        `Run with --no-llm to skip the LLM review entirely.`,
+        `API key not working for ${model}.\n\n` +
+        `Check that your API key is set correctly and has not expired.\n\n` +
+        `Options:\n` +
+        `  • Set the key: export OPENAI_API_KEY=sk-...\n` +
+        `  • Switch to a different provider in .advreview.yml (e.g., groq, ollama)\n` +
+        `  • Run with --no-llm to skip the LLM review entirely`,
         providerName,
         model,
         status,
@@ -366,55 +348,37 @@ async function classifyHttpError(
 
     case 403:
       return new LLMError(
-        `Permission denied for ${model} at ${baseUrl}.\n\n` +
-        `Your API key doesn't have access to this model or endpoint.\n` +
-        `Check your account permissions and API key scopes.\n\n` +
-        `Run with --no-llm to skip the LLM review entirely.`,
-        providerName,
-        model,
-        status,
-      );
-
-    case 429: {
-      // Distinguish rate limit from quota exhaustion
-      const isQuota = apiCode === "credit_balance_exhausted" ||
-        apiMessage.toLowerCase().includes("credit") ||
-        apiMessage.toLowerCase().includes("billing") ||
-        apiMessage.toLowerCase().includes("quota");
-
-      if (isQuota) {
-        return new LLMError(
-          `API quota exhausted for ${model}.\n\n` +
-          `Your account has no credits remaining. Add billing details or credits to continue using this provider.\n\n` +
-          `Options:\n` +
-          `  • Add credits to your account and retry\n` +
-          `  • Switch to a different provider in .advreview.yml (e.g., groq, ollama)\n` +
-          `  • Run with --no-llm to skip the LLM review entirely`,
-          providerName,
-          model,
-          status,
-        );
-      }
-
-      return new LLMError(
-        `Rate limited by ${model} provider.\n\n` +
-        `Too many requests in a short period. Wait a moment and retry, or:\n` +
+        `API key not working for ${model}.\n\n` +
+        `Your key doesn't have access to this model or endpoint.\n\n` +
+        `Options:\n` +
+        `  • Check your account permissions and API key scopes\n` +
         `  • Switch to a different provider in .advreview.yml\n` +
         `  • Run with --no-llm to skip the LLM review entirely`,
         providerName,
         model,
         status,
       );
-    }
+
+    case 429:
+      return new LLMError(
+        `API key not working for ${model} (rate limited or quota exhausted).\n\n` +
+        `This usually means your API key is on a free tier, has run out of credits, or is being rate-limited.\n\n` +
+        `Options:\n` +
+        `  • Check your billing details and add credits if needed\n` +
+        `  • Switch to a different provider in .advreview.yml (e.g., groq, ollama)\n` +
+        `  • Run with --no-llm to skip the LLM review entirely`,
+        providerName,
+        model,
+        status,
+      );
 
     case 404:
       return new LLMError(
-        `Model "${model}" not found at ${baseUrl}.\n\n` +
-        `This usually means:\n` +
-        `  • The model name is misspelled in your .advreview.yml\n` +
-        `  • The model has been deprecated or renamed\n` +
-        `  • You're pointing at the wrong API endpoint\n\n` +
-        `Run with --no-llm to skip the LLM review entirely.`,
+        `Model "${model}" not found.\n\n` +
+        `This usually means the model name in your .advreview.yml is misspelled or deprecated.\n\n` +
+        `Options:\n` +
+        `  • Fix the model name in .advreview.yml\n` +
+        `  • Run with --no-llm to skip the LLM review entirely`,
         providerName,
         model,
         status,
@@ -424,8 +388,7 @@ async function classifyHttpError(
     case 502:
     case 503:
       return new LLMError(
-        `The ${model} provider is experiencing issues (${status}).\n\n` +
-        `This is a server-side problem — try again in a few minutes.\n\n` +
+        `${model} provider is down (${status}). Try again in a few minutes.\n\n` +
         `Run with --no-llm to skip the LLM review entirely.`,
         providerName,
         model,
@@ -434,9 +397,11 @@ async function classifyHttpError(
 
     default:
       return new LLMError(
-        `Unexpected error from ${model} provider (${status}).\n\n` +
-        (apiMessage ? `Provider message: ${apiMessage}\n\n` : "") +
-        `Run with --no-llm to skip the LLM review entirely.`,
+        `API key not working for ${model} (${status}).\n\n` +
+        `Options:\n` +
+        `  • Check your API key and billing\n` +
+        `  • Switch to a different provider in .advreview.yml\n` +
+        `  • Run with --no-llm to skip the LLM review entirely`,
         providerName,
         model,
         status,
