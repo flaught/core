@@ -197,9 +197,9 @@ export class OpenAICompatibleProvider implements LLMProvider {
       throw new LLMError(
         `Could not reach ${this.config.model} at ${this.config.baseUrl}.\n\n` +
         `This usually means:\n` +
+        `  • The API key is not set or not valid\n` +
         `  • The API endpoint is down or unreachable\n` +
-        `  • You're behind a proxy that blocks the request\n` +
-        `  • The base URL in your config is wrong\n\n` +
+        `  • You're behind a proxy that blocks the request\n\n` +
         `Run with --no-llm to skip the LLM review entirely.`,
         this.name,
         this.model,
@@ -335,10 +335,11 @@ async function classifyHttpError(
   switch (status) {
     case 401:
       return new LLMError(
-        `API key not working for ${model}.\n\n` +
-        `Check that your API key is set correctly and has not expired.\n\n` +
+        `API key not configured or not valid for ${model}.\n\n` +
+        `This usually means the key is missing, empty, expired, or invalid.\n\n` +
         `Options:\n` +
         `  • Set the key: export OPENAI_API_KEY=sk-...\n` +
+        `  • Check that the key in .advreview.yml (llm.api_key_env) points to a set env var\n` +
         `  • Switch to a different provider in .advreview.yml (e.g., groq, ollama)\n` +
         `  • Run with --no-llm to skip the LLM review entirely`,
         providerName,
@@ -348,10 +349,10 @@ async function classifyHttpError(
 
     case 403:
       return new LLMError(
-        `API key not working for ${model}.\n\n` +
+        `API key not configured or not valid for ${model}.\n\n` +
         `Your key doesn't have access to this model or endpoint.\n\n` +
         `Options:\n` +
-        `  • Check your account permissions and API key scopes\n` +
+        `  • Check that the key is set and has the right permissions\n` +
         `  • Switch to a different provider in .advreview.yml\n` +
         `  • Run with --no-llm to skip the LLM review entirely`,
         providerName,
@@ -361,9 +362,10 @@ async function classifyHttpError(
 
     case 429:
       return new LLMError(
-        `API key not working for ${model} (rate limited or quota exhausted).\n\n` +
-        `This usually means your API key is on a free tier, has run out of credits, or is being rate-limited.\n\n` +
+        `API key not configured or not valid for ${model}.\n\n` +
+        `This usually means your API key is missing, on a free tier with no credits, or being rate-limited.\n\n` +
         `Options:\n` +
+        `  • Make sure the key is set: echo $OPENAI_API_KEY\n` +
         `  • Check your billing details and add credits if needed\n` +
         `  • Switch to a different provider in .advreview.yml (e.g., groq, ollama)\n` +
         `  • Run with --no-llm to skip the LLM review entirely`,
@@ -397,9 +399,9 @@ async function classifyHttpError(
 
     default:
       return new LLMError(
-        `API key not working for ${model} (${status}).\n\n` +
+        `API key not configured or not valid for ${model} (${status}).\n\n` +
         `Options:\n` +
-        `  • Check your API key and billing\n` +
+        `  • Make sure the key is set: echo $OPENAI_API_KEY\n` +
         `  • Switch to a different provider in .advreview.yml\n` +
         `  • Run with --no-llm to skip the LLM review entirely`,
         providerName,
