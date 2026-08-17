@@ -195,11 +195,11 @@ export class OpenAICompatibleProvider implements LLMProvider {
       });
     } catch (err) {
       throw new LLMError(
-        `Could not reach ${this.config.model} at ${this.config.baseUrl}.\n\n` +
+        `Could not reach Ollama at ${this.config.baseUrl}.\n\n` +
         `This usually means:\n` +
-        `  • The API key is not set or not valid\n` +
-        `  • The API endpoint is down or unreachable\n` +
-        `  • You're behind a proxy that blocks the request\n\n` +
+        `  • The model name is misspelled in .advreview.yml\n` +
+        `  • Ollama is not running — start it with: ollama serve\n` +
+        `  • The base_url in your config is wrong\n\n` +
         `Run with --no-llm to skip the LLM review entirely.`,
         this.name,
         this.model,
