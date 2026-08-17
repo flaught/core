@@ -1,0 +1,232 @@
+/**
+ * Review orchestrator — ties context assembly, LLM provider, and report
+ * rendering together into a complete adversarial review pipeline.
+ */
+
+import { assembleContext, type ReviewContext } from "./context/assembler.js";
+import { loadConfig } from "./config.js";
+import type { FlaughtConfig } from "./schemas/config.js";
+import { createProvider, type LLMReviewResult } from "./llm/provider.js";
+import { buildSystemPrompt, buildUserPrompt } from "./llm/prompt.js";
+import {
+  type FindingsArtifact,
+  type Finding,
+  type NoiseBudget,
+  type Severity,
+  SCHEMA_VERSION,
+  FINDINGS_SCHEMA_URL,
+  CAVEAT,
+} from "./schemas/findings.js";
+import { renderMarkdownReport } from "./report/markdown.js";
+import { renderJsonArtifact } from "./report/json.js";
+
+// ─── Review result ──────────────────────────────────────────────────────────
+
+export interface ReviewResult {
+  /** The assembled context */
+  context: ReviewContext;
+  /** The LLM review result (null if LLM was skipped) */
+  llmResult: LLMReviewResult | null;
+  /** The full findings artifact */
+  artifact: FindingsArtifact;
+  /** Markdown report for PR comments */
+  markdown: string;
+  /** JSON artifact string */
+  json: string;
+  /** Exit code based on severity gate */
+  exitCode: number;
+  /** Duration of the review in seconds */
+  durationSeconds: number;
+}
+
+// ─── Run the full review ────────────────────────────────────────────────────
+
+export async function runReview(options: {
+  repoPath?: string;
+  baseRef?: string;
+  headRef?: string;
+  configPath?: string;
+  prDescription?: string;
+  /** Skip LLM review (context assembly only) */
+  skipLlm?: boolean;
+}): Promise<ReviewResult> {
+  const startTime = Date.now();
+
+  // 1. Load config
+  const config = await loadConfig(options.configPath);
+
+  // 2. Assemble context
+  const context = await assembleContext({
+    repoPath: options.repoPath,
+    baseRef: options.baseRef,
+    headRef: options.headRef,
+    configPath: options.configPath,
+  });
+
+  // 3. Run LLM review
+  let llmResult: LLMReviewResult | null = null;
+  let findings: Finding[] = [];
+
+  if (!options.skipLlm && context.changedFiles.length > 0) {
+    const provider = createProvider(config);
+    const systemPrompt = buildSystemPrompt(config);
+    const userPrompt = buildUserPrompt(context, config, options.prDescription);
+
+    llmResult = await provider.review(systemPrompt, userPrompt);
+    findings = llmResult.findings;
+  }
+
+  // 4. Enforce noise budget
+  findings = enforceNoiseBudget(findings, config);
+
+  // 5. Build the findings artifact
+  const artifact = buildArtifact(context, findings, config);
+
+  // 6. Render reports
+  const markdown = renderMarkdownReport(artifact);
+  const json = renderJsonArtifact(artifact);
+
+  // 7. Determine exit code
+  const exitCode = computeExitCode(artifact, config);
+
+  const durationSeconds = Math.round((Date.now() - startTime) / 1000);
+  artifact.run.duration_seconds = durationSeconds;
+
+  return {
+    context,
+    llmResult,
+    artifact,
+    markdown,
+    json,
+    exitCode,
+    durationSeconds,
+  };
+}
+
+// ─── Noise budget enforcement ───────────────────────────────────────────────
+
+function enforceNoiseBudget(findings: Finding[], config: FlaughtConfig): Finding[] {
+  const severityOrder: Severity[] = ["critical", "high", "medium", "low", "info"];
+  const budget = config.noise_budget;
+
+  const result: Finding[] = [];
+  const counts: Record<Severity, number> = {
+    critical: 0,
+    high: 0,
+    medium: 0,
+    low: 0,
+    info: 0,
+  };
+
+  // Sort by severity (critical first), then by confidence (high first)
+  const sorted = [...findings].sort((a, b) => {
+    const severityDiff = severityOrder.indexOf(a.severity) - severityOrder.indexOf(b.severity);
+    if (severityDiff !== 0) return severityDiff;
+    return b.confidence - a.confidence;
+  });
+
+  for (const finding of sorted) {
+    const limit = budget[finding.severity];
+    if (counts[finding.severity] < limit) {
+      result.push(finding);
+      counts[finding.severity]++;
+    }
+  }
+
+  return result;
+}
+
+// ─── Build the findings artifact ────────────────────────────────────────────
+
+function buildArtifact(
+  context: ReviewContext,
+  findings: Finding[],
+  config: FlaughtConfig,
+): FindingsArtifact {
+  const bySeverity: Record<Severity, number> = {
+    critical: 0, high: 0, medium: 0, low: 0, info: 0,
+  };
+  const bySourceType: Record<string, number> = { deterministic: 0, llm: 0 };
+  const byCategory: Record<string, number> = {};
+
+  for (const f of findings) {
+    bySeverity[f.severity]++;
+    bySourceType[f.source_type] = (bySourceType[f.source_type] ?? 0) + 1;
+    byCategory[f.category] = (byCategory[f.category] ?? 0) + 1;
+  }
+
+  const dismissedCount = findings.filter((f) => f.dismissed).length;
+
+  const noiseBudget: NoiseBudget = {
+    critical: { limit: config.noise_budget.critical, used: bySeverity.critical },
+    high: { limit: config.noise_budget.high, used: bySeverity.high },
+    medium: { limit: config.noise_budget.medium, used: bySeverity.medium },
+    low: { limit: config.noise_budget.low, used: bySeverity.low },
+    info: { limit: config.noise_budget.info, used: bySeverity.info },
+  };
+
+  const repoName = context.repoRoot.split("/").pop() ?? "unknown";
+
+  const artifact: FindingsArtifact = {
+    $schema: FINDINGS_SCHEMA_URL,
+    schema_version: SCHEMA_VERSION,
+    _caveat: CAVEAT,
+    generated_at: new Date().toISOString(),
+    flaught_version: "0.1.0",
+    repository: {
+      name: repoName,
+      url: "",
+      branch: "",
+    },
+    pull_request: {
+      number: null,
+      url: null,
+      title: null,
+      description: null,
+      base_sha: context.baseSha,
+      head_sha: context.headSha,
+    },
+    run: {
+      id: generateRunId(),
+      ci_url: null,
+      duration_seconds: 0,
+    },
+    tools_executed: [],
+    findings,
+    test_inversion: null,
+    scope_creep: null,
+    noise_budget: noiseBudget,
+    summary: {
+      total_findings: findings.length,
+      by_severity: bySeverity,
+      by_source_type: bySourceType as FindingsArtifact["summary"]["by_source_type"],
+      by_category: byCategory as FindingsArtifact["summary"]["by_category"],
+      dismissed_count: dismissedCount,
+    },
+  };
+
+  return artifact;
+}
+
+function generateRunId(): string {
+  return `flaught-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
+// ─── Exit code computation ──────────────────────────────────────────────────
+
+function computeExitCode(artifact: FindingsArtifact, config: FlaughtConfig): number {
+  if (config.severity_gate.fail_on === "none") return 0;
+
+  const severityOrder: Severity[] = ["critical", "high", "medium", "low", "info"];
+  const threshold = severityOrder.indexOf(config.severity_gate.fail_on);
+
+  for (const finding of artifact.findings) {
+    if (finding.dismissed) continue;
+    const findingLevel = severityOrder.indexOf(finding.severity);
+    if (findingLevel <= threshold) {
+      return 1;
+    }
+  }
+
+  return 0;
+}

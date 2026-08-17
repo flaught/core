@@ -3,16 +3,19 @@
  * Flaught CLI — adversarial PR/code review for CI.
  *
  * Usage:
- *   flaught review            # full adversarial review
- *   flaught review --json     # dump context as JSON
- *   flaught review --base main --head feature-branch
- *   flaught init              # scaffold .advreview.yml
+ *   flaught review                          # full adversarial review
+ *   flaught review --json                   # output context as JSON (stage 1 only)
+ *   flaught review --base main --head feat  # specify refs
+ *   flaught review --no-llm                 # skip LLM, context assembly only
+ *   flaught init                            # scaffold .advreview.yml
  */
 
 import { Command } from "commander";
-import { assembleContext, contextToJSON, type ContextOptions } from "./context/assembler.js";
-import { initConfig } from "./config.js";
+import * as fs from "node:fs";
 import * as path from "node:path";
+import { contextToJSON } from "./context/assembler.js";
+import { runReview } from "./review.js";
+import { initConfig } from "./config.js";
 
 const program = new Command();
 
@@ -37,11 +40,13 @@ program
   .option("-b, --base <ref>", "Base ref (branch, tag, or SHA)")
   .option("-h, --head <ref>", "Head ref (default: HEAD)")
   .option("-c, --config <path>", "Path to .advreview.yml")
-  .option("--diff <path>", "Path to a diff file (instead of git diff)")
   .option("--json", "Output full context as JSON (for debugging/integration)")
+  .option("--output <path>", "Write JSON artifact to file")
+  .option("--no-llm", "Skip LLM review (context assembly only)")
+  .option("--pr-description <text>", "PR description for scope-creep detection")
   .action(async (opts) => {
     try {
-      await runReview(opts);
+      await runCliReview(opts);
     } catch (err) {
       console.error("Flaught review failed:");
       console.error(err instanceof Error ? err.message : String(err));
@@ -49,66 +54,56 @@ program
     }
   });
 
-async function runReview(opts: {
+async function runCliReview(opts: {
   repo?: string;
   base?: string;
   head?: string;
   config?: string;
-  diff?: string;
   json?: boolean;
+  output?: string;
+  noLlm?: boolean;
+  prDescription?: string;
 }): Promise<void> {
-  const contextOptions: ContextOptions = {
+  // --json without --no-llm: output stage 1 context only (backward compat)
+  if (opts.json) {
+    const { assembleContext } = await import("./context/assembler.js");
+    const context = await assembleContext({
+      repoPath: opts.repo ? path.resolve(opts.repo) : undefined,
+      baseRef: opts.base,
+      headRef: opts.head,
+      configPath: opts.config,
+    });
+    console.log(JSON.stringify(contextToJSON(context), null, 2));
+    return;
+  }
+
+  // Full review pipeline
+  const result = await runReview({
     repoPath: opts.repo ? path.resolve(opts.repo) : undefined,
     baseRef: opts.base,
     headRef: opts.head,
     configPath: opts.config,
-  };
+    prDescription: opts.prDescription,
+    skipLlm: opts.noLlm,
+  });
 
-  const context = await assembleContext(contextOptions);
+  // Output markdown report to stdout
+  console.log(result.markdown);
 
-  // JSON mode: dump full context and exit
-  if (opts.json) {
-    const json = contextToJSON(context);
-    console.log(JSON.stringify(json, null, 2));
-    return;
+  // Write JSON artifact to file if requested
+  if (opts.output) {
+    const outputPath = path.resolve(opts.output);
+    fs.writeFileSync(outputPath, result.json, "utf-8");
+    console.error(`\n📄 JSON artifact written to ${outputPath}`);
   }
 
-  // Human-readable output
-  console.log("Flaught — adversarial code review");
-  console.log("─".repeat(40));
-
-  // Stage 1: Context assembly
-  console.log("\n📋 Stage 1: Assembling context...");
-  console.log(`  Base: ${context.baseSha.slice(0, 8)} → Head: ${context.headSha.slice(0, 8)}`);
-  console.log(`  Changed files: ${context.changedFiles.length}`);
-  console.log(`  Neighborhood files: ${context.neighborhoodFiles.length}`);
-  console.log(`  Dependency graph nodes: ${context.dependencyGraph.getAllFiles().length}`);
-
-  if (context.changedFiles.length === 0) {
-    console.log("\n✓ No changes detected. Nothing to review.");
-    return;
+  // Exit code based on severity gate
+  if (result.exitCode !== 0) {
+    console.error(
+      `\n⛔ Exiting with code ${result.exitCode}: undismissed findings at or above severity gate threshold`,
+    );
   }
-
-  // Print changed files summary
-  console.log("\n  Changed:");
-  for (const f of context.changedFiles) {
-    const indicator =
-      f.status === "added" ? "+" :
-      f.status === "deleted" ? "-" :
-      f.status === "renamed" ? "→" : "~";
-    console.log(`    ${indicator} ${f.path} (+${f.additions}/-${f.deletions})`);
-  }
-
-  if (context.neighborhoodFiles.length > 0) {
-    console.log("\n  Neighborhood (one-hop dependents):");
-    for (const f of context.neighborhoodFiles) {
-      console.log(`    ○ ${f}`);
-    }
-  }
-
-  // Stages 2-6 are not yet implemented
-  console.log("\n⚠ Stages 2-6 (LLM review, tools, test inversion, scope creep, report) not yet implemented.");
-  console.log("Stage 1 (context assembly) complete. Exiting.");
+  process.exit(result.exitCode);
 }
 
 program.parse();
