@@ -16,6 +16,7 @@ import * as path from "node:path";
 import { contextToJSON } from "./context/assembler.js";
 import { runReview } from "./review.js";
 import { initConfig } from "./config.js";
+import { LLMError, MissingAPIKeyError } from "./llm/provider.js";
 
 const program = new Command();
 
@@ -48,9 +49,7 @@ program
     try {
       await runCliReview(opts);
     } catch (err) {
-      console.error("Flaught review failed:");
-      console.error(err instanceof Error ? err.message : String(err));
-      process.exit(1);
+      handleError(err);
     }
   });
 
@@ -64,7 +63,7 @@ async function runCliReview(opts: {
   noLlm?: boolean;
   prDescription?: string;
 }): Promise<void> {
-  // --json without --no-llm: output stage 1 context only (backward compat)
+  // --json: output stage 1 context only
   if (opts.json) {
     const { assembleContext } = await import("./context/assembler.js");
     const context = await assembleContext({
@@ -104,6 +103,27 @@ async function runCliReview(opts: {
     );
   }
   process.exit(result.exitCode);
+}
+
+function handleError(err: unknown): never {
+  if (err instanceof MissingAPIKeyError) {
+    console.error(`\n❌ ${err.message}`);
+    process.exit(2);
+  }
+
+  if (err instanceof LLMError) {
+    console.error(`\n❌ LLM error (${err.provider}/${err.model}):`);
+    console.error(`\n${err.message}`);
+    process.exit(2);
+  }
+
+  if (err instanceof Error) {
+    console.error(`\n❌ ${err.message}`);
+  } else {
+    console.error(`\n❌ ${String(err)}`);
+  }
+
+  process.exit(1);
 }
 
 program.parse();

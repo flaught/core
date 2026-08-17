@@ -230,12 +230,43 @@ describe("createProvider", () => {
     expect(provider).toBeInstanceOf(OpenAICompatibleProvider);
   });
 
+  it("throws MissingAPIKeyError when OpenAI key is missing", () => {
+    const config = FlaughtConfigSchema.parse({
+      llm: { provider: "openai", model: "gpt-4o" },
+    });
+    // Ensure the env var is not set
+    delete process.env.OPENAI_API_KEY;
+    expect(() => createProvider(config)).toThrow(/Missing API key/);
+  });
+
+  it("throws MissingAPIKeyError when Groq key is missing", () => {
+    const config = FlaughtConfigSchema.parse({
+      llm: { provider: "groq", model: "llama-3.1-70b" },
+    });
+    delete process.env.GROQ_API_KEY;
+    expect(() => createProvider(config)).toThrow(/Missing API key/);
+  });
+
+  it("throws MissingAPIKeyError when Gemini key is missing", () => {
+    const config = FlaughtConfigSchema.parse({
+      llm: { provider: "gemini", model: "gemini-1.5-pro" },
+    });
+    delete process.env.GEMINI_API_KEY;
+    expect(() => createProvider(config)).toThrow(/Missing API key/);
+  });
+
+  it("does not require an API key for Ollama", () => {
+    const config = FlaughtConfigSchema.parse({
+      llm: { provider: "ollama", model: "codellama" },
+    });
+    // Should not throw — Ollama doesn't need an API key
+    const provider = createProvider(config);
+    expect(provider).toBeInstanceOf(OllamaProvider);
+  });
+
   it("throws for unknown provider", () => {
-    // This would need to bypass Zod validation, so we test it differently
-    // The Zod schema only allows valid providers, so this is a defensive check
-    // Zod only allows valid providers, so we test the defensive check directly
     expect(() => {
       createProvider({ llm: { provider: "invalid", model: "x" } } as any);
-    }).toThrow();
+    }).toThrow(/Unknown LLM provider/);
   });
 });

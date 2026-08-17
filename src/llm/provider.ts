@@ -11,6 +11,42 @@
 
 import type { Finding, Severity, Category } from "../schemas/findings.js";
 
+// ─── Custom error classes ────────────────────────────────────────────────────
+
+export class LLMError extends Error {
+  constructor(
+    message: string,
+    public readonly provider: string,
+    public readonly model: string,
+    public readonly statusCode?: number,
+    public readonly raw?: string,
+  ) {
+    super(message);
+    this.name = "LLMError";
+  }
+}
+
+export class MissingAPIKeyError extends LLMError {
+  constructor(
+    public readonly envVarName: string,
+    provider: string,
+  ) {
+    super(
+      `Missing API key. Set the ${envVarName} environment variable to use the ${provider} provider.\n\n` +
+      `Options:\n` +
+      `  1. Set the key: export ${envVarName}=sk-...\n` +
+      `  2. Use a different provider in .advreview.yml:\n` +
+      `       llm:\n` +
+      `         provider: ollama\n` +
+      `         model: codellama\n` +
+      `  3. Skip the LLM review entirely: flaught review --no-llm`,
+      provider,
+      "unknown",
+    );
+    this.name = "MissingAPIKeyError";
+  }
+}
+
 // ─── Provider interface ─────────────────────────────────────────────────────
 
 export interface LLMProvider {
@@ -57,6 +93,9 @@ export function createProvider(config: FlaughtConfig): LLMProvider {
 
   switch (config.llm.provider) {
     case "openai":
+      if (!apiKey) {
+        throw new MissingAPIKeyError(config.llm.api_key_env, "OpenAI");
+      }
       return new OpenAICompatibleProvider({
         baseUrl: config.llm.base_url ?? "https://api.openai.com/v1",
         apiKey,
@@ -66,6 +105,9 @@ export function createProvider(config: FlaughtConfig): LLMProvider {
       });
 
     case "groq":
+      if (!apiKey) {
+        throw new MissingAPIKeyError(config.llm.api_key_env, "Groq");
+      }
       return new OpenAICompatibleProvider({
         baseUrl: config.llm.base_url ?? "https://api.groq.com/openai/v1",
         apiKey,
@@ -75,7 +117,9 @@ export function createProvider(config: FlaughtConfig): LLMProvider {
       });
 
     case "gemini":
-      // Gemini's OpenAI-compatible endpoint
+      if (!apiKey) {
+        throw new MissingAPIKeyError(config.llm.api_key_env, "Gemini");
+      }
       return new OpenAICompatibleProvider({
         baseUrl: config.llm.base_url ?? "https://generativelanguage.googleapis.com/v1beta/openai",
         apiKey,
@@ -85,6 +129,7 @@ export function createProvider(config: FlaughtConfig): LLMProvider {
       });
 
     case "ollama":
+      // Ollama doesn't need an API key, but check if the server is reachable
       return new OllamaProvider({
         baseUrl: config.llm.base_url ?? "http://localhost:11434",
         model: config.llm.model,
@@ -92,7 +137,11 @@ export function createProvider(config: FlaughtConfig): LLMProvider {
       });
 
     default:
-      throw new Error(`Unknown LLM provider: ${config.llm.provider}`);
+      throw new LLMError(
+        `Unknown LLM provider: ${config.llm.provider}. Supported providers: openai, groq, gemini, ollama`,
+        config.llm.provider,
+        config.llm.model,
+      );
   }
 }
 
@@ -131,26 +180,36 @@ export class OpenAICompatibleProvider implements LLMProvider {
       ],
       temperature: this.config.temperature,
       max_tokens: this.config.maxTokens,
-      // Request JSON output — most OpenAI-compatible providers support this
       response_format: { type: "json_object" },
     };
 
-    const response = await fetch(url, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        ...(this.config.apiKey
-          ? { Authorization: `Bearer ${this.config.apiKey}` }
-          : {}),
-      },
-      body: JSON.stringify(body),
-    });
+    let response: Response;
+    try {
+      response = await fetch(url, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${this.config.apiKey}`,
+        },
+        body: JSON.stringify(body),
+      });
+    } catch (err) {
+      throw new LLMError(
+        `Could not reach ${this.config.model} at ${this.config.baseUrl}.\n\n` +
+        `This usually means:\n` +
+        `  • The API endpoint is down or unreachable\n` +
+        `  • You're behind a proxy that blocks the request\n` +
+        `  • The base URL in your config is wrong\n\n` +
+        `Run with --no-llm to skip the LLM review entirely.`,
+        this.name,
+        this.model,
+        undefined,
+        err instanceof Error ? err.message : String(err),
+      );
+    }
 
     if (!response.ok) {
-      const errorText = await response.text();
-      throw new Error(
-        `LLM API error (${response.status}): ${errorText}`,
-      );
+      throw await classifyHttpError(response, this.config.baseUrl, this.config.model, this.name);
     }
 
     const data = await response.json() as {
@@ -211,21 +270,31 @@ export class OllamaProvider implements LLMProvider {
       options: {
         temperature: this.config.temperature,
       },
-      // Ollama supports JSON mode
       format: "json",
     };
 
-    const response = await fetch(url, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
-    });
+    let response: Response;
+    try {
+      response = await fetch(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+    } catch (err) {
+      throw new LLMError(
+        `Could not reach Ollama at ${this.config.baseUrl}.\n\n` +
+        `Make sure Ollama is running: ollama serve\n` +
+        `And the model is available: ollama pull ${this.config.model}\n\n` +
+        `Run with --no-llm to skip the LLM review entirely.`,
+        this.name,
+        this.model,
+        undefined,
+        err instanceof Error ? err.message : String(err),
+      );
+    }
 
     if (!response.ok) {
-      const errorText = await response.text();
-      throw new Error(
-        `Ollama API error (${response.status}): ${errorText}`,
-      );
+      throw await classifyHttpError(response, this.config.baseUrl, this.config.model, this.name);
     }
 
     const data = await response.json() as {
@@ -253,7 +322,129 @@ export class OllamaProvider implements LLMProvider {
   }
 }
 
-// ─── LLM response parsing ───────────────────────────────────────────────────
+// ─── HTTP error classification ────────────────────────────────────────────────
+
+async function classifyHttpError(
+  response: Response,
+  baseUrl: string,
+  model: string,
+  providerName: string,
+): Promise<LLMError> {
+  const status = response.status;
+  let errorBody = "";
+  try {
+    errorBody = await response.text();
+  } catch {
+    // Can't read body — that's fine, we have the status
+  }
+
+  // Try to parse the error body for a more specific message
+  let apiMessage = "";
+  let apiCode = "";
+  try {
+    // If errorBody is a promise (from response.text()), we can't await here,
+    // but we already have what we need from the status code
+    if (typeof errorBody === "string" && errorBody) {
+      const parsed = JSON.parse(errorBody);
+      apiMessage = parsed?.error?.message ?? parsed?.message ?? "";
+      apiCode = parsed?.error?.code ?? parsed?.code ?? "";
+    }
+  } catch {
+    // Not JSON, ignore
+  }
+
+  switch (status) {
+    case 401:
+      return new LLMError(
+        `Authentication failed for ${model} at ${baseUrl}.\n\n` +
+        `Your API key is invalid or expired. Check that ${providerName === "openai-compatible" ? "the correct key" : "your API key"} is set correctly.\n\n` +
+        `Run with --no-llm to skip the LLM review entirely.`,
+        providerName,
+        model,
+        status,
+      );
+
+    case 403:
+      return new LLMError(
+        `Permission denied for ${model} at ${baseUrl}.\n\n` +
+        `Your API key doesn't have access to this model or endpoint.\n` +
+        `Check your account permissions and API key scopes.\n\n` +
+        `Run with --no-llm to skip the LLM review entirely.`,
+        providerName,
+        model,
+        status,
+      );
+
+    case 429: {
+      // Distinguish rate limit from quota exhaustion
+      const isQuota = apiCode === "credit_balance_exhausted" ||
+        apiMessage.toLowerCase().includes("credit") ||
+        apiMessage.toLowerCase().includes("billing") ||
+        apiMessage.toLowerCase().includes("quota");
+
+      if (isQuota) {
+        return new LLMError(
+          `API quota exhausted for ${model}.\n\n` +
+          `Your account has no credits remaining. Add billing details or credits to continue using this provider.\n\n` +
+          `Options:\n` +
+          `  • Add credits to your account and retry\n` +
+          `  • Switch to a different provider in .advreview.yml (e.g., groq, ollama)\n` +
+          `  • Run with --no-llm to skip the LLM review entirely`,
+          providerName,
+          model,
+          status,
+        );
+      }
+
+      return new LLMError(
+        `Rate limited by ${model} provider.\n\n` +
+        `Too many requests in a short period. Wait a moment and retry, or:\n` +
+        `  • Switch to a different provider in .advreview.yml\n` +
+        `  • Run with --no-llm to skip the LLM review entirely`,
+        providerName,
+        model,
+        status,
+      );
+    }
+
+    case 404:
+      return new LLMError(
+        `Model "${model}" not found at ${baseUrl}.\n\n` +
+        `This usually means:\n` +
+        `  • The model name is misspelled in your .advreview.yml\n` +
+        `  • The model has been deprecated or renamed\n` +
+        `  • You're pointing at the wrong API endpoint\n\n` +
+        `Run with --no-llm to skip the LLM review entirely.`,
+        providerName,
+        model,
+        status,
+      );
+
+    case 500:
+    case 502:
+    case 503:
+      return new LLMError(
+        `The ${model} provider is experiencing issues (${status}).\n\n` +
+        `This is a server-side problem — try again in a few minutes.\n\n` +
+        `Run with --no-llm to skip the LLM review entirely.`,
+        providerName,
+        model,
+        status,
+      );
+
+    default:
+      return new LLMError(
+        `Unexpected error from ${model} provider (${status}).\n\n` +
+        (apiMessage ? `Provider message: ${apiMessage}\n\n` : "") +
+        `Run with --no-llm to skip the LLM review entirely.`,
+        providerName,
+        model,
+        status,
+      );
+  }
+}
+
+// ─── LLM response parsing ────────────────────────────────────────────────────
 
 /**
  * Parse the LLM's JSON response into structured Findings.
@@ -278,7 +469,7 @@ export function parseFindingsFromLLM(
       try {
         parsed = JSON.parse(jsonMatch[1]);
       } catch {
-        return []; // Can't parse at all
+        return [];
       }
     } else {
       return [];
@@ -294,8 +485,6 @@ export function parseFindingsFromLLM(
     : Array.isArray(maybeFindings)
       ? maybeFindings as unknown[]
       : [];
-
-  if (!Array.isArray(rawFindings)) return [];
 
   const findings: Finding[] = [];
   const validSeverities = new Set<Severity>(["critical", "high", "medium", "low", "info"]);
