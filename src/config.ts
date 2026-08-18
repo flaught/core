@@ -122,6 +122,14 @@ llm:
 # severity_gate:
 #   fail_on: high  # none | critical | high | medium
 
+# ── Dismissals ───────────────────────────────────────────────
+# Findings matching an entry in the dismissal store (see \`flaught dismiss\`)
+# are auto-marked dismissed on every subsequent run and excluded from the
+# severity gate.
+# dismissals:
+#   enabled: true
+#   path: .flaught-dismissals.json
+
 # ── Exclusions ─────────────────────────────────────────────
 # exclude:
 #   paths:

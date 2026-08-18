@@ -32,10 +32,12 @@ export interface FindingEvidence {
   snippet: string;
   /** file:line refs to files in the one-hop dependency neighborhood */
   blast_radius: string[];
+  /** Stable rule/check identifier from the source tool (e.g. semgrep check_id, eslint ruleId). Null for LLM findings and findings with no rule concept. */
+  rule_id: string | null;
 }
 
 export interface Finding {
-  id: string; // e.g. "F-001"
+  id: string; // e.g. "F-001" — positional within a single run, NOT stable across runs
   severity: Severity;
   category: Category;
   title: string;
@@ -49,6 +51,12 @@ export interface Finding {
   confidence: number;
   /** URLs to rules, docs, or references */
   references: string[];
+  /**
+   * Stable content-based identifier, unlike `id` which is just array position.
+   * Used to match findings against the persisted dismissal store across runs.
+   * See src/dismissals/fingerprint.ts for the derivation.
+   */
+  fingerprint: string;
 
   // ── Dismissal (structured disposition, not erasure) ──
   dismissed: boolean;
@@ -166,9 +174,9 @@ export interface FindingsArtifact {
 
 // ─── Constants ─────────────────────────────────────────────────────────────
 
-export const SCHEMA_VERSION = 1;
+export const SCHEMA_VERSION = 2;
 
-export const FINDINGS_SCHEMA_URL = "https://flaught.dev/schemas/findings/v1.schema.json";
+export const FINDINGS_SCHEMA_URL = "https://flaught.dev/schemas/findings/v2.schema.json";
 
 export const CAVEAT =
   "This artifact is evidence that adversarial scrutiny occurred on this PR. " +

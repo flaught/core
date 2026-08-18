@@ -18,3 +18,16 @@ export { renderJsonArtifact } from "./report/json.js";
 export { runDeterministicTools, formatToolFindingsForPrompt, type ToolResult, type DeterministicFinding } from "./tools/runner.js";
 export { runTestInversion } from "./test-inversion/runner.js";
 export { detectScopeCreepHeuristic, extractScopeCreepFromFindings, formatScopeCreepForPrompt } from "./scope-creep/detector.js";
+export { DismissalEntrySchema, DismissalStoreSchema, type DismissalEntry, type DismissalStore, DISMISSAL_STORE_VERSION } from "./schemas/dismissals.js";
+export { computeFingerprint, fingerprintFinding, type FingerprintInput } from "./dismissals/fingerprint.js";
+export {
+  loadDismissalStore,
+  saveDismissalStore,
+  addDismissal,
+  removeDismissal,
+  isExpired,
+  findActiveDismissal,
+  resolveDismissalsPath,
+  DEFAULT_DISMISSALS_FILENAME,
+} from "./dismissals/store.js";
+export { applyDismissals, type ApplyDismissalsResult } from "./dismissals/apply.js";

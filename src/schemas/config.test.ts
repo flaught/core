@@ -27,6 +27,8 @@ describe("FlaughtConfigSchema", () => {
     expect(config.noise_budget.low).toBe(20);
     expect(config.noise_budget.info).toBe(25);
     expect(config.severity_gate.fail_on).toBe("high");
+    expect(config.dismissals.enabled).toBe(true);
+    expect(config.dismissals.path).toBe(".flaught-dismissals.json");
     expect(config.exclude.paths).toContain("node_modules/**");
     expect(config.exclude.patterns).toEqual([]);
   });

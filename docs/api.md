@@ -137,6 +137,37 @@ if (result) {
 }
 ```
 
+## Dismissals
+
+`runReview()` applies the persisted dismissal store automatically. The building blocks are also exported for custom tooling (e.g. a review dashboard, or a bot that dismisses on a PR comment command) — see [`docs/dismissals.md`](dismissals.md) for the full workflow.
+
+```typescript
+import {
+  computeFingerprint,
+  loadDismissalStore,
+  saveDismissalStore,
+  addDismissal,
+  removeDismissal,
+  findActiveDismissal,
+  resolveDismissalsPath,
+  applyDismissals,
+} from "@flaught/core";
+
+const dismissalsPath = resolveDismissalsPath(repoRoot); // .flaught-dismissals.json by default
+const store = loadDismissalStore(dismissalsPath);
+
+const updated = addDismissal(store, {
+  fingerprint: someFinding.fingerprint,
+  dismissed_by: "jane@example.com",
+  dismissed_at: new Date().toISOString(),
+  reason: "False positive — sanitized upstream",
+  context: { title: someFinding.title, file: someFinding.evidence.file },
+  expires_at: null, // or an ISO timestamp for a TTL
+});
+
+saveDismissalStore(dismissalsPath, updated);
+```
+
 ## Error handling
 
 Flaught throws custom error classes with actionable messages:

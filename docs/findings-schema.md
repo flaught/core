@@ -18,12 +18,14 @@ The schema is versioned from day one (`schema_version: 1`) and self-describing (
     "line_start": 42,
     "line_end": 42,
     "snippet": "const result = db.query(`SELECT * FROM users WHERE id = ${userId}`)",
-    "blast_radius": ["src/api/users.ts:15", "src/middleware/auth.ts:8"]
+    "blast_radius": ["src/api/users.ts:15", "src/middleware/auth.ts:8"],
+    "rule_id": "sql-injection"
   },
   "source": "semgrep",
   "source_type": "deterministic",
   "confidence": 1.0,
   "references": ["https://semgrep.dev/r/sql-injection"],
+  "fingerprint": "sha256:3f9c1a2b4d5e6f70",
   "dismissed": false,
   "dismissed_by": null,
   "dismissed_at": null,
@@ -37,6 +39,8 @@ The schema is versioned from day one (`schema_version: 1`) and self-describing (
 |---|---|---|
 | `D-` | Deterministic tool finding (semgrep, linter, vuln scanner, test inversion) | Always 1.0 |
 | `F-` | LLM-asserted finding | Self-reported, typically 0.5–0.9 |
+
+`id` is **run-local** — it's just array position and is not stable across runs. Use `fingerprint` for anything that needs to identify "the same finding" across separate runs (most notably, [dismissals](dismissals.md)). `evidence.rule_id` is the source tool's own stable check/rule identifier (e.g. a semgrep `check_id`); it's `null` for LLM findings, which have no such concept.
 
 ## Severity levels
 
@@ -79,7 +83,7 @@ Findings are never deleted — they're dismissed with structured disposition dat
 }
 ```
 
-All four fields (`dismissed`, `dismissed_by`, `dismissed_at`, `dismissal_reason`) are present on every finding, defaulting to `false`/`null`/`null`/`null`.
+All four fields (`dismissed`, `dismissed_by`, `dismissed_at`, `dismissal_reason`) are present on every finding, defaulting to `false`/`null`/`null`/`null`. These are set automatically on every run by matching `fingerprint` against the persisted dismissal store — see [dismissals](dismissals.md) for the full workflow.
 
 ## Full artifact structure
 
@@ -87,11 +91,11 @@ The JSON artifact (`--output findings.json`) is a complete, self-contained recor
 
 ```json
 {
-  "$schema": "https://flaught.dev/schemas/findings/v1.schema.json",
-  "schema_version": 1,
+  "$schema": "https://flaught.dev/schemas/findings/v2.schema.json",
+  "schema_version": 2,
   "_caveat": "This artifact is evidence that adversarial scrutiny occurred on this PR. It is NOT evidence that findings are correct. LLM-asserted findings may include hallucinations. Deterministic-tool findings have their own false-positive rates. Treat this as a prompt for human review, not as audit-truth.",
   "generated_at": "2025-01-15T10:25:00Z",
-  "flaught_version": "0.1.0",
+  "flaught_version": "0.2.0",
 
   "repository": {
     "name": "my-repo",
@@ -150,12 +154,14 @@ The JSON artifact (`--output findings.json`) is a complete, self-contained recor
         "line_start": 42,
         "line_end": 42,
         "snippet": "const result = db.query(`SELECT * FROM users WHERE id = ${userId}`)",
-        "blast_radius": ["src/api/users.ts:15", "src/middleware/auth.ts:8"]
+        "blast_radius": ["src/api/users.ts:15", "src/middleware/auth.ts:8"],
+        "rule_id": "sql-injection"
       },
       "source": "semgrep",
       "source_type": "deterministic",
       "confidence": 1.0,
       "references": ["https://semgrep.dev/r/sql-injection"],
+      "fingerprint": "sha256:3f9c1a2b4d5e6f70",
       "dismissed": false,
       "dismissed_by": null,
       "dismissed_at": null,
@@ -227,6 +233,6 @@ The `evidence.blast_radius` field on each finding lists files in the one-hop dep
 
 ## Schema versioning
 
-The schema uses integer versioning. The current version is `1`. Breaking changes will increment the version. The `$schema` URL points to a JSON Schema document for validation.
+The schema uses integer versioning. The current version is `2` (bumped from `1` when `fingerprint` and `evidence.rule_id` were added — see [dismissals](dismissals.md)). Breaking changes will increment the version. The `$schema` URL points to a JSON Schema document for validation.
 
 The `_caveat` field is always present and never stripped — it's an honest disclaimer about what the artifact represents and what it doesn't.

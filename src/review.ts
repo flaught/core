@@ -26,6 +26,9 @@ import { renderJsonArtifact } from "./report/json.js";
 import { runDeterministicTools, formatToolFindingsForPrompt, type DeterministicFinding } from "./tools/runner.js";
 import { runTestInversion } from "./test-inversion/runner.js";
 import { detectScopeCreepHeuristic, extractScopeCreepFromFindings, formatScopeCreepForPrompt } from "./scope-creep/detector.js";
+import { computeFingerprint } from "./dismissals/fingerprint.js";
+import { loadDismissalStore, resolveDismissalsPath } from "./dismissals/store.js";
+import { applyDismissals } from "./dismissals/apply.js";
 
 // ─── Progress callback ──────────────────────────────────────────────────────
 
@@ -137,23 +140,36 @@ export async function runReview(options: ReviewOptions = {}): Promise<ReviewResu
 
   // Convert deterministic findings to Finding format
   for (const df of deterministicFindings) {
+    const ruleId = df.ruleId !== "unknown" ? df.ruleId : null;
+    const severity = (["critical", "high", "medium", "low", "info"].includes(df.severity) ? df.severity : "medium") as Severity;
+    const category = (["security", "architecture", "scope-creep", "test-quality", "performance", "maintainability"].includes(df.category) ? df.category : "maintainability") as Finding["category"];
+    const evidence = {
+      file: df.file,
+      line_start: df.line,
+      line_end: df.line,
+      snippet: df.snippet,
+      blast_radius: [],
+      rule_id: ruleId,
+    };
+
     findings.push({
       id: `D-${findings.length + 1}`.padStart(5, "0"),
-      severity: (["critical", "high", "medium", "low", "info"].includes(df.severity) ? df.severity : "medium") as Severity,
-      category: (["security", "architecture", "scope-creep", "test-quality", "performance", "maintainability"].includes(df.category) ? df.category : "maintainability") as Finding["category"],
+      severity,
+      category,
       title: df.title,
-      description: `${df.source} found: ${df.title}${df.ruleId !== "unknown" ? ` (${df.ruleId})` : ""}`,
-      evidence: {
-        file: df.file,
-        line_start: df.line,
-        line_end: df.line,
-        snippet: df.snippet,
-        blast_radius: [],
-      },
+      description: `${df.source} found: ${df.title}${ruleId ? ` (${ruleId})` : ""}`,
+      evidence,
       source: df.source,
       source_type: "deterministic",
       confidence: 1.0, // deterministic tools get full confidence
       references: df.reference ? [df.reference] : [],
+      fingerprint: computeFingerprint({
+        source_type: "deterministic",
+        source: df.source,
+        category,
+        title: df.title,
+        evidence: { file: evidence.file, rule_id: ruleId },
+      }),
       dismissed: false,
       dismissed_by: null,
       dismissed_at: null,
@@ -222,23 +238,34 @@ export async function runReview(options: ReviewOptions = {}): Promise<ReviewResu
     if (testInversion && testInversion.flagged.length > 0) {
       // Convert flagged tests to findings
       for (const ft of testInversion.flagged) {
+        const title = `Test doesn't verify the change: ${ft.test}`;
+        const evidence = {
+          file: "",
+          line_start: 0,
+          line_end: 0,
+          snippet: "",
+          blast_radius: [],
+          rule_id: null,
+        };
+
         findings.push({
           id: `F-${findings.length + 1}`.padStart(5, "0"),
           severity: "medium",
           category: "test-quality",
-          title: `Test doesn't verify the change: ${ft.test}`,
+          title,
           description: ft.reason,
-          evidence: {
-            file: "",
-            line_start: 0,
-            line_end: 0,
-            snippet: "",
-            blast_radius: [],
-          },
+          evidence,
           source: "test-inversion",
           source_type: "deterministic",
           confidence: 1.0,
           references: [],
+          fingerprint: computeFingerprint({
+            source_type: "deterministic",
+            source: "test-inversion",
+            category: "test-quality",
+            title,
+            evidence: { file: evidence.file, rule_id: null },
+          }),
           dismissed: false,
           dismissed_by: null,
           dismissed_at: null,
@@ -287,6 +314,18 @@ export async function runReview(options: ReviewOptions = {}): Promise<ReviewResu
     }
   } else if (!config.scope_creep.enabled) {
     progress("Scope-creep detection disabled in config — skipping.");
+  }
+
+  // 6c. Apply persisted dismissals (fingerprint-matched, before noise budget so a
+  // re-surfaced dismissed finding never crowds out a genuinely new one)
+  if (config.dismissals.enabled) {
+    const dismissalsPath = resolveDismissalsPath(context.repoRoot, config.dismissals.path);
+    const dismissalStore = loadDismissalStore(dismissalsPath);
+    const applied = applyDismissals(findings, dismissalStore);
+    findings = applied.findings;
+    if (applied.appliedCount > 0) {
+      progress(`  ${applied.appliedCount} finding(s) auto-dismissed via ${config.dismissals.path}`);
+    }
   }
 
   // 7. Enforce noise budget
@@ -342,6 +381,11 @@ function enforceNoiseBudget(findings: Finding[], config: FlaughtConfig): Finding
   const severityOrder: Severity[] = ["critical", "high", "medium", "low", "info"];
   const budget = config.noise_budget;
 
+  // Dismissed findings are already-handled disposition, not noise — they don't
+  // consume a budget slot, so a stale dismissal can't crowd out a new finding.
+  const dismissed = findings.filter((f) => f.dismissed);
+  const active = findings.filter((f) => !f.dismissed);
+
   const result: Finding[] = [];
   const counts: Record<Severity, number> = {
     critical: 0,
@@ -352,7 +396,7 @@ function enforceNoiseBudget(findings: Finding[], config: FlaughtConfig): Finding
   };
 
   // Sort by severity (critical first), then by confidence (high first)
-  const sorted = [...findings].sort((a, b) => {
+  const sorted = [...active].sort((a, b) => {
     const severityDiff = severityOrder.indexOf(a.severity) - severityOrder.indexOf(b.severity);
     if (severityDiff !== 0) return severityDiff;
     return b.confidence - a.confidence;
@@ -366,7 +410,7 @@ function enforceNoiseBudget(findings: Finding[], config: FlaughtConfig): Finding
     }
   }
 
-  return result;
+  return [...result, ...dismissed];
 }
 
 // ─── Build the findings artifact ────────────────────────────────────────────
@@ -405,7 +449,7 @@ function buildArtifact(
     schema_version: SCHEMA_VERSION,
     _caveat: CAVEAT,
     generated_at: new Date().toISOString(),
-    flaught_version: "0.1.0",
+    flaught_version: "0.2.0",
     repository: {
       name: repoName,
       url: "",

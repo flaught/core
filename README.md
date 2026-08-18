@@ -40,6 +40,7 @@ flaught review                  # full adversarial review vs HEAD~1
 flaught review --base main      # review against main
 flaught review --no-llm         # deterministic tools only (no API key)
 flaught review --output findings.json --quiet   # CI mode
+flaught dismiss D-0002 --artifact findings.json --reason "..." # suppress a false positive, persisted across runs
 ```
 
 ## Exit codes
@@ -67,6 +68,7 @@ Any OpenAI-compatible endpoint works via `base_url`.
 
 - **[Configuration](docs/configuration.md)** — full `.advreview.yml` reference, LLM providers, noise budget, severity gate, tools, test inversion, scope-creep
 - **[Findings schema](docs/findings-schema.md)** — artifact structure, field definitions, severity levels, categories, dismissal, blast radius
+- **[Dismissals](docs/dismissals.md)** — persisting false-positive suppressions across runs via stable fingerprints, `flaught dismiss`/`dismissals` CLI
 - **[GitHub Actions](docs/github-actions.md)** — three ready-to-use workflows (minimal, full, Ollama) + exit code handling
 - **[Programmatic API](docs/api.md)** — use Flaught as a library in Node.js
 - **[Troubleshooting](docs/troubleshooting.md)** — every error message, what it means, how to fix it

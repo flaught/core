@@ -19,11 +19,13 @@ function makeFinding(overrides: Partial<Finding> = {}): Finding {
       line_end: 47,
       snippet: 'db.query(`SELECT * FROM users WHERE name LIKE "%${q}%"`)',
       blast_radius: ["src/db/client.ts:12"],
+      rule_id: null,
     },
     source: "llm:gpt-4o",
     source_type: "llm",
     confidence: 0.9,
     references: ["https://owasp.org/sql-injection"],
+    fingerprint: "sha256:test-fixture-fingerprint",
     dismissed: false,
     dismissed_by: null,
     dismissed_at: null,
@@ -57,7 +59,7 @@ function makeArtifact(overrides: Partial<FindingsArtifact> = {}): FindingsArtifa
     schema_version: SCHEMA_VERSION,
     _caveat: CAVEAT,
     generated_at: "2025-01-15T10:30:00Z",
-    flaught_version: "0.1.0",
+    flaught_version: "0.2.0",
     repository: { name: "flaught/core", url: "https://github.com/flaught/core", branch: "main" },
     pull_request: { number: 42, url: "https://github.com/flaught/core/pull/42", title: "Add auth", description: "Adds JWT auth", base_sha: "abc123", head_sha: "def456" },
     run: { id: "flaught-1234567890-abc123", ci_url: null, duration_seconds: 47 },
@@ -165,6 +167,7 @@ describe("renderMarkdownReport", () => {
           line_end: 47,
           snippet: "db.query(x)",
           blast_radius: ["src/db/client.ts:12", "src/middleware/auth.ts:8"],
+          rule_id: null,
         },
       })],
     });
@@ -183,8 +186,8 @@ describe("renderMarkdownReport", () => {
   it("includes footer with version", () => {
     const artifact = makeArtifact();
     const md = renderMarkdownReport(artifact);
-    expect(md).toContain("Flaught v0.1.0");
-    expect(md).toContain("Schema v1");
+    expect(md).toContain("Flaught v0.2.0");
+    expect(md).toContain("Schema v2");
   });
 });
 
@@ -194,7 +197,7 @@ describe("renderJsonArtifact", () => {
     const json = renderJsonArtifact(artifact);
     const parsed = JSON.parse(json);
     expect(parsed).toBeTruthy();
-    expect(parsed.schema_version).toBe(1);
+    expect(parsed.schema_version).toBe(2);
   });
 
   it("includes the caveat", () => {

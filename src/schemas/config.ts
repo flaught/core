@@ -101,6 +101,14 @@ const SeverityGateSchema = z.object({
     .default("high"),
 });
 
+// ─── Dismissals ────────────────────────────────────────────────────────────
+
+const DismissalsSchema = z.object({
+  enabled: z.boolean().default(true),
+  /** Path to the dismissal store, relative to repo root. */
+  path: z.string().default(".flaught-dismissals.json"),
+});
+
 // ─── Exclusions ─────────────────────────────────────────────────────────────
 
 const ExcludeSchema = z.object({
@@ -126,6 +134,7 @@ export const FlaughtConfigSchema = z.object({
   lighthouse: LighthouseSchema.default({}),
   noise_budget: NoiseBudgetSchema.default({}),
   severity_gate: SeverityGateSchema.default({}),
+  dismissals: DismissalsSchema.default({}),
   exclude: ExcludeSchema.default({}),
 });
 

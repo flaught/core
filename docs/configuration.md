@@ -65,6 +65,12 @@ llm:
 # severity_gate:
 #   fail_on: high     # none | critical | high | medium
 
+# ── Dismissals ─────────────────────────────────────────────
+# See docs/dismissals.md for the full workflow (`flaught dismiss`, etc).
+# dismissals:
+#   enabled: true
+#   path: .flaught-dismissals.json
+
 # ── Exclusions ─────────────────────────────────────────────
 # exclude:
 #   paths:
@@ -159,7 +165,19 @@ Controls whether Flaught exits with code 1 (findings exceed threshold) or 0 (cle
 | `high` | Any undismissed high or critical finding |
 | `medium` | Any undismissed medium, high, or critical finding |
 
-Default: `high`.
+Default: `high`. Dismissed findings (see below) are always excluded, regardless of severity.
+
+## Dismissals
+
+Findings are matched against a persisted, git-tracked dismissal store (`.flaught-dismissals.json` by default) by a stable content-based fingerprint — not the run-local `id`. A finding whose fingerprint has an active (non-expired) entry in the store is automatically marked `dismissed` on every run and excluded from the severity gate.
+
+```yaml
+dismissals:
+  enabled: true                     # default
+  path: .flaught-dismissals.json    # default, relative to repo root
+```
+
+See [`docs/dismissals.md`](dismissals.md) for the full workflow, the `flaught dismiss`/`dismissals` CLI, and the fingerprint/store format.
 
 ## Noise budget
 

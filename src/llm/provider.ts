@@ -10,6 +10,7 @@
  */
 
 import type { Finding, Severity, Category } from "../schemas/findings.js";
+import { computeFingerprint } from "../dismissals/fingerprint.js";
 
 // ─── Custom error classes ────────────────────────────────────────────────────
 
@@ -513,25 +514,36 @@ export function parseFindingsFromLLM(
       ? (f.category as Category)
       : "architecture";
 
+    const title = typeof f.title === "string" ? f.title : "Untitled finding";
+    const evidence = {
+      file: typeof f.file === "string" ? f.file : (f.evidence as Record<string, unknown>)?.file as string ?? "",
+      line_start: typeof f.line_start === "number" ? f.line_start : ((f.evidence as Record<string, unknown>)?.line_start as number ?? 0),
+      line_end: typeof f.line_end === "number" ? f.line_end : ((f.evidence as Record<string, unknown>)?.line_end as number ?? 0),
+      snippet: typeof f.snippet === "string" ? f.snippet : ((f.evidence as Record<string, unknown>)?.snippet as string ?? ""),
+      blast_radius: Array.isArray((f.evidence as Record<string, unknown>)?.blast_radius)
+        ? ((f.evidence as Record<string, unknown>)?.blast_radius as string[])
+        : [],
+      rule_id: null,
+    };
+
     findings.push({
       id: `F-${String(i + 1).padStart(3, "0")}`,
       severity,
       category,
-      title: typeof f.title === "string" ? f.title : "Untitled finding",
+      title,
       description: typeof f.description === "string" ? f.description : "",
-      evidence: {
-        file: typeof f.file === "string" ? f.file : (f.evidence as Record<string, unknown>)?.file as string ?? "",
-        line_start: typeof f.line_start === "number" ? f.line_start : ((f.evidence as Record<string, unknown>)?.line_start as number ?? 0),
-        line_end: typeof f.line_end === "number" ? f.line_end : ((f.evidence as Record<string, unknown>)?.line_end as number ?? 0),
-        snippet: typeof f.snippet === "string" ? f.snippet : ((f.evidence as Record<string, unknown>)?.snippet as string ?? ""),
-        blast_radius: Array.isArray((f.evidence as Record<string, unknown>)?.blast_radius)
-          ? ((f.evidence as Record<string, unknown>)?.blast_radius as string[])
-          : [],
-      },
+      evidence,
       source: `llm:${model}`,
       source_type: "llm",
       confidence: typeof f.confidence === "number" ? Math.min(1, Math.max(0, f.confidence)) : 0.7,
       references: Array.isArray(f.references) ? (f.references as string[]) : [],
+      fingerprint: computeFingerprint({
+        source_type: "llm",
+        source: `llm:${model}`,
+        category,
+        title,
+        evidence: { file: evidence.file, rule_id: null },
+      }),
       dismissed: false,
       dismissed_by: null,
       dismissed_at: null,
