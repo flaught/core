@@ -153,7 +153,7 @@ export async function runReview(options: ReviewOptions = {}): Promise<ReviewResu
     };
 
     findings.push({
-      id: `D-${findings.length + 1}`.padStart(5, "0"),
+      id: `D-${String(findings.length + 1).padStart(4, "0")}`,
       severity,
       category,
       title: df.title,
@@ -249,7 +249,7 @@ export async function runReview(options: ReviewOptions = {}): Promise<ReviewResu
         };
 
         findings.push({
-          id: `F-${findings.length + 1}`.padStart(5, "0"),
+          id: `F-${String(findings.length + 1).padStart(4, "0")}`,
           severity: "medium",
           category: "test-quality",
           title,
