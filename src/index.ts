@@ -16,3 +16,4 @@ export { runReview, type ReviewResult, type ReviewOptions, type ProgressCallback
 export { renderMarkdownReport } from "./report/markdown.js";
 export { renderJsonArtifact } from "./report/json.js";
 export { runDeterministicTools, formatToolFindingsForPrompt, type ToolResult, type DeterministicFinding } from "./tools/runner.js";
+export { runTestInversion } from "./test-inversion/runner.js";

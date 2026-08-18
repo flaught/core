@@ -14,6 +14,7 @@ import {
   type NoiseBudget,
   type Severity,
   type ToolExecuted,
+  type TestInversion,
   SCHEMA_VERSION,
   FINDINGS_SCHEMA_URL,
   CAVEAT,
@@ -21,6 +22,7 @@ import {
 import { renderMarkdownReport } from "./report/markdown.js";
 import { renderJsonArtifact } from "./report/json.js";
 import { runDeterministicTools, formatToolFindingsForPrompt, type DeterministicFinding } from "./tools/runner.js";
+import { runTestInversion } from "./test-inversion/runner.js";
 
 // ─── Progress callback ──────────────────────────────────────────────────────
 
@@ -183,7 +185,52 @@ export async function runReview(options: ReviewOptions = {}): Promise<ReviewResu
     progress(`  LLM found ${llmResult.findings.length} findings`);
   }
 
-  // 5. Enforce noise budget
+  // 5. Test inversion
+  let testInversion: TestInversion | null = null;
+
+  if (context.changedFiles.length > 0 && config.test_inversion.enabled) {
+    progress("Running test inversion (pre/post change test comparison)...");
+    testInversion = await runTestInversion(
+      config,
+      context.repoRoot,
+      context.baseSha,
+      context.headSha,
+      progress,
+    );
+
+    if (testInversion && testInversion.flagged.length > 0) {
+      // Convert flagged tests to findings
+      for (const ft of testInversion.flagged) {
+        findings.push({
+          id: `F-${findings.length + 1}`.padStart(5, "0"),
+          severity: "medium",
+          category: "test-quality",
+          title: `Test doesn't verify the change: ${ft.test}`,
+          description: ft.reason,
+          evidence: {
+            file: "",
+            line_start: 0,
+            line_end: 0,
+            snippet: "",
+            blast_radius: [],
+          },
+          source: "test-inversion",
+          source_type: "deterministic",
+          confidence: 1.0,
+          references: [],
+          dismissed: false,
+          dismissed_by: null,
+          dismissed_at: null,
+          dismissal_reason: null,
+        });
+      }
+      progress(`  ⚠ ${testInversion.flagged.length} test(s) pass on both base and head`);
+    }
+  } else if (!config.test_inversion.enabled) {
+    progress("Test inversion disabled in config — skipping.");
+  }
+
+  // 6. Enforce noise budget
   findings = enforceNoiseBudget(findings, config);
 
   if (findings.length > 0) {
@@ -199,17 +246,18 @@ export async function runReview(options: ReviewOptions = {}): Promise<ReviewResu
     progress(`  Breakdown: ${sevSummary} (${srcSummary})`);
   }
 
-  // 6. Build the findings artifact
+  // 7. Build the findings artifact
   progress("Building findings artifact...");
   const artifact = buildArtifact(context, findings, config);
   artifact.tools_executed = toolExecutions;
+  artifact.test_inversion = testInversion;
 
-  // 7. Render reports
+  // 8. Render reports
   progress("Rendering reports...");
   const markdown = renderMarkdownReport(artifact);
   const json = renderJsonArtifact(artifact);
 
-  // 7. Determine exit code
+  // 9. Determine exit code
   const exitCode = computeExitCode(artifact, config);
 
   const durationSeconds = Math.round((Date.now() - startTime) / 1000);
