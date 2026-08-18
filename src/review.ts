@@ -15,6 +15,8 @@ import {
   type Severity,
   type ToolExecuted,
   type TestInversion,
+  type ScopeCreep,
+  type FlaggedHunk,
   SCHEMA_VERSION,
   FINDINGS_SCHEMA_URL,
   CAVEAT,
@@ -23,6 +25,7 @@ import { renderMarkdownReport } from "./report/markdown.js";
 import { renderJsonArtifact } from "./report/json.js";
 import { runDeterministicTools, formatToolFindingsForPrompt, type DeterministicFinding } from "./tools/runner.js";
 import { runTestInversion } from "./test-inversion/runner.js";
+import { detectScopeCreepHeuristic, extractScopeCreepFromFindings, formatScopeCreepForPrompt } from "./scope-creep/detector.js";
 
 // ─── Progress callback ──────────────────────────────────────────────────────
 
@@ -109,6 +112,7 @@ export async function runReview(options: ReviewOptions = {}): Promise<ReviewResu
   // 3. Run deterministic tools (semgrep, linter, vuln scanner)
   let toolExecutions: ToolExecuted[] = [];
   let deterministicFindings: DeterministicFinding[] = [];
+  let scopeCreepHeuristic: FlaggedHunk[] = [];
 
   if (context.changedFiles.length > 0) {
     const anyToolEnabled = config.tools.semgrep.enabled || config.tools.linter.enabled || config.tools.vuln_scanner.enabled;
@@ -120,6 +124,11 @@ export async function runReview(options: ReviewOptions = {}): Promise<ReviewResu
     } else {
       progress("Deterministic tools disabled in config — skipping.");
     }
+  }
+
+  // 3b. Heuristic scope-creep pre-filter (runs before LLM so it can be injected into the prompt)
+  if (context.changedFiles.length > 0 && config.scope_creep.enabled) {
+    scopeCreepHeuristic = detectScopeCreepHeuristic(context, options.prDescription, config);
   }
 
   // 4. Run LLM review
@@ -163,9 +172,21 @@ export async function runReview(options: ReviewOptions = {}): Promise<ReviewResu
 
     // Inject deterministic tool findings into the prompt
     const toolContext = formatToolFindingsForPrompt(deterministicFindings);
-    const fullUserPrompt = toolContext
-      ? `${userPrompt}\n\n---\n\n${toolContext}`
-      : userPrompt;
+
+    // Inject scope-creep heuristic findings into the prompt (pre-computed before LLM call)
+    const scopeCreepContext = formatScopeCreepForPrompt(
+      scopeCreepHeuristic.length > 0
+        ? { pr_intent: options.prDescription ?? "No PR description provided", flagged_hunks: scopeCreepHeuristic }
+        : null,
+    );
+
+    let fullUserPrompt = userPrompt;
+    if (toolContext) {
+      fullUserPrompt = `${fullUserPrompt}\n\n---\n\n${toolContext}`;
+    }
+    if (scopeCreepContext) {
+      fullUserPrompt = `${fullUserPrompt}\n\n---\n\n${scopeCreepContext}`;
+    }
 
     const promptChars = systemPrompt.length + fullUserPrompt.length;
     const promptTokensEst = Math.round(promptChars / 4);
@@ -230,7 +251,45 @@ export async function runReview(options: ReviewOptions = {}): Promise<ReviewResu
     progress("Test inversion disabled in config — skipping.");
   }
 
-  // 6. Enforce noise budget
+  // 6. Scope-creep detection
+  let scopeCreepResult: ScopeCreep | null = null;
+
+  if (context.changedFiles.length > 0 && config.scope_creep.enabled) {
+    progress("Checking for scope creep...");
+    // Heuristic results were already computed before the LLM call
+    // (they're in scopeCreepHeuristic)
+    const llmScopeCreep = extractScopeCreepFromFindings(findings, options.prDescription);
+
+    // Merge: heuristic findings + LLM findings
+    const allFlagged: FlaggedHunk[] = [...scopeCreepHeuristic];
+
+    if (llmScopeCreep) {
+      // Add LLM findings that aren't already covered by heuristics
+      const heuristicFiles = new Set(scopeCreepHeuristic.map((h) => h.file));
+      for (const hunk of llmScopeCreep.flagged_hunks) {
+        if (!heuristicFiles.has(hunk.file)) {
+          allFlagged.push(hunk);
+        }
+      }
+    }
+
+    if (allFlagged.length > 0) {
+      scopeCreepResult = {
+        pr_intent: options.prDescription ?? "No PR description provided",
+        flagged_hunks: allFlagged,
+      };
+      progress(`  ⚠ ${allFlagged.length} hunks flagged as potential scope creep`);
+      for (const h of allFlagged) {
+        progress(`    - ${h.file} (${h.lines}): ${h.reason.substring(0, 60)}${h.reason.length > 60 ? "..." : ""}`);
+      }
+    } else {
+      progress("  No scope creep detected");
+    }
+  } else if (!config.scope_creep.enabled) {
+    progress("Scope-creep detection disabled in config — skipping.");
+  }
+
+  // 7. Enforce noise budget
   findings = enforceNoiseBudget(findings, config);
 
   if (findings.length > 0) {
@@ -246,18 +305,19 @@ export async function runReview(options: ReviewOptions = {}): Promise<ReviewResu
     progress(`  Breakdown: ${sevSummary} (${srcSummary})`);
   }
 
-  // 7. Build the findings artifact
+  // 8. Build the findings artifact
   progress("Building findings artifact...");
   const artifact = buildArtifact(context, findings, config);
   artifact.tools_executed = toolExecutions;
   artifact.test_inversion = testInversion;
+  artifact.scope_creep = scopeCreepResult;
 
-  // 8. Render reports
+  // 9. Render reports
   progress("Rendering reports...");
   const markdown = renderMarkdownReport(artifact);
   const json = renderJsonArtifact(artifact);
 
-  // 9. Determine exit code
+  // 10. Determine exit code
   const exitCode = computeExitCode(artifact, config);
 
   const durationSeconds = Math.round((Date.now() - startTime) / 1000);

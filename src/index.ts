@@ -17,3 +17,4 @@ export { renderMarkdownReport } from "./report/markdown.js";
 export { renderJsonArtifact } from "./report/json.js";
 export { runDeterministicTools, formatToolFindingsForPrompt, type ToolResult, type DeterministicFinding } from "./tools/runner.js";
 export { runTestInversion } from "./test-inversion/runner.js";
+export { detectScopeCreepHeuristic, extractScopeCreepFromFindings, formatScopeCreepForPrompt } from "./scope-creep/detector.js";
