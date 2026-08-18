@@ -70,7 +70,7 @@ This usually means the key is missing, empty, expired, or invalid.
 Options:
   • Set the key: export OPENAI_API_KEY=sk-...
   • Check that the key in .advreview.yml (llm.api_key_env) points to a set env var
-  • Switch to a different provider in .advreview.yml (e.g., groq, ollama)
+  • Switch to a different provider in .advreview.yml (e.g., groq, anthropic, ollama)
   • Run with --no-llm to skip the LLM review entirely
 ```
 

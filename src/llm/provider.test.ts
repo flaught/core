@@ -1,5 +1,5 @@
-import { describe, it, expect } from "vitest";
-import { parseFindingsFromLLM, createProvider, OpenAICompatibleProvider, OllamaProvider } from "./provider.js";
+import { describe, it, expect, vi, afterEach } from "vitest";
+import { parseFindingsFromLLM, createProvider, OpenAICompatibleProvider, OllamaProvider, AnthropicProvider } from "./provider.js";
 import { FlaughtConfigSchema } from "../schemas/config.js";
 
 describe("parseFindingsFromLLM", () => {
@@ -264,9 +264,137 @@ describe("createProvider", () => {
     expect(provider).toBeInstanceOf(OllamaProvider);
   });
 
+  it("creates an Anthropic provider for anthropic config", () => {
+    const config = FlaughtConfigSchema.parse({
+      llm: { provider: "anthropic", model: "claude-sonnet-5", api_key_env: "ANTHROPIC_API_KEY" },
+    });
+    process.env.ANTHROPIC_API_KEY = "sk-ant-test";
+    const provider = createProvider(config);
+    expect(provider).toBeInstanceOf(AnthropicProvider);
+    expect(provider.name).toBe("anthropic");
+    expect(provider.model).toBe("claude-sonnet-5");
+    delete process.env.ANTHROPIC_API_KEY;
+  });
+
+  it("throws MissingAPIKeyError when Anthropic key is missing", () => {
+    const config = FlaughtConfigSchema.parse({
+      llm: { provider: "anthropic", model: "claude-sonnet-5", api_key_env: "ANTHROPIC_API_KEY" },
+    });
+    delete process.env.ANTHROPIC_API_KEY;
+    expect(() => createProvider(config)).toThrow(/Missing API key/);
+  });
+
+  it("respects a custom base_url for the Anthropic provider (proxy/gateway support)", () => {
+    const config = FlaughtConfigSchema.parse({
+      llm: {
+        provider: "anthropic",
+        model: "claude-opus-5",
+        api_key_env: "ANTHROPIC_API_KEY",
+        base_url: "https://my-proxy.internal/anthropic",
+      },
+    });
+    process.env.ANTHROPIC_API_KEY = "sk-ant-test";
+    const provider = createProvider(config);
+    expect(provider).toBeInstanceOf(AnthropicProvider);
+    delete process.env.ANTHROPIC_API_KEY;
+  });
+
   it("throws for unknown provider", () => {
     expect(() => {
       createProvider({ llm: { provider: "invalid", model: "x" } } as any);
     }).toThrow(/Unknown LLM provider/);
+  });
+});
+
+describe("AnthropicProvider", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  function mockFetchOnce(responseBody: unknown, ok = true): ReturnType<typeof vi.fn> {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok,
+      status: ok ? 200 : 401,
+      json: async () => responseBody,
+    } as Response);
+    vi.stubGlobal("fetch", fetchMock);
+    return fetchMock;
+  }
+
+  it("sends the Messages API shape: top-level system, x-api-key/anthropic-version headers, no Authorization header", async () => {
+    const fetchMock = mockFetchOnce({
+      content: [{ type: "text", text: '{"findings":[]}' }],
+      usage: { input_tokens: 100, output_tokens: 20 },
+    });
+
+    const provider = new AnthropicProvider({
+      baseUrl: "https://api.anthropic.com/v1",
+      apiKey: "sk-ant-test",
+      apiKeyEnvVar: "ANTHROPIC_API_KEY",
+      model: "claude-sonnet-5",
+      temperature: 0.2,
+      maxTokens: 4096,
+      timeoutSeconds: 30,
+    });
+
+    const result = await provider.review("system prompt", "user prompt");
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const [url, init] = fetchMock.mock.calls[0]! as [string, RequestInit];
+    expect(url).toBe("https://api.anthropic.com/v1/messages");
+
+    const headers = init.headers as Record<string, string>;
+    expect(headers["x-api-key"]).toBe("sk-ant-test");
+    expect(headers["anthropic-version"]).toBe("2023-06-01");
+    expect(headers["Authorization"]).toBeUndefined();
+
+    const body = JSON.parse(init.body as string);
+    expect(body.system).toBe("system prompt");
+    expect(body.messages).toEqual([{ role: "user", content: "user prompt" }]);
+    expect(body.max_tokens).toBe(4096);
+    expect(body.model).toBe("claude-sonnet-5");
+
+    expect(result.model).toBe("llm:claude-sonnet-5");
+    expect(result.usage).toEqual({ prompt_tokens: 100, completion_tokens: 20, total_tokens: 120 });
+  });
+
+  it("extracts the text block from Anthropic's content array and parses findings", async () => {
+    mockFetchOnce({
+      content: [
+        { type: "text", text: '{"findings":[{"severity":"high","category":"security","title":"SQLi","description":"...","file":"a.ts","line_start":1,"line_end":1,"snippet":"x","confidence":0.9}]}' },
+      ],
+      usage: { input_tokens: 50, output_tokens: 10 },
+    });
+
+    const provider = new AnthropicProvider({
+      baseUrl: "https://api.anthropic.com/v1",
+      apiKey: "sk-ant-test",
+      apiKeyEnvVar: "ANTHROPIC_API_KEY",
+      model: "claude-opus-5",
+      temperature: 0.2,
+      maxTokens: 4096,
+      timeoutSeconds: 30,
+    });
+
+    const result = await provider.review("system", "user");
+    expect(result.findings).toHaveLength(1);
+    expect(result.findings[0]!.title).toBe("SQLi");
+    expect(result.findings[0]!.source).toBe("llm:claude-opus-5");
+  });
+
+  it("classifies a 401 with the configured Anthropic env var in the message", async () => {
+    mockFetchOnce({ error: { type: "authentication_error", message: "invalid x-api-key" } }, false);
+
+    const provider = new AnthropicProvider({
+      baseUrl: "https://api.anthropic.com/v1",
+      apiKey: "bad-key",
+      apiKeyEnvVar: "ANTHROPIC_API_KEY",
+      model: "claude-sonnet-5",
+      temperature: 0.2,
+      maxTokens: 4096,
+      timeoutSeconds: 30,
+    });
+
+    await expect(provider.review("system", "user")).rejects.toThrow(/ANTHROPIC_API_KEY/);
   });
 });

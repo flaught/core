@@ -449,7 +449,7 @@ function buildArtifact(
     schema_version: SCHEMA_VERSION,
     _caveat: CAVEAT,
     generated_at: new Date().toISOString(),
-    flaught_version: "0.2.0",
+    flaught_version: "0.3.0",
     repository: {
       name: repoName,
       url: "",

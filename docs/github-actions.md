@@ -134,6 +134,26 @@ jobs:
 
 Add `OPENAI_API_KEY` to your repository secrets (Settings → Secrets and variables → Actions).
 
+### Using Claude instead of OpenAI
+
+Set `provider: anthropic` and `model: claude-sonnet-5` (or `claude-opus-5`, `claude-haiku-4-5`) in `.advreview.yml`, then swap the secret in the step above:
+
+```yaml
+      - name: Run adversarial review
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: |
+          flaught review \
+            --base origin/${{ github.base_ref }} \
+            --head HEAD \
+            --output findings.json \
+            --pr-description "${{ github.event.pull_request.title }}" \
+            --quiet
+        continue-on-error: true
+```
+
+No other workflow changes needed — just make sure `.advreview.yml` sets `llm.api_key_env: ANTHROPIC_API_KEY` (the config default is `OPENAI_API_KEY` regardless of provider, so this must be set explicitly) and the `env:` var above matches it.
+
 ## Using Ollama in CI
 
 For teams that want LLM review without sending code to external APIs:

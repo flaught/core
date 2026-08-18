@@ -100,6 +100,7 @@ export function createProvider(config: FlaughtConfig): LLMProvider {
       return new OpenAICompatibleProvider({
         baseUrl: config.llm.base_url ?? "https://api.openai.com/v1",
         apiKey,
+        apiKeyEnvVar: config.llm.api_key_env,
         model: config.llm.model,
         temperature: config.llm.temperature,
         maxTokens: config.llm.max_tokens,
@@ -113,6 +114,7 @@ export function createProvider(config: FlaughtConfig): LLMProvider {
       return new OpenAICompatibleProvider({
         baseUrl: config.llm.base_url ?? "https://api.groq.com/openai/v1",
         apiKey,
+        apiKeyEnvVar: config.llm.api_key_env,
         model: config.llm.model,
         temperature: config.llm.temperature,
         maxTokens: config.llm.max_tokens,
@@ -126,6 +128,27 @@ export function createProvider(config: FlaughtConfig): LLMProvider {
       return new OpenAICompatibleProvider({
         baseUrl: config.llm.base_url ?? "https://generativelanguage.googleapis.com/v1beta/openai",
         apiKey,
+        apiKeyEnvVar: config.llm.api_key_env,
+        model: config.llm.model,
+        temperature: config.llm.temperature,
+        maxTokens: config.llm.max_tokens,
+        timeoutSeconds: config.llm.timeout_seconds,
+      });
+
+    case "anthropic":
+      if (!apiKey) {
+        throw new MissingAPIKeyError(config.llm.api_key_env, "Anthropic");
+      }
+      // baseUrl is overridable so this same adapter reaches any
+      // Messages-API-compatible endpoint — a corporate proxy, a self-hosted
+      // gateway, or a future Anthropic-compatible provider — not just
+      // api.anthropic.com. model is a free-form string, so any current or
+      // future Claude model (or a differently-named model behind a
+      // compatible proxy) works without a code change.
+      return new AnthropicProvider({
+        baseUrl: config.llm.base_url ?? "https://api.anthropic.com/v1",
+        apiKey,
+        apiKeyEnvVar: config.llm.api_key_env,
         model: config.llm.model,
         temperature: config.llm.temperature,
         maxTokens: config.llm.max_tokens,
@@ -143,7 +166,7 @@ export function createProvider(config: FlaughtConfig): LLMProvider {
 
     default:
       throw new LLMError(
-        `Unknown LLM provider: ${config.llm.provider}. Supported providers: openai, groq, gemini, ollama`,
+        `Unknown LLM provider: ${config.llm.provider}. Supported providers: openai, groq, gemini, anthropic, ollama`,
         config.llm.provider,
         config.llm.model,
       );
@@ -155,6 +178,7 @@ export function createProvider(config: FlaughtConfig): LLMProvider {
 export interface OpenAICompatibleConfig {
   baseUrl: string;
   apiKey: string;
+  apiKeyEnvVar: string;
   model: string;
   temperature: number;
   maxTokens: number;
@@ -232,7 +256,7 @@ export class OpenAICompatibleProvider implements LLMProvider {
 
     if (!response.ok) {
       clearTimeout(timeout);
-      throw await classifyHttpError(response, this.config.baseUrl, this.config.model, this.name);
+      throw await classifyHttpError(response, this.config.baseUrl, this.config.model, this.name, this.config.apiKeyEnvVar);
     }
 
     const data = await response.json() as {
@@ -253,6 +277,126 @@ export class OpenAICompatibleProvider implements LLMProvider {
             prompt_tokens: data.usage.prompt_tokens,
             completion_tokens: data.usage.completion_tokens,
             total_tokens: data.usage.total_tokens,
+          }
+        : undefined,
+    };
+  }
+}
+
+// ─── Anthropic provider ───────────────────────────────────────────────────────
+//
+// Anthropic's Messages API has a genuinely different wire shape from the
+// OpenAI-style /chat/completions convention — system prompt as a top-level
+// field (not a message), x-api-key + anthropic-version headers instead of
+// Authorization: Bearer, content as an array of typed blocks, and
+// usage.input_tokens/output_tokens instead of prompt_tokens/completion_tokens.
+// It cannot reuse OpenAICompatibleProvider; this adapter targets that shape
+// directly. baseUrl and model are both free-form config, so this same class
+// reaches any current or future Claude model, and any Messages-API-compatible
+// endpoint (a proxy, a gateway) via base_url — not just api.anthropic.com.
+
+const ANTHROPIC_API_VERSION = "2023-06-01";
+
+export interface AnthropicConfig {
+  baseUrl: string;
+  apiKey: string;
+  apiKeyEnvVar: string;
+  model: string;
+  temperature: number;
+  maxTokens: number;
+  timeoutSeconds: number;
+}
+
+export class AnthropicProvider implements LLMProvider {
+  name: string;
+  model: string;
+  private config: AnthropicConfig;
+
+  constructor(config: AnthropicConfig) {
+    this.config = config;
+    this.name = "anthropic";
+    this.model = config.model;
+  }
+
+  async review(
+    systemPrompt: string,
+    userPrompt: string,
+  ): Promise<LLMReviewResult> {
+    const url = `${this.config.baseUrl.replace(/\/+$/, "")}/messages`;
+
+    const body = {
+      model: this.config.model,
+      max_tokens: this.config.maxTokens,
+      temperature: this.config.temperature,
+      system: systemPrompt,
+      messages: [{ role: "user", content: userPrompt }],
+    };
+
+    let response: Response;
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), this.config.timeoutSeconds * 1000);
+    try {
+      response = await fetch(url, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-api-key": this.config.apiKey,
+          "anthropic-version": ANTHROPIC_API_VERSION,
+        },
+        body: JSON.stringify(body),
+        signal: controller.signal,
+      });
+    } catch (err) {
+      clearTimeout(timeout);
+      if (err instanceof DOMException && err.name === "AbortError") {
+        throw new LLMError(
+          `Request to ${this.config.model} timed out after ${this.config.timeoutSeconds}s.\n\n` +
+          `This usually means the diff is too large or the model is slow to respond.\n\n` +
+          `Options:\n` +
+          `  • Increase timeout in .advreview.yml: llm.timeout_seconds: 300\n` +
+          `  • Use a faster model (e.g., claude-haiku-4-5)\n` +
+          `  • Run with --no-llm to skip the LLM review entirely`,
+          this.name,
+          this.model,
+        );
+      }
+      throw new LLMError(
+        `Could not reach ${this.config.model} at ${this.config.baseUrl}.\n\n` +
+        `This usually means:\n` +
+        `  • The model name is misspelled in .advreview.yml\n` +
+        `  • The API endpoint is down or unreachable\n` +
+        `  • The base_url in your config is wrong\n\n` +
+        `Run with --no-llm to skip the LLM review entirely.`,
+        this.name,
+        this.model,
+        undefined,
+        err instanceof Error ? err.message : String(err),
+      );
+    }
+
+    if (!response.ok) {
+      clearTimeout(timeout);
+      throw await classifyHttpError(response, this.config.baseUrl, this.config.model, this.name, this.config.apiKeyEnvVar);
+    }
+
+    const data = await response.json() as {
+      content: Array<{ type: string; text?: string }>;
+      usage?: { input_tokens: number; output_tokens: number };
+    };
+
+    clearTimeout(timeout);
+    const raw = data.content?.find((block) => block.type === "text")?.text ?? "";
+    const findings = parseFindingsFromLLM(raw, this.config.model);
+
+    return {
+      findings,
+      raw,
+      model: `llm:${this.config.model}`,
+      usage: data.usage
+        ? {
+            prompt_tokens: data.usage.input_tokens,
+            completion_tokens: data.usage.output_tokens,
+            total_tokens: data.usage.input_tokens + data.usage.output_tokens,
           }
         : undefined,
     };
@@ -338,7 +482,7 @@ export class OllamaProvider implements LLMProvider {
 
     if (!response.ok) {
       clearTimeout(timeout);
-      throw await classifyHttpError(response, this.config.baseUrl, this.config.model, this.name);
+      throw await classifyHttpError(response, this.config.baseUrl, this.config.model, this.name, null);
     }
 
     const data = await response.json() as {
@@ -374,8 +518,16 @@ async function classifyHttpError(
   _baseUrl: string,
   model: string,
   providerName: string,
+  apiKeyEnvVar: string | null,
 ): Promise<LLMError> {
   const status = response.status;
+  // Ollama has no API key (apiKeyEnvVar is null there) — keep the hint generic in that case.
+  const setKeyHint = apiKeyEnvVar
+    ? `Set the key: export ${apiKeyEnvVar}=...`
+    : `Check that the server is reachable and configured correctly`;
+  const checkKeyHint = apiKeyEnvVar
+    ? `Make sure the key is set: echo $${apiKeyEnvVar}`
+    : `Check that the server is reachable and configured correctly`;
 
   switch (status) {
     case 401:
@@ -383,9 +535,9 @@ async function classifyHttpError(
         `API key not configured or not valid for ${model}.\n\n` +
         `This usually means the key is missing, empty, expired, or invalid.\n\n` +
         `Options:\n` +
-        `  • Set the key: export OPENAI_API_KEY=sk-...\n` +
+        `  • ${setKeyHint}\n` +
         `  • Check that the key in .advreview.yml (llm.api_key_env) points to a set env var\n` +
-        `  • Switch to a different provider in .advreview.yml (e.g., groq, ollama)\n` +
+        `  • Switch to a different provider in .advreview.yml (e.g., groq, anthropic, ollama)\n` +
         `  • Run with --no-llm to skip the LLM review entirely`,
         providerName,
         model,
@@ -410,9 +562,9 @@ async function classifyHttpError(
         `API key not configured or not valid for ${model}.\n\n` +
         `This usually means your API key is missing, on a free tier with no credits, or being rate-limited.\n\n` +
         `Options:\n` +
-        `  • Make sure the key is set: echo $OPENAI_API_KEY\n` +
+        `  • ${checkKeyHint}\n` +
         `  • Check your billing details and add credits if needed\n` +
-        `  • Switch to a different provider in .advreview.yml (e.g., groq, ollama)\n` +
+        `  • Switch to a different provider in .advreview.yml (e.g., groq, anthropic, ollama)\n` +
         `  • Run with --no-llm to skip the LLM review entirely`,
         providerName,
         model,
@@ -434,8 +586,9 @@ async function classifyHttpError(
     case 500:
     case 502:
     case 503:
+    case 529: // Anthropic's overloaded_error
       return new LLMError(
-        `${model} provider is down (${status}). Try again in a few minutes.\n\n` +
+        `${model} provider is down or overloaded (${status}). Try again in a few minutes.\n\n` +
         `Run with --no-llm to skip the LLM review entirely.`,
         providerName,
         model,
@@ -446,7 +599,7 @@ async function classifyHttpError(
       return new LLMError(
         `API key not configured or not valid for ${model} (${status}).\n\n` +
         `Options:\n` +
-        `  • Make sure the key is set: echo $OPENAI_API_KEY\n` +
+        `  • ${checkKeyHint}\n` +
         `  • Switch to a different provider in .advreview.yml\n` +
         `  • Run with --no-llm to skip the LLM review entirely`,
         providerName,

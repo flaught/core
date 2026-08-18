@@ -75,10 +75,11 @@ version: 1
 
 # ── LLM provider ───────────────────────────────────────────
 llm:
-  provider: openai          # openai | groq | gemini | ollama
-  model: gpt-4o
-  api_key_env: OPENAI_API_KEY
-  # base_url: null          # override for OpenAI-compatible endpoints
+  provider: openai          # openai | groq | gemini | anthropic | ollama
+  model: gpt-4o             # e.g. claude-sonnet-5 for anthropic
+  api_key_env: OPENAI_API_KEY   # e.g. ANTHROPIC_API_KEY for anthropic
+  # base_url: null          # override for OpenAI-compatible endpoints, or an
+                             # Anthropic Messages-API-compatible proxy/gateway
   temperature: 0.2
   max_tokens: 4096
   timeout_seconds: 120     # timeout for LLM API calls

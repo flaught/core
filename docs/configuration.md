@@ -128,6 +128,25 @@ export GEMINI_API_KEY=...
 flaught review
 ```
 
+### Anthropic (Claude)
+
+Native support — this is **not** routed through the OpenAI-compatible adapter. Anthropic's Messages API has a genuinely different wire shape (system prompt as a top-level field, `x-api-key`/`anthropic-version` headers instead of `Authorization: Bearer`, `usage.input_tokens`/`output_tokens` instead of `prompt_tokens`/`completion_tokens`), so it has its own adapter (`AnthropicProvider`).
+
+```yaml
+llm:
+  provider: anthropic
+  model: claude-sonnet-5          # any current or future Claude model id — not hardcoded
+  api_key_env: ANTHROPIC_API_KEY
+  # base_url: https://api.anthropic.com/v1   # default; override to point at a proxy/gateway
+```
+
+```bash
+export ANTHROPIC_API_KEY=sk-ant-...
+flaught review
+```
+
+`model` is a free-form string — `claude-opus-5`, `claude-sonnet-5`, `claude-haiku-4-5`, or any future/renamed Claude model, with no code change required. `base_url` is also overridable, so the same adapter reaches a corporate proxy or self-hosted gateway that speaks the Messages API, not just `api.anthropic.com` directly.
+
 ### Ollama (local models)
 
 ```yaml
@@ -153,6 +172,8 @@ llm:
   base_url: https://my-llm-gateway.example.com/v1
   api_key_env: MY_GATEWAY_KEY
 ```
+
+This only works for gateways that speak the OpenAI `/chat/completions` shape. A gateway that speaks Anthropic's Messages API instead — including most enterprise Claude proxies — needs `provider: anthropic` with `base_url` overridden (see above), not `provider: openai`.
 
 ## Severity gate
 

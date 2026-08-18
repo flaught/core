@@ -99,6 +99,14 @@ describe("FlaughtConfigSchema", () => {
     ).toThrow();
   });
 
+  it("accepts anthropic as a provider", () => {
+    const config = FlaughtConfigSchema.parse({
+      llm: { provider: "anthropic", model: "claude-sonnet-5", api_key_env: "ANTHROPIC_API_KEY" },
+    });
+    expect(config.llm.provider).toBe("anthropic");
+    expect(config.llm.model).toBe("claude-sonnet-5");
+  });
+
   it("rejects temperature outside 0-1", () => {
     expect(() =>
       FlaughtConfigSchema.parse({ llm: { temperature: 1.5 } })

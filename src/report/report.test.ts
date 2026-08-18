@@ -59,7 +59,7 @@ function makeArtifact(overrides: Partial<FindingsArtifact> = {}): FindingsArtifa
     schema_version: SCHEMA_VERSION,
     _caveat: CAVEAT,
     generated_at: "2025-01-15T10:30:00Z",
-    flaught_version: "0.2.0",
+    flaught_version: "0.3.0",
     repository: { name: "flaught/core", url: "https://github.com/flaught/core", branch: "main" },
     pull_request: { number: 42, url: "https://github.com/flaught/core/pull/42", title: "Add auth", description: "Adds JWT auth", base_sha: "abc123", head_sha: "def456" },
     run: { id: "flaught-1234567890-abc123", ci_url: null, duration_seconds: 47 },
@@ -186,7 +186,7 @@ describe("renderMarkdownReport", () => {
   it("includes footer with version", () => {
     const artifact = makeArtifact();
     const md = renderMarkdownReport(artifact);
-    expect(md).toContain("Flaught v0.2.0");
+    expect(md).toContain("Flaught v0.3.0");
     expect(md).toContain("Schema v2");
   });
 });

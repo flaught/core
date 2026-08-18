@@ -27,7 +27,7 @@ const StackSchema = z.object({
 
 const LlmSchema = z.object({
   provider: z
-    .enum(["openai", "groq", "gemini", "ollama"])
+    .enum(["openai", "groq", "gemini", "ollama", "anthropic"])
     .default("openai"),
   model: z.string().default("gpt-4o"),
   api_key_env: z.string().default("OPENAI_API_KEY"),
