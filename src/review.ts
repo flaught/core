@@ -20,6 +20,12 @@ import {
 import { renderMarkdownReport } from "./report/markdown.js";
 import { renderJsonArtifact } from "./report/json.js";
 
+// ─── Progress callback ──────────────────────────────────────────────────────
+
+export type ProgressCallback = (message: string) => void;
+
+function noopProgress(_message: string) {}
+
 // ─── Review result ──────────────────────────────────────────────────────────
 
 export interface ReviewResult {
@@ -41,7 +47,7 @@ export interface ReviewResult {
 
 // ─── Run the full review ────────────────────────────────────────────────────
 
-export async function runReview(options: {
+export interface ReviewOptions {
   repoPath?: string;
   baseRef?: string;
   headRef?: string;
@@ -49,13 +55,21 @@ export async function runReview(options: {
   prDescription?: string;
   /** Skip LLM review (context assembly only) */
   skipLlm?: boolean;
-}): Promise<ReviewResult> {
+  /** Progress callback for logging */
+  onProgress?: ProgressCallback;
+}
+
+export async function runReview(options: ReviewOptions = {}): Promise<ReviewResult> {
+  const progress = options.onProgress ?? noopProgress;
   const startTime = Date.now();
 
   // 1. Load config
+  progress("Loading config...");
   const config = await loadConfig(options.configPath);
+  progress(`  Provider: ${config.llm.provider}/${config.llm.model}`);
 
   // 2. Assemble context
+  progress("Assembling context (diff + dependency graph)...");
   const context = await assembleContext({
     repoPath: options.repoPath,
     baseRef: options.baseRef,
@@ -63,26 +77,76 @@ export async function runReview(options: {
     configPath: options.configPath,
   });
 
+  progress(`  Base: ${context.baseSha.slice(0, 8)} → Head: ${context.headSha.slice(0, 8)}`);
+  progress(`  Changed files: ${context.changedFiles.length}`);
+  progress(`  Neighborhood (blast radius): ${context.neighborhoodFiles.length}`);
+  progress(`  Dependency graph: ${context.dependencyGraph.getAllFiles().length} files`);
+
+  if (context.changedFiles.length === 0) {
+    progress("No changes detected. Nothing to review.");
+  } else {
+    for (const f of context.changedFiles) {
+      const indicator =
+        f.status === "added" ? "+" :
+        f.status === "deleted" ? "-" :
+        f.status === "renamed" ? "→" : "~";
+      progress(`    ${indicator} ${f.path} (+${f.additions}/-${f.deletions})`);
+    }
+    if (context.neighborhoodFiles.length > 0) {
+      progress("  Neighborhood files:");
+      for (const f of context.neighborhoodFiles) {
+        progress(`    ○ ${f}`);
+      }
+    }
+  }
+
   // 3. Run LLM review
   let llmResult: LLMReviewResult | null = null;
   let findings: Finding[] = [];
 
-  if (!options.skipLlm && context.changedFiles.length > 0) {
+  if (options.skipLlm) {
+    progress("Skipping LLM review (--no-llm).");
+  } else if (context.changedFiles.length === 0) {
+    progress("No changes to review — skipping LLM call.");
+  } else {
     const provider = createProvider(config);
     const systemPrompt = buildSystemPrompt(config);
     const userPrompt = buildUserPrompt(context, config, options.prDescription);
 
+    const promptChars = systemPrompt.length + userPrompt.length;
+    const promptTokensEst = Math.round(promptChars / 4);
+    progress(`Running adversarial review with ${config.llm.provider}/${config.llm.model}...`);
+    progress(`  Prompt size: ~${promptTokensEst.toLocaleString()} tokens (${promptChars.toLocaleString()} chars)`);
+
     llmResult = await provider.review(systemPrompt, userPrompt);
     findings = llmResult.findings;
+
+    if (llmResult.usage) {
+      progress(`  Token usage: ${llmResult.usage.prompt_tokens.toLocaleString()} prompt + ${llmResult.usage.completion_tokens.toLocaleString()} completion = ${llmResult.usage.total_tokens.toLocaleString()} total`);
+    }
+
+    progress(`  Found ${findings.length} findings (before noise budget)`);
   }
 
   // 4. Enforce noise budget
   findings = enforceNoiseBudget(findings, config);
 
+  if (findings.length > 0) {
+    progress(`  After noise budget: ${findings.length} findings`);
+    const bySev: Record<string, number> = {};
+    for (const f of findings) {
+      bySev[f.severity] = (bySev[f.severity] ?? 0) + 1;
+    }
+    const summary = Object.entries(bySev).map(([sev, count]) => `${count} ${sev}`).join(", ");
+    progress(`  Breakdown: ${summary}`);
+  }
+
   // 5. Build the findings artifact
+  progress("Building findings artifact...");
   const artifact = buildArtifact(context, findings, config);
 
   // 6. Render reports
+  progress("Rendering reports...");
   const markdown = renderMarkdownReport(artifact);
   const json = renderJsonArtifact(artifact);
 
@@ -91,6 +155,7 @@ export async function runReview(options: {
 
   const durationSeconds = Math.round((Date.now() - startTime) / 1000);
   artifact.run.duration_seconds = durationSeconds;
+  progress(`Done in ${durationSeconds}s.`);
 
   return {
     context,

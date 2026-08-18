@@ -14,7 +14,7 @@ import { Command } from "commander";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { contextToJSON } from "./context/assembler.js";
-import { runReview } from "./review.js";
+import { runReview, type ProgressCallback } from "./review.js";
 import { initConfig } from "./config.js";
 import { LLMError, MissingAPIKeyError } from "./llm/provider.js";
 
@@ -45,6 +45,7 @@ program
   .option("--output <path>", "Write JSON artifact to file")
   .option("--no-llm", "Skip LLM review (context assembly only)")
   .option("--pr-description <text>", "PR description for scope-creep detection")
+  .option("--quiet", "Only output the final report, no progress messages")
   .action(async (opts) => {
     try {
       await runCliReview(opts);
@@ -62,7 +63,12 @@ async function runCliReview(opts: {
   output?: string;
   llm?: boolean;
   prDescription?: string;
+  quiet?: boolean;
 }): Promise<void> {
+  const progress: ProgressCallback = opts.quiet
+    ? () => {}
+    : (msg) => console.error(msg);
+
   // --json: output stage 1 context only
   if (opts.json) {
     const { assembleContext } = await import("./context/assembler.js");
@@ -84,6 +90,7 @@ async function runCliReview(opts: {
     configPath: opts.config,
     prDescription: opts.prDescription,
     skipLlm: !opts.llm,
+    onProgress: progress,
   });
 
   // Output markdown report to stdout
@@ -112,8 +119,7 @@ function handleError(err: unknown): never {
   }
 
   if (err instanceof LLMError) {
-    console.error(`\n❌ LLM error (${err.provider}/${err.model}):`);
-    console.error(`\n${err.message}`);
+    console.error(`\n❌ ${err.message}`);
     process.exit(2);
   }
 
