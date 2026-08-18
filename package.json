@@ -7,13 +7,22 @@
     "flaught": "dist/cli.js"
   },
   "types": "dist/index.d.ts",
+  "files": [
+    "dist",
+    "!dist/**/*.test.*",
+    "!dist/**/*.map",
+    "README.md",
+    "LICENSE",
+    "docs"
+  ],
   "scripts": {
     "build": "tsc",
     "dev": "tsc --watch",
     "lint": "eslint src/",
     "test": "vitest run",
     "test:watch": "vitest",
-    "review": "node dist/cli.js review"
+    "review": "node dist/cli.js review",
+    "prepublishOnly": "npm run build && npm test"
   },
   "keywords": [
     "code-review",
@@ -21,13 +30,22 @@
     "pr-review",
     "ci",
     "security",
-    "governance"
+    "devsecops",
+    "semgrep",
+    "llm",
+    "governance",
+    "scope-creep",
+    "test-inversion"
   ],
   "author": "Flaught contributors",
   "license": "MIT",
   "repository": {
     "type": "git",
     "url": "https://github.com/flaught/core.git"
+  },
+  "homepage": "https://github.com/flaught/core#readme",
+  "bugs": {
+    "url": "https://github.com/flaught/core/issues"
   },
   "dependencies": {
     "commander": "^12.1.0",
