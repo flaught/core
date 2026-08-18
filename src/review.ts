@@ -13,12 +13,14 @@ import {
   type Finding,
   type NoiseBudget,
   type Severity,
+  type ToolExecuted,
   SCHEMA_VERSION,
   FINDINGS_SCHEMA_URL,
   CAVEAT,
 } from "./schemas/findings.js";
 import { renderMarkdownReport } from "./report/markdown.js";
 import { renderJsonArtifact } from "./report/json.js";
+import { runDeterministicTools, formatToolFindingsForPrompt, type DeterministicFinding } from "./tools/runner.js";
 
 // ─── Progress callback ──────────────────────────────────────────────────────
 
@@ -33,6 +35,8 @@ export interface ReviewResult {
   context: ReviewContext;
   /** The LLM review result (null if LLM was skipped) */
   llmResult: LLMReviewResult | null;
+  /** Deterministic tool results */
+  toolResults: ToolExecuted[];
   /** The full findings artifact */
   artifact: FindingsArtifact;
   /** Markdown report for PR comments */
@@ -100,9 +104,51 @@ export async function runReview(options: ReviewOptions = {}): Promise<ReviewResu
     }
   }
 
-  // 3. Run LLM review
+  // 3. Run deterministic tools (semgrep, linter, vuln scanner)
+  let toolExecutions: ToolExecuted[] = [];
+  let deterministicFindings: DeterministicFinding[] = [];
+
+  if (context.changedFiles.length > 0) {
+    const anyToolEnabled = config.tools.semgrep.enabled || config.tools.linter.enabled || config.tools.vuln_scanner.enabled;
+    if (anyToolEnabled) {
+      progress("Running deterministic tools...");
+      const toolResult = await runDeterministicTools(config, context.repoRoot, progress);
+      toolExecutions = toolResult.executions;
+      deterministicFindings = toolResult.findings;
+    } else {
+      progress("Deterministic tools disabled in config — skipping.");
+    }
+  }
+
+  // 4. Run LLM review
   let llmResult: LLMReviewResult | null = null;
   let findings: Finding[] = [];
+
+  // Convert deterministic findings to Finding format
+  for (const df of deterministicFindings) {
+    findings.push({
+      id: `D-${findings.length + 1}`.padStart(5, "0"),
+      severity: (["critical", "high", "medium", "low", "info"].includes(df.severity) ? df.severity : "medium") as Severity,
+      category: (["security", "architecture", "scope-creep", "test-quality", "performance", "maintainability"].includes(df.category) ? df.category : "maintainability") as Finding["category"],
+      title: df.title,
+      description: `${df.source} found: ${df.title}${df.ruleId !== "unknown" ? ` (${df.ruleId})` : ""}`,
+      evidence: {
+        file: df.file,
+        line_start: df.line,
+        line_end: df.line,
+        snippet: df.snippet,
+        blast_radius: [],
+      },
+      source: df.source,
+      source_type: "deterministic",
+      confidence: 1.0, // deterministic tools get full confidence
+      references: df.reference ? [df.reference] : [],
+      dismissed: false,
+      dismissed_by: null,
+      dismissed_at: null,
+      dismissal_reason: null,
+    });
+  }
 
   if (options.skipLlm) {
     progress("Skipping LLM review (--no-llm).");
@@ -113,39 +159,52 @@ export async function runReview(options: ReviewOptions = {}): Promise<ReviewResu
     const systemPrompt = buildSystemPrompt(config);
     const userPrompt = buildUserPrompt(context, config, options.prDescription);
 
-    const promptChars = systemPrompt.length + userPrompt.length;
+    // Inject deterministic tool findings into the prompt
+    const toolContext = formatToolFindingsForPrompt(deterministicFindings);
+    const fullUserPrompt = toolContext
+      ? `${userPrompt}\n\n---\n\n${toolContext}`
+      : userPrompt;
+
+    const promptChars = systemPrompt.length + fullUserPrompt.length;
     const promptTokensEst = Math.round(promptChars / 4);
     progress(`Running adversarial review with ${config.llm.provider}/${config.llm.model}...`);
     progress(`  Prompt size: ~${promptTokensEst.toLocaleString()} tokens (${promptChars.toLocaleString()} chars)`);
+    if (deterministicFindings.length > 0) {
+      progress(`  Grounding with ${deterministicFindings.length} deterministic tool findings`);
+    }
 
-    llmResult = await provider.review(systemPrompt, userPrompt);
-    findings = llmResult.findings;
+    llmResult = await provider.review(systemPrompt, fullUserPrompt);
+    findings.push(...llmResult.findings);
 
     if (llmResult.usage) {
       progress(`  Token usage: ${llmResult.usage.prompt_tokens.toLocaleString()} prompt + ${llmResult.usage.completion_tokens.toLocaleString()} completion = ${llmResult.usage.total_tokens.toLocaleString()} total`);
     }
 
-    progress(`  Found ${findings.length} findings (before noise budget)`);
+    progress(`  LLM found ${llmResult.findings.length} findings`);
   }
 
-  // 4. Enforce noise budget
+  // 5. Enforce noise budget
   findings = enforceNoiseBudget(findings, config);
 
   if (findings.length > 0) {
     progress(`  After noise budget: ${findings.length} findings`);
     const bySev: Record<string, number> = {};
+    const bySource: Record<string, number> = {};
     for (const f of findings) {
       bySev[f.severity] = (bySev[f.severity] ?? 0) + 1;
+      bySource[f.source_type] = (bySource[f.source_type] ?? 0) + 1;
     }
-    const summary = Object.entries(bySev).map(([sev, count]) => `${count} ${sev}`).join(", ");
-    progress(`  Breakdown: ${summary}`);
+    const sevSummary = Object.entries(bySev).map(([sev, count]) => `${count} ${sev}`).join(", ");
+    const srcSummary = Object.entries(bySource).map(([src, count]) => `${count} ${src}`).join(", ");
+    progress(`  Breakdown: ${sevSummary} (${srcSummary})`);
   }
 
-  // 5. Build the findings artifact
+  // 6. Build the findings artifact
   progress("Building findings artifact...");
   const artifact = buildArtifact(context, findings, config);
+  artifact.tools_executed = toolExecutions;
 
-  // 6. Render reports
+  // 7. Render reports
   progress("Rendering reports...");
   const markdown = renderMarkdownReport(artifact);
   const json = renderJsonArtifact(artifact);
@@ -160,6 +219,7 @@ export async function runReview(options: ReviewOptions = {}): Promise<ReviewResu
   return {
     context,
     llmResult,
+    toolResults: toolExecutions,
     artifact,
     markdown,
     json,
