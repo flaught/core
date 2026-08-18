@@ -81,6 +81,7 @@ llm:
   # base_url: null          # override for OpenAI-compatible endpoints
   temperature: 0.2
   max_tokens: 4096
+  timeout_seconds: 120     # timeout for LLM API calls
 
 # ── Deterministic tools ────────────────────────────────────
 # tools:

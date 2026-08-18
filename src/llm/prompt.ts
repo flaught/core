@@ -78,6 +78,7 @@ export function buildUserPrompt(
   prDescription?: string,
 ): string {
   const sections: string[] = [];
+  const MAX_PROMPT_CHARS = 100_000; // ~25K tokens, leaves room for the system prompt and output
 
   // ── PR context ──
   if (prDescription) {
@@ -166,5 +167,43 @@ export function buildUserPrompt(
     `Respond with valid JSON only, following the format specified in your system prompt.`,
   );
 
-  return sections.join("\n\n---\n\n");
+  let prompt = sections.join("\n\n---\n\n");
+
+  // ── Truncate if the prompt is too long ──
+  if (prompt.length > MAX_PROMPT_CHARS) {
+    // Priority order for truncation: neighborhood contents first, then file contents, then diff
+    // The summary sections (changed files, blast radius, review instructions) are kept.
+
+    // Try without neighborhood contents
+    const withoutNeighborhood = sections
+      .filter((s) => !s.includes("Neighborhood File Contents"))
+      .join("\n\n---\n\n");
+    if (withoutNeighborhood.length <= MAX_PROMPT_CHARS) {
+      return withoutNeighborhood + "\n\n---\n\n⚠️ Neighborhood file contents were truncated to fit the prompt size limit.";
+    }
+
+    // Try without file contents too
+    const essential = sections
+      .filter((s) => !s.includes("Neighborhood File Contents") && !s.includes("Changed File Contents"))
+      .join("\n\n---\n\n");
+    if (essential.length <= MAX_PROMPT_CHARS) {
+      return essential + "\n\n---\n\n⚠️ File contents were truncated to fit the prompt size limit. Only the diff and summaries are included.";
+    }
+
+    // Last resort: truncate the diff itself
+    const diffSection = sections.find((s) => s.includes("Unified Diff"));
+    const nonDiffSections = sections.filter((s) => !s.includes("Unified Diff") && !s.includes("Neighborhood File Contents") && !s.includes("Changed File Contents"));
+    const diffBudget = MAX_PROMPT_CHARS - nonDiffSections.join("\n\n---\n\n").length - 200;
+    if (diffSection && diffBudget > 1000) {
+      const truncatedDiff = diffSection.slice(0, diffBudget);
+      return [...nonDiffSections, truncatedDiff].join("\n\n---\n\n") +
+        `\n\n---\n\n⚠️ The diff was truncated to fit the prompt size limit (${context.changedFiles.length} files changed; showing first ~${diffBudget} chars).`;
+    }
+
+    // Absolute fallback
+    return nonDiffSections.join("\n\n---\n\n") +
+      `\n\n⚠️ Context was truncated to fit the prompt size limit.`;
+  }
+
+  return prompt;
 }

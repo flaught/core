@@ -102,6 +102,7 @@ export function createProvider(config: FlaughtConfig): LLMProvider {
         model: config.llm.model,
         temperature: config.llm.temperature,
         maxTokens: config.llm.max_tokens,
+        timeoutSeconds: config.llm.timeout_seconds,
       });
 
     case "groq":
@@ -114,6 +115,7 @@ export function createProvider(config: FlaughtConfig): LLMProvider {
         model: config.llm.model,
         temperature: config.llm.temperature,
         maxTokens: config.llm.max_tokens,
+        timeoutSeconds: config.llm.timeout_seconds,
       });
 
     case "gemini":
@@ -126,6 +128,7 @@ export function createProvider(config: FlaughtConfig): LLMProvider {
         model: config.llm.model,
         temperature: config.llm.temperature,
         maxTokens: config.llm.max_tokens,
+        timeoutSeconds: config.llm.timeout_seconds,
       });
 
     case "ollama":
@@ -134,6 +137,7 @@ export function createProvider(config: FlaughtConfig): LLMProvider {
         baseUrl: config.llm.base_url ?? "http://localhost:11434",
         model: config.llm.model,
         temperature: config.llm.temperature,
+        timeoutSeconds: config.llm.timeout_seconds,
       });
 
     default:
@@ -153,6 +157,7 @@ export interface OpenAICompatibleConfig {
   model: string;
   temperature: number;
   maxTokens: number;
+  timeoutSeconds: number;
 }
 
 export class OpenAICompatibleProvider implements LLMProvider {
@@ -184,6 +189,8 @@ export class OpenAICompatibleProvider implements LLMProvider {
     };
 
     let response: Response;
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), this.config.timeoutSeconds * 1000);
     try {
       response = await fetch(url, {
         method: "POST",
@@ -192,13 +199,27 @@ export class OpenAICompatibleProvider implements LLMProvider {
           Authorization: `Bearer ${this.config.apiKey}`,
         },
         body: JSON.stringify(body),
+        signal: controller.signal,
       });
     } catch (err) {
+      clearTimeout(timeout);
+      if (err instanceof DOMException && err.name === "AbortError") {
+        throw new LLMError(
+          `Request to ${this.config.model} timed out after ${this.config.timeoutSeconds}s.\n\n` +
+          `This usually means the diff is too large or the model is slow to respond.\n\n` +
+          `Options:\n` +
+          `  • Increase timeout in .advreview.yml: llm.timeout_seconds: 300\n` +
+          `  • Use a faster model (e.g., groq with llama-3.1-70b)\n` +
+          `  • Run with --no-llm to skip the LLM review entirely`,
+          this.name,
+          this.model,
+        );
+      }
       throw new LLMError(
-        `Could not reach Ollama at ${this.config.baseUrl}.\n\n` +
+        `Could not reach ${this.config.model} at ${this.config.baseUrl}.\n\n` +
         `This usually means:\n` +
         `  • The model name is misspelled in .advreview.yml\n` +
-        `  • Ollama is not running — start it with: ollama serve\n` +
+        `  • The API endpoint is down or unreachable\n` +
         `  • The base_url in your config is wrong\n\n` +
         `Run with --no-llm to skip the LLM review entirely.`,
         this.name,
@@ -209,6 +230,7 @@ export class OpenAICompatibleProvider implements LLMProvider {
     }
 
     if (!response.ok) {
+      clearTimeout(timeout);
       throw await classifyHttpError(response, this.config.baseUrl, this.config.model, this.name);
     }
 
@@ -217,6 +239,7 @@ export class OpenAICompatibleProvider implements LLMProvider {
       usage?: { prompt_tokens: number; completion_tokens: number; total_tokens: number };
     };
 
+    clearTimeout(timeout);
     const raw = data.choices[0]?.message?.content ?? "";
     const findings = parseFindingsFromLLM(raw, this.config.model);
 
@@ -241,6 +264,7 @@ export interface OllamaConfig {
   baseUrl: string;
   model: string;
   temperature: number;
+  timeoutSeconds: number;
 }
 
 export class OllamaProvider implements LLMProvider {
@@ -274,17 +298,35 @@ export class OllamaProvider implements LLMProvider {
     };
 
     let response: Response;
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), this.config.timeoutSeconds * 1000);
     try {
       response = await fetch(url, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
+        signal: controller.signal,
       });
     } catch (err) {
+      clearTimeout(timeout);
+      if (err instanceof DOMException && err.name === "AbortError") {
+        throw new LLMError(
+          `Request to ${this.config.model} timed out after ${this.config.timeoutSeconds}s.\n\n` +
+          `This usually means the diff is too large or the model is slow to respond.\n\n` +
+          `Options:\n` +
+          `  • Increase timeout in .advreview.yml: llm.timeout_seconds: 300\n` +
+          `  • Use a faster/smaller model\n` +
+          `  • Run with --no-llm to skip the LLM review entirely`,
+          this.name,
+          this.model,
+        );
+      }
       throw new LLMError(
         `Could not reach Ollama at ${this.config.baseUrl}.\n\n` +
-        `Make sure Ollama is running: ollama serve\n` +
-        `And the model is available: ollama pull ${this.config.model}\n\n` +
+        `This usually means:\n` +
+        `  • The model name is misspelled in .advreview.yml\n` +
+        `  • Ollama is not running — start it with: ollama serve\n` +
+        `  • The base_url in your config is wrong\n\n` +
         `Run with --no-llm to skip the LLM review entirely.`,
         this.name,
         this.model,
@@ -294,6 +336,7 @@ export class OllamaProvider implements LLMProvider {
     }
 
     if (!response.ok) {
+      clearTimeout(timeout);
       throw await classifyHttpError(response, this.config.baseUrl, this.config.model, this.name);
     }
 
@@ -304,6 +347,7 @@ export class OllamaProvider implements LLMProvider {
       eval_count?: number;
     };
 
+    clearTimeout(timeout);
     const raw = data.message?.content ?? "";
     const findings = parseFindingsFromLLM(raw, this.config.model);
 
