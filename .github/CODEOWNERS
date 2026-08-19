@@ -1,0 +1,5 @@
+# Every PR into main needs an approving review from a code owner.
+# Combined with branch protection's require_code_owner_reviews (org
+# admin only), this keeps merge-gating approvals restricted to
+# flaught org members even if outside collaborators are ever added.
+* @dgabriel
