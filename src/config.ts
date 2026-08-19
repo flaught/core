@@ -36,13 +36,19 @@ export function findConfigFile(startDir: string): string | null {
  *
  * If no config file is found, returns defaults.
  * If a config file is found, merges it with defaults and validates with Zod.
+ *
+ * Search order: `configPath`'s directory, else `repoPath` (e.g. from
+ * `--repo`/`ReviewOptions.repoPath`), else `process.cwd()`. Without this,
+ * `flaught review --repo /some/other/repo` run from an unrelated cwd would
+ * silently fall back to defaults instead of that repo's .advreview.yml.
  */
 export async function loadConfig(
   configPath?: string,
+  repoPath?: string,
 ): Promise<FlaughtConfig> {
   const searchDir = configPath
     ? path.dirname(configPath)
-    : process.cwd();
+    : (repoPath ?? process.cwd());
 
   const filePath = configPath ?? findConfigFile(searchDir);
 

@@ -230,7 +230,7 @@ export async function assembleContext(
   const git = simpleGit(repoPath);
 
   // Load config for exclusions
-  const config = await loadConfig(options.configPath);
+  const config = await loadConfig(options.configPath, repoPath);
   const excludePaths = [
     ...config.exclude.paths,
     ...(options.excludePaths ?? []),

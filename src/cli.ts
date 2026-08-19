@@ -34,7 +34,7 @@ const program = new Command();
 program
   .name("flaught")
   .description("Adversarial PR/code review tool — structured, skeptical scrutiny for CI")
-  .version("0.4.0");
+  .version("0.4.1");
 
 program
   .command("init")

@@ -170,7 +170,10 @@ export function createProvider(config: FlaughtConfig): LLMProvider {
         temperature: config.llm.temperature,
         timeoutSeconds: config.llm.timeout_seconds,
         apiKey: ollamaApiKeyConfigured ? (apiKey || undefined) : undefined,
-        apiKeyEnvVar: config.llm.api_key_env,
+        // Only set when opted in, so a plain local config never surfaces an
+        // "OPENAI_API_KEY" hint in error messages for a provider that
+        // doesn't need one.
+        apiKeyEnvVar: ollamaApiKeyConfigured ? config.llm.api_key_env : undefined,
       });
     }
 
@@ -460,7 +463,12 @@ export class OllamaProvider implements LLMProvider {
       format: "json",
     };
 
-    const isCloud = Boolean(this.config.apiKey);
+    // apiKeyEnvVar being set (regardless of whether the env var actually
+    // resolved to a value) means the user configured this for cloud auth —
+    // distinct from apiKey being truthy, so a misconfigured (empty) key
+    // still gets the specific "set OLLAMA_API_KEY" hint instead of the
+    // generic local-usage one.
+    const isCloud = Boolean(this.config.apiKey) || Boolean(this.config.apiKeyEnvVar);
     const headers: Record<string, string> = { "Content-Type": "application/json" };
     if (this.config.apiKey) {
       headers.Authorization = `Bearer ${this.config.apiKey}`;
@@ -513,7 +521,7 @@ export class OllamaProvider implements LLMProvider {
         this.config.baseUrl,
         this.config.model,
         this.name,
-        isCloud ? (this.config.apiKeyEnvVar ?? null) : null,
+        this.config.apiKeyEnvVar ?? null,
       );
     }
 

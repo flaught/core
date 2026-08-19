@@ -157,6 +157,45 @@ describe("runReview (no-llm mode)", () => {
     expect(result.json).toBeTruthy();
   });
 
+  it("loads .advreview.yml via repoPath alone, without an explicit configPath (regression)", async () => {
+    // Regression test: runReview({repoPath, ...}) — the exact shape the CLI's
+    // `--repo` flag produces — used to silently ignore the target repo's
+    // .advreview.yml and fall back to defaults whenever invoked from an
+    // unrelated cwd, because loadConfig only ever searched configPath's
+    // dirname or process.cwd(). Prove a real file-based config is honored
+    // via repoPath alone, using exclude.paths as the observable effect.
+    const repoPath = fs.mkdtempSync(path.join(os.tmpdir(), "flaught-review-"));
+    tempDirs.push(repoPath);
+
+    const git = simpleGit(repoPath);
+    await git.init();
+    await git.addConfig("user.email", "test@flaught.dev");
+    await git.addConfig("user.name", "Flaught Test");
+
+    await commitFiles(git, {
+      ".advreview.yml": "version: 1\nexclude:\n  paths:\n    - \"src/excluded.ts\"\n",
+      "src/main.ts": "console.log('hello');",
+      "src/excluded.ts": "console.log('hello');",
+    }, "initial");
+
+    await commitFiles(git, {
+      "src/main.ts": "console.log('hello world');",
+      "src/excluded.ts": "console.log('hello world');",
+    }, "modify both");
+
+    // No configPath passed — only repoPath, exactly like `flaught review --repo <path>`.
+    const result = await runReview({
+      repoPath,
+      baseRef: "HEAD~1",
+      headRef: "HEAD",
+      skipLlm: true,
+    });
+
+    const changedPaths = result.context.changedFiles.map((f) => f.path);
+    expect(changedPaths).toContain("src/main.ts");
+    expect(changedPaths).not.toContain("src/excluded.ts");
+  });
+
   it("produces valid JSON artifact", async () => {
     const repoPath = fs.mkdtempSync(path.join(os.tmpdir(), "flaught-review-"));
     tempDirs.push(repoPath);

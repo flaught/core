@@ -77,7 +77,7 @@ export async function runReview(options: ReviewOptions = {}): Promise<ReviewResu
 
   // 1. Load config
   progress("Loading config...");
-  const config = await loadConfig(options.configPath);
+  const config = await loadConfig(options.configPath, options.repoPath);
   progress(`  Provider: ${config.llm.provider}/${config.llm.model}`);
 
   // 2. Assemble context
@@ -449,7 +449,7 @@ function buildArtifact(
     schema_version: SCHEMA_VERSION,
     _caveat: CAVEAT,
     generated_at: new Date().toISOString(),
-    flaught_version: "0.4.0",
+    flaught_version: "0.4.1",
     repository: {
       name: repoName,
       url: "",
