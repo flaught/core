@@ -137,6 +137,13 @@ llm:
 #   enabled: true
 #   path: .flaught-dismissals.json
 
+# ── Prompt templates ────────────────────────────────────────
+# Override or extend the LLM prompts by dropping files into .flaught-prompt/
+# See https://github.com/flaught/core for the full list of template files.
+# prompt:
+#   enabled: true
+#   path: .flaught-prompt
+
 # ── Exclusions ─────────────────────────────────────────────
 # exclude:
 #   paths:

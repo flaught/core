@@ -35,13 +35,31 @@ npm install -g @flaught/core
 ## Quick start
 
 ```bash
-flaught init                    # scaffold .advreview.yml
+flaught init                    # scaffold .advreview.yml AND .flaught-prompt/
 flaught review                  # full adversarial review vs HEAD~1
 flaught review --base main      # review against main
 flaught review --no-llm         # deterministic tools only (no API key)
 flaught review --output findings.json --quiet   # CI mode
 flaught dismiss D-0002 --artifact findings.json --reason "..." # suppress a false positive, persisted across runs
 ```
+
+### Customize the reviewer
+
+```bash
+# The simplest customization — add team-specific rules:
+cp .flaught-prompt/system-append.md.example .flaught-prompt/system-append.md
+```
+
+```markdown
+<!-- .flaught-prompt/system-append.md -->
+## Our Rules
+
+- Flag any use of eval() — never allowed in our codebase
+- All API endpoints must validate input with a schema library
+- Database queries must use parameterized statements, never string interpolation
+```
+
+You can also override the reviewer's posture, categories, severity definitions, or the entire prompt. **See [Prompt Templates](docs/prompt-templates.md)** for the full guide.
 
 ## Exit codes
 
@@ -69,6 +87,7 @@ Any OpenAI-compatible endpoint works via `base_url`. Anthropic has its own nativ
 ## Documentation
 
 - **[Configuration](docs/configuration.md)** — full `.advreview.yml` reference, LLM providers, noise budget, severity gate, tools, test inversion, scope-creep
+- **[Prompt Templates](docs/prompt-templates.md)** — override or extend the LLM reviewer's posture, categories, rules, and context via `.flaught-prompt/`
 - **[Findings schema](docs/findings-schema.md)** — artifact structure, field definitions, severity levels, categories, dismissal, blast radius
 - **[Dismissals](docs/dismissals.md)** — persisting false-positive suppressions across runs via stable fingerprints, `flaught dismiss`/`dismissals` CLI
 - **[GitHub Actions](docs/github-actions.md)** — three ready-to-use workflows (minimal, full, Ollama) + exit code handling

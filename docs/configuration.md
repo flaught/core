@@ -275,3 +275,64 @@ scope_creep:
 ```
 
 Pass the PR description via `--pr-description` on the CLI. Without a PR description, only heuristic detection runs.
+
+## Prompt templates
+
+The LLM prompt — the posture, categories, severity definitions, output format — is the highest-leverage surface in Flaught. The `.flaught-prompt/` directory lets you override or extend any part of it without forking the code.
+
+```bash
+flaught init    # creates .advreview.yml AND .flaught-prompt/ with example files
+```
+
+The most common customization is `system-append.md` — adding team-specific rules without rewriting the prompt:
+
+```markdown
+<!-- .flaught-prompt/system-append.md -->
+## Acme Corp Rules
+
+- Flag any use of eval() or Function() — these are never allowed
+- All API endpoints must validate input with a schema library (zod, joi, etc.)
+- Database queries must use parameterized statements, never string interpolation
+- Changes to authentication code must include integration tests
+```
+
+### Override vs. append
+
+| File | Mode | What it does |
+|---|---|---|
+| `system.md` | Override | Replaces the **entire** system prompt (supersedes all other files) |
+| `posture.md` | Override | Replaces just the posture/persona section |
+| `categories.md` | Override | Replaces the category definitions |
+| `severity.md` | Override | Replaces the severity definitions |
+| `output-format.md` | Override | Replaces the JSON output format spec |
+| `constraints.md` | Override | Replaces the IMPORTANT constraints |
+| `system-append.md` | Append | Appended to the system prompt (most common!) |
+| `user-append.md` | Append | Appended to the user prompt |
+
+### Template variables
+
+All files support `{{variable}}` interpolation:
+
+| Variable | Produces |
+|---|---|
+| `{{noise_budget}}` | Formatted noise budget from config (e.g. `"  - critical: max 5 findings\n  - high: max 10 findings"`) |
+| `{{categories}}` | Default category definitions (for reference when overriding) |
+| `{{severities}}` | Default severity definitions (for reference when overriding) |
+
+### Config
+
+```yaml
+prompt:
+  enabled: true           # set to false to ignore .flaught-prompt/ entirely
+  path: .flaught-prompt   # relative to repo root, or absolute
+```
+
+### How it works
+
+1. If `system.md` is present, it **replaces the entire** system prompt (other section overrides are ignored)
+2. Otherwise, individual section overrides (`posture.md`, `categories.md`, etc.) replace only their respective sections
+3. `system-append.md` is **always** appended, regardless of mode
+4. `user-append.md` is **always** appended to the user prompt
+5. The noise budget is **always** present — if a full `system.md` override doesn't include it, it's auto-injected
+
+**See [docs/prompt-templates.md](prompt-templates.md) for the complete guide**, including common customizations (security-focused posture, domain-specific categories, project context), full override examples, and the built-in default text.

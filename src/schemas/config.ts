@@ -109,6 +109,15 @@ const DismissalsSchema = z.object({
   path: z.string().default(".flaught-dismissals.json"),
 });
 
+// ─── Prompt templates ──────────────────────────────────────────────────────
+
+const PromptSchema = z.object({
+  /** Enable prompt template overrides from .flaught-prompt/ directory */
+  enabled: z.boolean().default(true),
+  /** Path to prompt templates directory, relative to repo root (or absolute) */
+  path: z.string().default(".flaught-prompt"),
+});
+
 // ─── Exclusions ─────────────────────────────────────────────────────────────
 
 const ExcludeSchema = z.object({
@@ -135,6 +144,7 @@ export const FlaughtConfigSchema = z.object({
   noise_budget: NoiseBudgetSchema.default({}),
   severity_gate: SeverityGateSchema.default({}),
   dismissals: DismissalsSchema.default({}),
+  prompt: PromptSchema.default({}),
   exclude: ExcludeSchema.default({}),
 });
 

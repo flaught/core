@@ -168,6 +168,51 @@ const updated = addDismissal(store, {
 saveDismissalStore(dismissalsPath, updated);
 ```
 
+## Prompt templates
+
+The prompt template system is fully accessible from the API. See [`docs/prompt-templates.md`](prompt-templates.md) for the full guide.
+
+```typescript
+import {
+  loadTemplates,
+  assembleSystemPrompt,
+  buildSystemPrompt,
+  buildUserPrompt,
+  initPromptTemplates,
+  buildTemplateVariables,
+  NO_TEMPLATES,
+  DEFAULT_POSTURE,
+  DEFAULT_CATEGORIES,
+  DEFAULT_SEVERITY,
+  DEFAULT_OUTPUT_FORMAT,
+  DEFAULT_CONSTRAINTS,
+  type PromptTemplates,
+  type TemplateVariables,
+} from "@flaught/core";
+
+// Load templates from .flaught-prompt/
+const templates = loadTemplates(repoRoot, config);
+
+// Build prompts with template overrides
+const systemPrompt = buildSystemPrompt(config, templates);
+const userPrompt = buildUserPrompt(context, config, prDescription, templates);
+
+// Use NO_TEMPLATES for built-in defaults
+const defaultPrompt = buildSystemPrompt(config, NO_TEMPLATES);
+
+// Scaffold the template directory
+const dir = initPromptTemplates("/path/to/repo");
+
+// Access built-in defaults for reference
+console.log(DEFAULT_POSTURE);
+console.log(DEFAULT_CATEGORIES);
+
+// Build template variables for interpolation
+const vars = buildTemplateVariables(config);
+console.log(vars.noise_budget);
+// "  - critical: max 5 findings\n  - high: max 10 findings\n  ..."
+```
+
 ## Error handling
 
 Flaught throws custom error classes with actionable messages:

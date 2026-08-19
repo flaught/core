@@ -28,13 +28,14 @@ import {
   resolveDismissalsPath,
   isExpired,
 } from "./dismissals/store.js";
+import { initPromptTemplates } from "./prompt/templates.js";
 
 const program = new Command();
 
 program
   .name("flaught")
   .description("Adversarial PR/code review tool — structured, skeptical scrutiny for CI")
-  .version("0.4.1");
+  .version("0.5.0");
 
 program
   .command("init")
@@ -43,6 +44,11 @@ program
   .action((opts) => {
     const filePath = initConfig(opts.dir);
     console.log(`Created ${filePath}`);
+
+    // Also scaffold .flaught-prompt/ with example template files
+    const promptDir = initPromptTemplates(opts.dir);
+    console.log(`Created ${promptDir}/ with example template files`);
+    console.log(`\nEdit the .example files to customize prompts. Remove .example to activate a template.`);
   });
 
 program

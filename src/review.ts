@@ -8,6 +8,7 @@ import { loadConfig } from "./config.js";
 import type { FlaughtConfig } from "./schemas/config.js";
 import { createProvider, type LLMReviewResult } from "./llm/provider.js";
 import { buildSystemPrompt, buildUserPrompt } from "./llm/prompt.js";
+import { loadTemplates } from "./prompt/templates.js";
 import {
   type FindingsArtifact,
   type Finding,
@@ -88,6 +89,15 @@ export async function runReview(options: ReviewOptions = {}): Promise<ReviewResu
     headRef: options.headRef,
     configPath: options.configPath,
   });
+
+  // 2b. Load prompt templates
+  const templates = loadTemplates(context.repoRoot, config);
+  const activeTemplates = Object.entries(templates)
+    .filter(([, v]) => v !== null)
+    .map(([k]) => k);
+  if (activeTemplates.length > 0) {
+    progress(`Loaded ${activeTemplates.length} prompt template override(s): ${activeTemplates.join(", ")}`);
+  }
 
   progress(`  Base: ${context.baseSha.slice(0, 8)} → Head: ${context.headSha.slice(0, 8)}`);
   progress(`  Changed files: ${context.changedFiles.length}`);
@@ -183,8 +193,8 @@ export async function runReview(options: ReviewOptions = {}): Promise<ReviewResu
     progress("No changes to review — skipping LLM call.");
   } else {
     const provider = createProvider(config);
-    const systemPrompt = buildSystemPrompt(config);
-    const userPrompt = buildUserPrompt(context, config, options.prDescription);
+    const systemPrompt = buildSystemPrompt(config, templates);
+    const userPrompt = buildUserPrompt(context, config, options.prDescription, templates);
 
     // Inject deterministic tool findings into the prompt
     const toolContext = formatToolFindingsForPrompt(deterministicFindings);

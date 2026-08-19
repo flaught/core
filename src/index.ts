@@ -12,6 +12,21 @@ export type { FindingsArtifact, Finding, FindingEvidence, Severity, Category, So
 export { SCHEMA_VERSION, FINDINGS_SCHEMA_URL, CAVEAT } from "./schemas/findings.js";
 export { createProvider, type LLMProvider, type LLMReviewResult, parseFindingsFromLLM } from "./llm/provider.js";
 export { buildSystemPrompt, buildUserPrompt } from "./llm/prompt.js";
+export {
+  loadTemplates,
+  initPromptTemplates,
+  assembleSystemPrompt,
+  assembleUserAppend,
+  buildTemplateVariables,
+  NO_TEMPLATES,
+  DEFAULT_POSTURE,
+  DEFAULT_CATEGORIES,
+  DEFAULT_SEVERITY,
+  DEFAULT_OUTPUT_FORMAT,
+  DEFAULT_CONSTRAINTS,
+  type PromptTemplates,
+  type TemplateVariables,
+} from "./prompt/templates.js";
 export { runReview, type ReviewResult, type ReviewOptions, type ProgressCallback } from "./review.js";
 export { renderMarkdownReport } from "./report/markdown.js";
 export { renderJsonArtifact } from "./report/json.js";

@@ -1,6 +1,6 @@
 {
   "name": "@flaught/core",
-  "version": "0.4.1",
+  "version": "0.5.0",
   "description": "Adversarial PR/code review tool — structured, skeptical scrutiny for CI",
   "main": "dist/index.js",
   "bin": {

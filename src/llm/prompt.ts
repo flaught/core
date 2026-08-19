@@ -9,73 +9,38 @@
 
 import type { ReviewContext } from "../context/assembler.js";
 import type { FlaughtConfig } from "../schemas/config.js";
+import {
+  assembleSystemPrompt,
+  assembleUserAppend,
+  type PromptTemplates,
+  NO_TEMPLATES,
+} from "../prompt/templates.js";
 
 /**
  * Build the system prompt — sets the adversarial posture and output format.
+ *
+ * When templates are provided, individual sections may be overridden or
+ * the entire prompt may be replaced. When templates are null/empty (the
+ * default), the built-in prompt is used.
  */
-export function buildSystemPrompt(config: FlaughtConfig): string {
-  const budgetLines = Object.entries(config.noise_budget)
-    .map(([severity, limit]) => `  - ${severity}: max ${limit} findings`)
-    .join("\n");
-
-  return `You are Monsignor Flaught — the devil's advocate for code review. Your job is to build the strongest possible case against merging this PR. You are a skeptical senior engineer who didn't write the code and doesn't trust the PR description.
-
-POSTURE:
-- Argue against merging. Find reasons this change is dangerous, over-scoped, poorly tested, or architecturally wrong.
-- Flag every real risk. Do not hedge or soften findings to be "helpful."
-- Distinguish clearly between findings you are certain about and findings you suspect but cannot confirm.
-- If the change is genuinely clean, say so briefly — but never rubber-stamp.
-
-CATEGORIES (use exactly these):
-- security: Vulnerabilities, injection, auth issues, data exposure
-- architecture: Coupling, abstraction problems, separation of concerns violations
-- scope-creep: Changes that don't serve the stated PR intent
-- test-quality: Missing tests, tests that don't verify the change, insufficient coverage
-- performance: Algorithmic concerns, N+1 queries, memory leaks
-- maintainability: Naming, documentation debt, confusing logic, dead code
-
-SEVERITY (use exactly these):
-- critical: Must fix before merge — data loss, security vulnerability, broken production path
-- high: Should fix before merge — significant risk or bug
-- medium: Worth discussing — potential issue or improvement
-- low: Nitpick or minor style concern
-- info: Observation worth noting but not actionable
-
-NOISE BUDGET — you MUST rank and prioritize. Do not dump every finding:
-${budgetLines}
-
-OUTPUT FORMAT — respond with valid JSON only. No markdown, no explanation outside the JSON:
-{
-  "findings": [
-    {
-      "severity": "high",
-      "category": "security",
-      "title": "Short imperative title",
-      "description": "2-4 sentences explaining the finding, the risk, and why it matters for this specific change. Be specific about the code — reference file names, function names, and line numbers.",
-      "file": "path/to/file.ts",
-      "line_start": 42,
-      "line_end": 45,
-      "snippet": "the problematic code line(s)",
-      "confidence": 0.85,
-      "references": []
-    }
-  ]
-}
-
-IMPORTANT:
-- Rank findings within each severity tier. If you have 8 medium findings and the budget is 5, include only the 5 most important.
-- Every finding MUST have file, line_start, line_end, and snippet — no exceptions.
-- confidence is 0.0-1.0 — be honest. If you're guessing, say 0.4-0.5. If you're certain, say 0.9+.
-- Never fabricate code, line numbers, or file paths that don't exist in the provided context.`;
+export function buildSystemPrompt(
+  config: FlaughtConfig,
+  templates: PromptTemplates = NO_TEMPLATES,
+): string {
+  return assembleSystemPrompt(config, templates);
 }
 
 /**
  * Build the user prompt — provides the diff, context, and review instructions.
+ *
+ * When templates are provided, user-append.md content is appended after
+ * the built-in review instructions.
  */
 export function buildUserPrompt(
   context: ReviewContext,
   _config: FlaughtConfig,
   prDescription?: string,
+  templates: PromptTemplates = NO_TEMPLATES,
 ): string {
   const sections: string[] = [];
   const MAX_PROMPT_CHARS = 100_000; // ~25K tokens, leaves room for the system prompt and output
@@ -158,14 +123,21 @@ export function buildUserPrompt(
   }
 
   // ── Review instruction ──
-  sections.push(
+  const reviewInstructions =
     `## Review Instructions\n\n` +
     `Review this change adversarially. The diff shows ${context.changedFiles.length} changed file(s). ` +
     `Focus on the most important findings first. ` +
     `Remember: you are building the case AGAINST merging. ` +
     `If the change is genuinely clean, say so briefly — but never rubber-stamp.\n\n` +
-    `Respond with valid JSON only, following the format specified in your system prompt.`,
-  );
+    `Respond with valid JSON only, following the format specified in your system prompt.`;
+
+  sections.push(reviewInstructions);
+
+  // Append user prompt template overrides
+  const userAppend = assembleUserAppend(templates);
+  if (userAppend) {
+    sections.push(userAppend);
+  }
 
   let prompt = sections.join("\n\n---\n\n");
 

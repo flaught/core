@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import { buildSystemPrompt, buildUserPrompt } from "./prompt.js";
 import { FlaughtConfigSchema } from "../schemas/config.js";
 import type { ReviewContext } from "../context/assembler.js";
+import { NO_TEMPLATES, type PromptTemplates } from "../prompt/templates.js";
 
 describe("buildSystemPrompt", () => {
   it("includes the adversarial posture", () => {
@@ -55,6 +56,32 @@ describe("buildSystemPrompt", () => {
     expect(prompt).toContain("medium");
     expect(prompt).toContain("low");
     expect(prompt).toContain("info");
+  });
+
+  it("accepts template overrides", () => {
+    const config = FlaughtConfigSchema.parse({});
+    const templates: PromptTemplates = {
+      ...NO_TEMPLATES,
+      systemAppend: "## Team Rules\n- No eval() allowed",
+    };
+
+    const prompt = buildSystemPrompt(config, templates);
+
+    expect(prompt).toContain("devil's advocate"); // built-in still present
+    expect(prompt).toContain("No eval() allowed"); // appended
+  });
+
+  it("uses full system override when provided", () => {
+    const config = FlaughtConfigSchema.parse({});
+    const templates: PromptTemplates = {
+      ...NO_TEMPLATES,
+      system: "You are a custom security reviewer.",
+    };
+
+    const prompt = buildSystemPrompt(config, templates);
+
+    expect(prompt).toContain("custom security reviewer");
+    expect(prompt).toContain("NOISE BUDGET"); // auto-injected
   });
 });
 
@@ -148,5 +175,35 @@ describe("buildUserPrompt", () => {
     expect(prompt).toContain("Review Instructions");
     expect(prompt).toContain("adversarially");
     expect(prompt).toContain("valid JSON");
+  });
+
+  it("appends user-append template content", () => {
+    const config = FlaughtConfigSchema.parse({});
+    const context = mockContext();
+    const templates: PromptTemplates = {
+      ...NO_TEMPLATES,
+      userAppend: "Our project uses event-sourcing. Flag any direct DB writes.",
+    };
+
+    const prompt = buildUserPrompt(context, config, undefined, templates);
+
+    expect(prompt).toContain("event-sourcing");
+    expect(prompt).toContain("Flag any direct DB writes");
+  });
+
+  it("appends user-append after review instructions", () => {
+    const config = FlaughtConfigSchema.parse({});
+    const context = mockContext();
+    const templates: PromptTemplates = {
+      ...NO_TEMPLATES,
+      userAppend: "## Team Rules\n- All inputs must be validated",
+    };
+
+    const prompt = buildUserPrompt(context, config, undefined, templates);
+    const reviewIdx = prompt.indexOf("Review Instructions");
+    const appendIdx = prompt.indexOf("Team Rules");
+
+    expect(reviewIdx).toBeGreaterThan(-1);
+    expect(appendIdx).toBeGreaterThan(reviewIdx);
   });
 });
