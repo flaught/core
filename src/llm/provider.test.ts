@@ -222,6 +222,22 @@ describe("createProvider", () => {
     expect(provider.model).toBe("codellama");
   });
 
+  it("creates an Ollama Cloud provider when api_key_env is explicitly configured", () => {
+    const config = FlaughtConfigSchema.parse({
+      llm: {
+        provider: "ollama",
+        model: "glm-5.2:cloud",
+        base_url: "https://ollama.com",
+        api_key_env: "OLLAMA_API_KEY",
+      },
+    });
+    process.env.OLLAMA_API_KEY = "ollama-cloud-test-key";
+    const provider = createProvider(config);
+    expect(provider).toBeInstanceOf(OllamaProvider);
+    expect(provider.model).toBe("glm-5.2:cloud");
+    delete process.env.OLLAMA_API_KEY;
+  });
+
   it("creates a Gemini provider (OpenAI-compatible endpoint)", () => {
     const config = FlaughtConfigSchema.parse({
       llm: { provider: "gemini", model: "gemini-1.5-pro" },
@@ -396,5 +412,117 @@ describe("AnthropicProvider", () => {
     });
 
     await expect(provider.review("system", "user")).rejects.toThrow(/ANTHROPIC_API_KEY/);
+  });
+});
+
+describe("OllamaProvider — Ollama Cloud auth", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    delete process.env.OLLAMA_API_KEY;
+    delete process.env.OPENAI_API_KEY;
+  });
+
+  function mockFetchOnce(responseBody: unknown, ok = true): ReturnType<typeof vi.fn> {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok,
+      status: ok ? 200 : 401,
+      json: async () => responseBody,
+    } as Response);
+    vi.stubGlobal("fetch", fetchMock);
+    return fetchMock;
+  }
+
+  it("sends Authorization: Bearer when a cloud API key is configured", async () => {
+    const fetchMock = mockFetchOnce({
+      message: { content: '{"findings":[]}' },
+      prompt_eval_count: 40,
+      eval_count: 8,
+    });
+
+    const provider = new OllamaProvider({
+      baseUrl: "https://ollama.com",
+      model: "glm-5.2:cloud",
+      temperature: 0.2,
+      timeoutSeconds: 30,
+      apiKey: "ollama-cloud-test-key",
+      apiKeyEnvVar: "OLLAMA_API_KEY",
+    });
+
+    await provider.review("system prompt", "user prompt");
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const [url, init] = fetchMock.mock.calls[0]! as [string, RequestInit];
+    expect(url).toBe("https://ollama.com/api/chat");
+    const headers = init.headers as Record<string, string>;
+    expect(headers.Authorization).toBe("Bearer ollama-cloud-test-key");
+  });
+
+  it("sends no Authorization header for local usage (no apiKey configured)", async () => {
+    const fetchMock = mockFetchOnce({
+      message: { content: '{"findings":[]}' },
+    });
+
+    const provider = new OllamaProvider({
+      baseUrl: "http://localhost:11434",
+      model: "codellama",
+      temperature: 0.2,
+      timeoutSeconds: 30,
+    });
+
+    await provider.review("system prompt", "user prompt");
+
+    const [, init] = fetchMock.mock.calls[0]! as [string, RequestInit];
+    const headers = init.headers as Record<string, string>;
+    expect(headers.Authorization).toBeUndefined();
+  });
+
+  it("createProvider does not leak an ambient OPENAI_API_KEY into Ollama requests when api_key_env was never configured", async () => {
+    process.env.OPENAI_API_KEY = "sk-should-not-leak";
+    const config = FlaughtConfigSchema.parse({
+      llm: { provider: "ollama", model: "codellama" }, // api_key_env left at its default
+    });
+    const provider = createProvider(config) as OllamaProvider;
+
+    const fetchMock = mockFetchOnce({ message: { content: '{"findings":[]}' } });
+    await provider.review("system", "user");
+
+    const [, init] = fetchMock.mock.calls[0]! as [string, RequestInit];
+    const headers = init.headers as Record<string, string>;
+    expect(headers.Authorization).toBeUndefined();
+  });
+
+  it("createProvider attaches the key when api_key_env is explicitly set for Ollama Cloud", async () => {
+    process.env.OLLAMA_API_KEY = "ollama-cloud-real-key";
+    const config = FlaughtConfigSchema.parse({
+      llm: {
+        provider: "ollama",
+        model: "glm-5.2:cloud",
+        base_url: "https://ollama.com",
+        api_key_env: "OLLAMA_API_KEY",
+      },
+    });
+    const provider = createProvider(config) as OllamaProvider;
+
+    const fetchMock = mockFetchOnce({ message: { content: '{"findings":[]}' } });
+    await provider.review("system", "user");
+
+    const [, init] = fetchMock.mock.calls[0]! as [string, RequestInit];
+    const headers = init.headers as Record<string, string>;
+    expect(headers.Authorization).toBe("Bearer ollama-cloud-real-key");
+  });
+
+  it("classifies a 401 with the configured env var in the message for Ollama Cloud", async () => {
+    mockFetchOnce({ error: "Unauthorized" }, false);
+
+    const provider = new OllamaProvider({
+      baseUrl: "https://ollama.com",
+      model: "glm-5.2:cloud",
+      temperature: 0.2,
+      timeoutSeconds: 30,
+      apiKey: "bad-key",
+      apiKeyEnvVar: "OLLAMA_API_KEY",
+    });
+
+    await expect(provider.review("system", "user")).rejects.toThrow(/OLLAMA_API_KEY/);
   });
 });

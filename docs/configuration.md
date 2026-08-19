@@ -161,6 +161,25 @@ ollama serve   # start the Ollama server
 flaught review
 ```
 
+### Ollama Cloud
+
+Same `ollama` provider, same `/api/chat` request shape — Ollama Cloud (`:cloud`-tagged models, e.g. `glm-5.2:cloud`) just points `base_url` at `https://ollama.com` and adds an `Authorization: Bearer` header via `api_key_env`. No local server, no GPU, no model download — it's a plain hosted API call, same as any other provider.
+
+```yaml
+llm:
+  provider: ollama
+  model: glm-5.2:cloud
+  base_url: https://ollama.com
+  api_key_env: OLLAMA_API_KEY
+```
+
+```bash
+export OLLAMA_API_KEY=...   # generate at ollama.com/settings/keys
+flaught review
+```
+
+`api_key_env` must be set explicitly to enable this — a bare `provider: ollama` with no `api_key_env` never sends an `Authorization` header, even if `OPENAI_API_KEY` (the config schema's unrelated default) happens to be set in your shell. This is deliberate: it stops an ambient key meant for a different provider from silently leaking to whatever `base_url` your Ollama config points at.
+
 ### Custom OpenAI-compatible endpoint
 
 Any OpenAI-compatible API can be used by setting `base_url`:

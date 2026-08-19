@@ -154,9 +154,71 @@ Set `provider: anthropic` and `model: claude-sonnet-5` (or `claude-opus-5`, `cla
 
 No other workflow changes needed — just make sure `.advreview.yml` sets `llm.api_key_env: ANTHROPIC_API_KEY` (the config default is `OPENAI_API_KEY` regardless of provider, so this must be set explicitly) and the `env:` var above matches it.
 
-## Using Ollama in CI
+## Using Ollama Cloud in CI
 
-For teams that want LLM review without sending code to external APIs:
+The simplest option if you want Ollama's model catalog without running anything yourself. Ollama Cloud (`:cloud`-tagged models) is a plain hosted HTTPS API — no `services:` container, no health check, no model pull step, no GPU/CPU limits to worry about on the runner:
+
+```yaml
+# .github/workflows/adversarial-review.yml
+name: Adversarial Review (Ollama Cloud)
+
+on:
+  pull_request:
+
+jobs:
+  review:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install Flaught
+        run: npm install -g @flaught/core
+
+      - name: Install Semgrep
+        run: pip install semgrep
+
+      - name: Run adversarial review
+        env:
+          OLLAMA_API_KEY: ${{ secrets.OLLAMA_API_KEY }}
+        run: |
+          flaught review \
+            --base origin/${{ github.base_ref }} \
+            --head HEAD \
+            --output findings.json \
+            --pr-description "${{ github.event.pull_request.title }}" \
+            --quiet
+        continue-on-error: true
+
+      - name: Upload findings
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: flaught-findings
+          path: findings.json
+```
+
+With this `.advreview.yml`:
+
+```yaml
+version: 1
+llm:
+  provider: ollama
+  model: glm-5.2:cloud
+  base_url: https://ollama.com
+  api_key_env: OLLAMA_API_KEY
+```
+
+Generate the key at `ollama.com/settings/keys` and add it as the `OLLAMA_API_KEY` repository secret (Settings → Secrets and variables → Actions).
+
+## Using self-hosted Ollama in CI
+
+For teams that want LLM review without sending code to *any* external API — including Ollama's own cloud — by running the model in a container on the runner itself:
 
 ```yaml
 # .github/workflows/adversarial-review.yml

@@ -61,9 +61,10 @@ Switch with zero code changes — just update `.advreview.yml`:
 | **Groq** | `provider: groq`, `model: llama-3.1-70b-versatile` |
 | **Gemini** | `provider: gemini`, `model: gemini-1.5-pro` |
 | **Anthropic (Claude)** | `provider: anthropic`, `model: claude-sonnet-5` |
-| **Ollama** | `provider: ollama`, `model: codellama` |
+| **Ollama** (local) | `provider: ollama`, `model: codellama` |
+| **Ollama Cloud** | `provider: ollama`, `model: glm-5.2:cloud`, `base_url: https://ollama.com`, `api_key_env: OLLAMA_API_KEY` |
 
-Any OpenAI-compatible endpoint works via `base_url`. Anthropic has its own native adapter (its Messages API isn't OpenAI-compatible) — `model` and `base_url` are both free-form, so any current/future Claude model or Messages-API-compatible proxy works without a code change.
+Any OpenAI-compatible endpoint works via `base_url`. Anthropic has its own native adapter (its Messages API isn't OpenAI-compatible) — `model` and `base_url` are both free-form, so any current/future Claude model or Messages-API-compatible proxy works without a code change. Ollama Cloud reuses the same local adapter (same `/api/chat` shape) with an added `Authorization: Bearer` header — no GPU, no container, just a hosted API call.
 
 ## Documentation
 

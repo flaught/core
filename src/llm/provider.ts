@@ -155,14 +155,24 @@ export function createProvider(config: FlaughtConfig): LLMProvider {
         timeoutSeconds: config.llm.timeout_seconds,
       });
 
-    case "ollama":
-      // Ollama doesn't need an API key, but check if the server is reachable
+    case "ollama": {
+      // Local Ollama needs no API key. Ollama Cloud (:cloud-tagged models,
+      // base_url: https://ollama.com) needs Authorization: Bearer — same
+      // /api/chat endpoint shape either way. Only attach a key when the
+      // user has explicitly pointed api_key_env somewhere other than the
+      // schema's default ("OPENAI_API_KEY") — otherwise a user who has
+      // OPENAI_API_KEY set for unrelated reasons would silently leak it as
+      // a bearer header to whatever base_url their Ollama config points at.
+      const ollamaApiKeyConfigured = config.llm.api_key_env !== "OPENAI_API_KEY";
       return new OllamaProvider({
         baseUrl: config.llm.base_url ?? "http://localhost:11434",
         model: config.llm.model,
         temperature: config.llm.temperature,
         timeoutSeconds: config.llm.timeout_seconds,
+        apiKey: ollamaApiKeyConfigured ? (apiKey || undefined) : undefined,
+        apiKeyEnvVar: config.llm.api_key_env,
       });
+    }
 
     default:
       throw new LLMError(
@@ -410,6 +420,14 @@ export interface OllamaConfig {
   model: string;
   temperature: number;
   timeoutSeconds: number;
+  /**
+   * Optional — the local Ollama server has no auth, but Ollama Cloud
+   * (`:cloud`-tagged models, served from https://ollama.com) requires an
+   * `Authorization: Bearer` header. Same endpoint shape (/api/chat) either
+   * way; only the header changes. Leave unset for local usage.
+   */
+  apiKey?: string;
+  apiKeyEnvVar?: string;
 }
 
 export class OllamaProvider implements LLMProvider {
@@ -442,13 +460,19 @@ export class OllamaProvider implements LLMProvider {
       format: "json",
     };
 
+    const isCloud = Boolean(this.config.apiKey);
+    const headers: Record<string, string> = { "Content-Type": "application/json" };
+    if (this.config.apiKey) {
+      headers.Authorization = `Bearer ${this.config.apiKey}`;
+    }
+
     let response: Response;
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), this.config.timeoutSeconds * 1000);
     try {
       response = await fetch(url, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers,
         body: JSON.stringify(body),
         signal: controller.signal,
       });
@@ -470,8 +494,10 @@ export class OllamaProvider implements LLMProvider {
         `Could not reach Ollama at ${this.config.baseUrl}.\n\n` +
         `This usually means:\n` +
         `  • The model name is misspelled in .advreview.yml\n` +
-        `  • Ollama is not running — start it with: ollama serve\n` +
-        `  • The base_url in your config is wrong\n\n` +
+        (isCloud
+          ? `  • ollama.com is unreachable, or the base_url in your config is wrong\n\n`
+          : `  • Ollama is not running — start it with: ollama serve\n` +
+            `  • The base_url in your config is wrong\n\n`) +
         `Run with --no-llm to skip the LLM review entirely.`,
         this.name,
         this.model,
@@ -482,7 +508,13 @@ export class OllamaProvider implements LLMProvider {
 
     if (!response.ok) {
       clearTimeout(timeout);
-      throw await classifyHttpError(response, this.config.baseUrl, this.config.model, this.name, null);
+      throw await classifyHttpError(
+        response,
+        this.config.baseUrl,
+        this.config.model,
+        this.name,
+        isCloud ? (this.config.apiKeyEnvVar ?? null) : null,
+      );
     }
 
     const data = await response.json() as {
