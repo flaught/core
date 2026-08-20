@@ -105,7 +105,7 @@ flaught review
 ```yaml
 llm:
   provider: groq
-  model: llama-3.1-70b-versatile
+  model: groq/compound-mini
   api_key_env: GROQ_API_KEY
 ```
 

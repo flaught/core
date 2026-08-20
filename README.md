@@ -34,14 +34,37 @@ npm install -g @flaught/core
 
 ## Quick start
 
+Pick your environment and paste:
+
+### Terminal
+
 ```bash
-flaught init                    # scaffold .advreview.yml AND .flaught-prompt/
+flaught init                    # scaffold .advreview.yml + .flaught-prompt/
 flaught review                  # full adversarial review vs HEAD~1
 flaught review --base main      # review against main
 flaught review --no-llm         # deterministic tools only (no API key)
 flaught review --output findings.json --quiet   # CI mode
 flaught dismiss D-0002 --artifact findings.json --reason "..." # suppress a false positive, persisted across runs
 ```
+
+### pi.dev
+
+```
+Run Flaught on this project. Install it globally (npm install -g @flaught/core),
+run `flaught init` to scaffold config, then `flaught review --base main`.
+If the review finds issues, fix them and re-run until it's clean.
+```
+
+### Claude Code / Codex / Cursor
+
+```bash
+# Paste this into your session:
+npm install -g @flaught/core && flaught init && flaught review --base main
+```
+
+### GitHub Actions
+
+Add `.github/workflows/adversarial-review.yml` — see [GitHub Actions docs](docs/github-actions.md) for the full workflow, or start with the minimal version:
 
 ### Customize the reviewer
 
@@ -76,7 +99,7 @@ Switch with zero code changes — just update `.advreview.yml`:
 | Provider | Config |
 |---|---|
 | **OpenAI** | `provider: openai`, `model: gpt-4o` |
-| **Groq** | `provider: groq`, `model: llama-3.1-70b-versatile` |
+| **Groq** | `provider: groq`, `model: groq/compound-mini` |
 | **Gemini** | `provider: gemini`, `model: gemini-1.5-pro` |
 | **Anthropic (Claude)** | `provider: anthropic`, `model: claude-sonnet-5` |
 | **Ollama** (local) | `provider: ollama`, `model: codellama` |
