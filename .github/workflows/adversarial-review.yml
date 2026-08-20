@@ -24,7 +24,7 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22
 
       - name: Install Flaught
         run: npm install -g @flaught/core
@@ -41,11 +41,12 @@ jobs:
           GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
         run: |
           set +e
+          PR_DESC="${{ github.event.pull_request.title }}"
           flaught review \
-            --base origin/${{ github.base_ref }} \
+            --base "origin/${{ github.base_ref }}" \
             --head HEAD \
             --output findings.json \
-            --pr-description "${{ github.event.pull_request.title }}: ${{ github.event.pull_request.body }}" \
+            --pr-description "$PR_DESC" \
             --quiet
           EXIT_CODE=$?
           echo "exit_code=$EXIT_CODE" >> "$GITHUB_OUTPUT"
@@ -64,12 +65,13 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          # Re-render the markdown report from the review
+          # Re-render the markdown report (no LLM cost, just deterministic findings)
+          PR_DESC="${{ github.event.pull_request.title }}"
           BODY=$(flaught review \
-            --base origin/${{ github.base_ref }} \
+            --base "origin/${{ github.base_ref }}" \
             --head HEAD \
             --no-llm \
-            --pr-description "${{ github.event.pull_request.title }}: ${{ github.event.pull_request.body }}" \
+            --pr-description "$PR_DESC" \
             --quiet 2>/dev/null || echo "Review could not be rendered.")
 
           if [ -f findings.json ]; then
