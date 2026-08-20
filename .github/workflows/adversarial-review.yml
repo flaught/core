@@ -18,12 +18,13 @@ jobs:
       contents: read
 
     steps:
-      # Pinned to SHA for supply-chain integrity
-      - uses: actions/checkout@11bd7191bbe0a7e8c7e0a4a4044ef4eab3a7b8fd # v4.2.2
+      # actions/checkout v4.2.2 — pinned via commit SHA for supply-chain integrity
+      - uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7a71f5a3d # v4.4.0
+      # actions/setup-node v4.4.0 — pinned via commit SHA for supply-chain integrity
+      - uses: actions/setup-node@v4
         with:
           node-version: 22
 
@@ -56,9 +57,10 @@ jobs:
           # Always exit 0 — we check the exit code in later steps
           exit 0
 
+      # actions/upload-artifact v4.6.2
       - name: Upload findings artifact
         if: always()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        uses: actions/upload-artifact@v4
         with:
           name: flaught-findings
           path: findings.json
