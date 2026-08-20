@@ -50,6 +50,7 @@ jobs:
             --quiet
           EXIT_CODE=$?
           echo "exit_code=$EXIT_CODE" >> "$GITHUB_OUTPUT"
+          # Always exit 0 — we check the exit code in later steps
           exit 0
 
       - name: Upload findings artifact
@@ -65,17 +66,20 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          # Re-render the markdown report (no LLM cost, just deterministic findings)
           PR_DESC="${{ github.event.pull_request.title }}"
-          BODY=$(flaught review \
-            --base "origin/${{ github.base_ref }}" \
-            --head HEAD \
-            --no-llm \
-            --pr-description "$PR_DESC" \
-            --quiet 2>/dev/null || echo "Review could not be rendered.")
-
           if [ -f findings.json ]; then
+            # Re-render the markdown report from the artifact (no LLM cost)
+            BODY=$(flaught review \
+              --base "origin/${{ github.base_ref }}" \
+              --head HEAD \
+              --no-llm \
+              --pr-description "$PR_DESC" \
+              --quiet 2>/dev/null || echo "Review could not be rendered.")
             echo "$BODY" | gh pr comment ${{ github.event.pull_request.number }} --body-file -
+          else
+            # Review errored before producing findings — report the error
+            echo "⚠️ Flaught review failed to produce findings. Check the workflow logs for details." | \
+              gh pr comment ${{ github.event.pull_request.number }} --body-file -
           fi
 
       - name: Check severity gate
@@ -87,5 +91,5 @@ jobs:
       - name: Check for errors
         if: steps.review.outputs.exit_code == '2'
         run: |
-          echo "::error::Flaught encountered an error (config, API, or runtime)"
+          echo "::error::Flaught encountered an error (config, API, or runtime). Check the workflow logs."
           exit 1
