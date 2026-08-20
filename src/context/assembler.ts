@@ -204,6 +204,7 @@ function isExcluded(
       .replace(/§§/g, ".*") // ** matches anything including /
       .replace(/\?/g, "[^/]");
 
+    // nosemgrep: javascript.lang.security.audit.detect-non-literal-regexp — glob patterns come from config, not user input
     const regex = new RegExp(`^${globRegex}$`);
     if (regex.test(filePath)) return true;
   }
@@ -211,6 +212,7 @@ function isExcluded(
   // Check regex patterns
   for (const pattern of excludePatterns) {
     try {
+      // nosemgrep: javascript.lang.security.audit.detect-non-literal-regexp — patterns come from config, not user input
       const regex = new RegExp(pattern);
       if (regex.test(filePath)) return true;
     } catch {
