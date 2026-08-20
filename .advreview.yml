@@ -1,84 +1,63 @@
 # Flaught adversarial review configuration
-# See https://github.com/flaught/core for full documentation
+# https://github.com/flaught/core
 
 version: 1
 
-# ── Stack declaration ──────────────────────────────────────
-# Omit to auto-detect from repo contents (package.json, requirements.txt, etc.)
-# stack:
-#   languages: [python, typescript]
-#   frameworks: [fastapi, react]
-#   runtime: node  # node | python | mixed | auto
-
 # ── LLM provider ───────────────────────────────────────────
+# Groq: fast, cheap, OpenAI-compatible API. Requires GROQ_API_KEY secret.
 llm:
-  provider: openai          # openai | groq | gemini | anthropic | ollama
-  model: gpt-4o             # e.g. claude-sonnet-5 for anthropic
-  api_key_env: OPENAI_API_KEY   # e.g. ANTHROPIC_API_KEY for anthropic
-  # base_url: null          # override for OpenAI-compatible endpoints, or an
-                             # Anthropic Messages-API-compatible proxy/gateway
+  provider: groq
+  model: llama-3.3-70b-versatile
+  api_key_env: GROQ_API_KEY
   temperature: 0.2
   max_tokens: 4096
-  timeout_seconds: 120     # timeout for LLM API calls
+  timeout_seconds: 120
 
 # ── Deterministic tools ────────────────────────────────────
-# tools:
-#   semgrep:
-#     enabled: true
-#     # config: path/to/semgrep-rules.yml
-#   linter:
-#     enabled: true
-#     # command: eslint  # override auto-detected linter
-#   vuln_scanner:
-#     enabled: true
-#     # command: npm audit  # override auto-detected scanner
+tools:
+  semgrep:
+    enabled: true
+  linter:
+    enabled: true
+  vuln_scanner:
+    enabled: true
 
 # ── Test inversion ──────────────────────────────────────────
-# test_inversion:
-#   enabled: true
-#   # command: pytest  # override auto-detected test command
+test_inversion:
+  enabled: true
 
 # ── Scope-creep detection ─────────────────────────────────
-# scope_creep:
-#   enabled: true
-#   intent_source: pr_description  # pr_description | linked_issue | both
+scope_creep:
+  enabled: true
+  intent_source: pr_description
 
-# ── Lighthouse (optional, degrades cleanly) ─────────────────
-# lighthouse:
-#   enabled: false
-#   # preview_url: https://deploy-preview-42.example.com
-
-# ── Noise budget ───────────────────────────────────────────
-# noise_budget:
-#   critical: 5
-#   high: 10
-#   medium: 15
-#   low: 20
-#   info: 25
+# ── Noise budget ────────────────────────────────────────────
+noise_budget:
+  critical: 3
+  high: 5
+  medium: 10
+  low: 15
+  info: 20
 
 # ── Severity gate ──────────────────────────────────────────
-# severity_gate:
-#   fail_on: high  # none | critical | high | medium
+severity_gate:
+  fail_on: high
 
 # ── Dismissals ───────────────────────────────────────────────
-# Findings matching an entry in the dismissal store (see `flaught dismiss`)
-# are auto-marked dismissed on every subsequent run and excluded from the
-# severity gate.
-# dismissals:
-#   enabled: true
-#   path: .flaught-dismissals.json
+dismissals:
+  enabled: true
+  path: .flaught-dismissals.json
 
 # ── Prompt templates ────────────────────────────────────────
-# Override or extend the LLM prompts by dropping files into .flaught-prompt/
-# See https://github.com/flaught/core for the full list of template files.
-# prompt:
-#   enabled: true
-#   path: .flaught-prompt
+prompt:
+  enabled: true
+  path: .flaught-prompt
 
 # ── Exclusions ─────────────────────────────────────────────
-# exclude:
-#   paths:
-#     - "node_modules/**"
-#     - "vendor/**"
-#     - "**/*.min.js"
-#   patterns: []
+exclude:
+  paths:
+    - "node_modules/**"
+    - "dist/**"
+    - "coverage/**"
+    - "**/*.test.ts"
+    - "**/*.test.js"
