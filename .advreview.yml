@@ -5,9 +5,12 @@ version: 1
 
 # ── LLM provider ───────────────────────────────────────────
 # Groq: fast, cheap, OpenAI-compatible API. Requires GROQ_API_KEY secret.
+# Available models (as of Aug 2026): groq/compound-mini, openai/gpt-oss-20b,
+# openai/gpt-oss-120b, qwen/qwen3.6-27b, allam-2-7b
+# NOTE: llama-3.3-70b-versatile has been removed from Groq.
 llm:
   provider: groq
-  model: llama-3.3-70b-versatile
+  model: groq/compound-mini
   api_key_env: GROQ_API_KEY
   temperature: 0.2
   max_tokens: 4096
