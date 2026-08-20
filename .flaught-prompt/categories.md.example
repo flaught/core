@@ -1,0 +1,18 @@
+# Categories Override
+#
+# This file replaces the categories section of the system prompt.
+# The LLM is instructed to use exactly these categories.
+#
+# Default categories:
+# {{categories}}
+#
+# Example — add domain-specific categories:
+# CATEGORIES (use exactly these):
+# - security: Vulnerabilities, injection, auth issues, data exposure
+# - architecture: Coupling, abstraction problems, separation of concerns violations
+# - scope-creep: Changes that don't serve the stated PR intent
+# - test-quality: Missing tests, tests that don't verify the change, insufficient coverage
+# - performance: Algorithmic concerns, N+1 queries, memory leaks
+# - maintainability: Naming, documentation debt, confusing logic, dead code
+# - compliance: HIPAA, PCI-DSS, SOC2, or regulatory violations
+# - accessibility: A11y violations, missing ARIA labels, keyboard navigation issues

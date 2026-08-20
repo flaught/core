@@ -14,6 +14,10 @@ import { Command } from "commander";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { simpleGit } from "simple-git";
+
+// Read version from package.json — the compiled output is CJS, so require() works directly
+const pkgVersion: string = require("../package.json").version;
+
 import { contextToJSON } from "./context/assembler.js";
 import { runReview, type ProgressCallback } from "./review.js";
 import { initConfig, loadConfig } from "./config.js";
@@ -35,7 +39,7 @@ const program = new Command();
 program
   .name("flaught")
   .description("Adversarial PR/code review tool — structured, skeptical scrutiny for CI")
-  .version("0.5.0");
+  .version(pkgVersion);
 
 program
   .command("init")

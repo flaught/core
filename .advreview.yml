@@ -1,0 +1,66 @@
+# Flaught adversarial review configuration
+# https://github.com/flaught/core
+
+version: 1
+
+# ── LLM provider ───────────────────────────────────────────
+# Groq: fast, cheap, OpenAI-compatible API. Requires GROQ_API_KEY secret.
+# Available models (as of Aug 2026): groq/compound-mini, openai/gpt-oss-20b,
+# openai/gpt-oss-120b, qwen/qwen3.6-27b, allam-2-7b
+# NOTE: llama-3.3-70b-versatile has been removed from Groq.
+llm:
+  provider: groq
+  model: groq/compound-mini
+  api_key_env: GROQ_API_KEY
+  temperature: 0.2
+  max_tokens: 4096
+  timeout_seconds: 120
+
+# ── Deterministic tools ────────────────────────────────────
+tools:
+  semgrep:
+    enabled: true
+  linter:
+    enabled: true
+  vuln_scanner:
+    enabled: true
+
+# ── Test inversion ──────────────────────────────────────────
+test_inversion:
+  enabled: true
+
+# ── Scope-creep detection ─────────────────────────────────
+scope_creep:
+  enabled: true
+  intent_source: pr_description
+
+# ── Noise budget ────────────────────────────────────────────
+noise_budget:
+  critical: 3
+  high: 5
+  medium: 10
+  low: 15
+  info: 20
+
+# ── Severity gate ──────────────────────────────────────────
+severity_gate:
+  fail_on: high
+
+# ── Dismissals ───────────────────────────────────────────────
+dismissals:
+  enabled: true
+  path: .flaught-dismissals.json
+
+# ── Prompt templates ────────────────────────────────────────
+prompt:
+  enabled: true
+  path: .flaught-prompt
+
+# ── Exclusions ─────────────────────────────────────────────
+exclude:
+  paths:
+    - "node_modules/**"
+    - "dist/**"
+    - "coverage/**"
+    - "**/*.test.ts"
+    - "**/*.test.js"

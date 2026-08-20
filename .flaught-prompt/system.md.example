@@ -1,0 +1,14 @@
+# System Prompt Override
+#
+# If this file is named "system.md" (without .example), it replaces the
+# ENTIRE system prompt. Individual section overrides (posture.md, categories.md,
+# etc.) are ignored when system.md is present.
+#
+# Available template variables:
+#   {{noise_budget}}  — formatted noise budget lines from config
+#   {{categories}}    — default category definitions (for reference)
+#   {{severities}}    — default severity definitions (for reference)
+#
+# Tip: Start by copying the built-in prompt and modifying it, rather than
+# writing from scratch. You can see the built-in defaults in:
+#   src/prompt/templates.ts (DEFAULT_POSTURE, DEFAULT_CATEGORIES, etc.)

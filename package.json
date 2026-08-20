@@ -1,6 +1,6 @@
 {
   "name": "@flaught/core",
-  "version": "0.5.0",
+  "version": "0.5.6",
   "description": "Adversarial PR/code review tool — structured, skeptical scrutiny for CI",
   "main": "dist/index.js",
   "bin": {
@@ -57,7 +57,7 @@
     "@types/js-yaml": "^4.0.9",
     "@types/node": "^22.0.0",
     "typescript": "^5.5.0",
-    "vitest": "^2.0.0"
+    "vitest": "^3.2.7"
   },
   "engines": {
     "node": ">=18.0.0"

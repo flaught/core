@@ -1,0 +1,8 @@
+# Output Format Override
+#
+# This file replaces the JSON output format specification.
+# Only override this if you need the LLM to return findings in a
+# different schema — the built-in parser expects the default format.
+#
+# Default format:
+# {{output_format}}

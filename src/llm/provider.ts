@@ -570,6 +570,32 @@ async function classifyHttpError(
     : `Check that the server is reachable and configured correctly`;
 
   switch (status) {
+    case 400: {
+      // Bad request — usually model-specific limitations (JSON mode not supported,
+      // invalid parameters, etc.). Include the provider's error message for debugging.
+      let detail = "";
+      try {
+        const body = await response.clone().json().catch(() => ({} as Record<string, unknown>));
+        const msg = (body as Record<string, unknown>)?.error;
+        if (typeof msg === "object" && msg !== null && typeof (msg as Record<string, unknown>).message === "string") {
+          detail = (msg as Record<string, unknown>).message as string;
+        } else if (typeof (body as Record<string, unknown>).message === "string") {
+          detail = (body as Record<string, unknown>).message as string;
+        }
+      } catch { /* ignore parse errors */ }
+      return new LLMError(
+        `Bad request from ${providerName} for model "${model}" (${status}).${detail ? `\n\n${detail}` : ""}\n\n` +
+        `This usually means the model doesn't support a feature Flaught uses (e.g. JSON mode), or the request parameters are invalid.\n\n` +
+        `Options:\n` +
+        `  • Switch to a different model in .advreview.yml (groq/compound-mini and openai/gpt-oss-120b are known to work on Groq)\n` +
+        `  • Switch to a different provider (openai, anthropic, ollama)\n` +
+        `  • Run with --no-llm to skip the LLM review entirely`,
+        providerName,
+        model,
+        status,
+      );
+    }
+
     case 401:
       return new LLMError(
         `API key not configured or not valid for ${model}.\n\n` +
@@ -599,12 +625,12 @@ async function classifyHttpError(
 
     case 429:
       return new LLMError(
-        `API key not configured or not valid for ${model}.\n\n` +
-        `This usually means your API key is missing, on a free tier with no credits, or being rate-limited.\n\n` +
+        `Rate limited by ${providerName} for model "${model}".\n\n` +
+        `This means you've hit the rate limit on your plan (free tier: 30 RPM, 6K TPM).\n\n` +
         `Options:\n` +
-        `  • ${checkKeyHint}\n` +
-        `  • Check your billing details and add credits if needed\n` +
-        `  • Switch to a different provider in .advreview.yml (e.g., groq, anthropic, ollama)\n` +
+        `  • Wait a minute and retry\n` +
+        `  • Upgrade your ${providerName === "groq" ? "Groq" : providerName} plan for higher limits\n` +
+        `  • Switch to a different provider in .advreview.yml (e.g., openai, anthropic, ollama)\n` +
         `  • Run with --no-llm to skip the LLM review entirely`,
         providerName,
         model,

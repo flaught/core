@@ -1,0 +1,10 @@
+# Constraints Override
+#
+# This file replaces the IMPORTANT constraints section of the system prompt.
+#
+# Default constraints:
+# IMPORTANT:
+# - Rank findings within each severity tier. If you have 8 medium findings and the budget is 5, include only the 5 most important.
+# - Every finding MUST have file, line_start, line_end, and snippet — no exceptions.
+# - confidence is 0.0-1.0 — be honest. If you're guessing, say 0.4-0.5. If you're certain, say 0.9+.
+# - Never fabricate code, line numbers, or file paths that don't exist in the provided context.

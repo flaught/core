@@ -2,4 +2,6 @@ node_modules/
 dist/
 *.tgz
 .env
-.advreview.yml.npmrc
+findings.json
+.flaught-dismissals.json
+.npmrc

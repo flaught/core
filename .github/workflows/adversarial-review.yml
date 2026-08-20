@@ -1,0 +1,101 @@
+# Flaught — Adversarial Review
+#
+# Dogfooding: runs Flaught against every PR to this repo.
+# Uses Groq (groq/compound-mini) for the LLM adversarial pass.
+# The review comment is posted to the PR; the JSON artifact is uploaded
+# for trend tracking. Exit code 1 (findings exceed severity gate) blocks merge.
+
+name: Adversarial Review
+
+on:
+  pull_request:
+
+jobs:
+  review:
+    runs-on: ubuntu-latest
+    permissions:
+      pull-requests: write
+      contents: read
+
+    steps:
+      # actions/checkout@v4.2.2 — pinned to commit SHA for supply-chain integrity
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          fetch-depth: 0
+
+      # actions/setup-node@v4.4.0 — pinned to commit SHA for supply-chain integrity
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 22
+
+      - name: Install Flaught
+        run: npm install -g @flaught/core
+
+      - name: Install Semgrep
+        run: pip install semgrep
+
+      - name: Install project dependencies
+        run: npm ci
+
+      - name: Run adversarial review
+        id: review
+        env:
+          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+          PR_BASE_REF: ${{ github.base_ref }}
+          PR_TITLE: ${{ github.event.pull_request.title }}
+        # Shell-injection-safe: all GitHub expressions passed via env vars, not interpolated inline
+        run: |
+          set +e
+          flaught review \
+            --base "origin/${PR_BASE_REF}" \
+            --head HEAD \
+            --output findings.json \
+            --pr-description "${PR_TITLE}" \
+            --quiet
+          EXIT_CODE=$?
+          echo "exit_code=$EXIT_CODE" >> "$GITHUB_OUTPUT"
+          # Always exit 0 — we check the exit code in later steps
+          exit 0
+
+      # actions/upload-artifact@v4.6.2 — pinned to commit SHA for supply-chain integrity
+      - name: Upload findings artifact
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: flaught-findings
+          path: findings.json
+          retention-days: 90
+
+      - name: Comment on PR
+        if: always()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_BASE_REF: ${{ github.base_ref }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          PR_TITLE: ${{ github.event.pull_request.title }}
+        # Shell-injection-safe: all GitHub expressions passed via env vars
+        run: |
+          if [ -f findings.json ]; then
+            BODY=$(flaught review \
+              --base "origin/${PR_BASE_REF}" \
+              --head HEAD \
+              --no-llm \
+              --pr-description "${PR_TITLE}" \
+              --quiet 2>/dev/null || echo "Review could not be rendered.")
+            echo "$BODY" | gh pr comment "${PR_NUMBER}" --body-file -
+          else
+            echo "⚠️ Flaught review failed to produce findings. Check the workflow logs for details." | \
+              gh pr comment "${PR_NUMBER}" --body-file -
+          fi
+
+      - name: Check severity gate
+        if: steps.review.outputs.exit_code == '1'
+        run: |
+          echo "::error::Flaught found findings that exceed the severity gate threshold"
+          exit 1
+
+      - name: Check for errors
+        if: steps.review.outputs.exit_code == '2'
+        run: |
+          echo "::error::Flaught encountered an error (config, API, or runtime). Check the workflow logs."
+          exit 1
