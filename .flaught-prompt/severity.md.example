@@ -1,0 +1,6 @@
+# Severity Override
+#
+# This file replaces the severity definitions section of the system prompt.
+#
+# Default severities:
+# {{severities}}

@@ -53,6 +53,29 @@ export interface DeterministicFinding {
   ruleId: string;
   /** Link to documentation for this rule */
   reference?: string;
+
+  // ── Vulnerability-specific fields (populated by npm_audit, pip-audit, etc.) ──
+
+  /** Human-readable vulnerability description (advisory title) */
+  vuln_description?: string;
+  /** Affected version range (e.g. "<=6.4.2") */
+  vuln_range?: string;
+  /** Installed version of the vulnerable package */
+  vuln_installed_version?: string;
+  /** Whether this is a direct dependency */
+  vuln_is_direct?: boolean;
+  /** Packages affected by this vulnerability (transitive dependency chain) */
+  vuln_effects?: string[];
+  /** Available fix: package name and version */
+  vuln_fix?: string;
+  /** Whether the fix is a SemVer major bump */
+  vuln_fix_is_breaking?: boolean;
+  /** CWE identifiers */
+  vuln_cwe?: string[];
+  /** CVSS score */
+  vuln_cvss_score?: number;
+  /** Advisory URLs */
+  vuln_urls?: string[];
 }
 
 // ─── Run all enabled deterministic tools ───────────────────────────────────────
@@ -388,7 +411,7 @@ async function detectVulnCommand(repoPath: string): Promise<string | null> {
 
 // ── Parse vulnerability scanner JSON output ───────────────────────────────────
 
-function parseVulnJsonOutput(stdout: string, command: string): DeterministicFinding[] {
+export function parseVulnJsonOutput(stdout: string, command: string): DeterministicFinding[] {
   try {
     const data = JSON.parse(stdout);
     const findings: DeterministicFinding[] = [];
@@ -396,16 +419,113 @@ function parseVulnJsonOutput(stdout: string, command: string): DeterministicFind
     // npm audit format
     if (data.vulnerabilities) {
       for (const [, vuln] of Object.entries(data.vulnerabilities as Record<string, any>)) {
+        // npm audit `via` can be a string array (package names) or an array of
+        // advisory objects with title, url, severity, cwe, cvss, etc.
+        // We want the richest data available.
+        const viaAdvisories: any[] = Array.isArray(vuln.via)
+          ? vuln.via.filter((v: any) => typeof v === "object" && v !== null)
+          : [];
+
+        // Use the highest-severity advisory for the canonical title/description
+        const primaryAdvisory = viaAdvisories.length > 0
+          ? viaAdvisories.sort((a: any, b: any) => {
+              const order: Record<string, number> = { critical: 0, high: 1, moderate: 2, low: 3, info: 4 };
+              return (order[a.severity] ?? 2) - (order[b.severity] ?? 2);
+            })[0]
+          : null;
+
+        // Build a descriptive title: "<package>: <advisory title>" or "<package>: <vulnerability>"
+        const pkgName = vuln.name ?? "unknown";
+        const advisoryTitle = primaryAdvisory?.title ?? null;
+        const title = advisoryTitle
+          ? `${pkgName}: ${advisoryTitle}`
+          : `${pkgName}: Vulnerability in ${pkgName}${vuln.range ? ` (${vuln.range})` : ""}`;
+
+        // Build a human-readable description with fix info
+        const descriptionParts: string[] = [];
+        if (viaAdvisories.length > 1) {
+          descriptionParts.push(`${viaAdvisories.length} advisories affect this package.`);
+          for (const adv of viaAdvisories) {
+            descriptionParts.push(`- ${adv.title ?? adv.name ?? "Unknown"} (${adv.severity ?? "unknown"} severity)${adv.url ? ` — ${adv.url}` : ""}`);
+          }
+        } else if (viaAdvisories.length === 1) {
+          const adv = viaAdvisories[0];
+          descriptionParts.push(adv.title ?? "Vulnerability found by npm audit.");
+        }
+
+        if (vuln.isDirect) {
+          descriptionParts.push("Direct dependency.");
+        } else {
+          descriptionParts.push("Transitive dependency.");
+        }
+
+        if (vuln.effects?.length > 0) {
+          descriptionParts.push(`Affected via: ${vuln.effects.join(" → ")}.`);
+        }
+
+        if (vuln.fixAvailable) {
+          const fix = vuln.fixAvailable;
+          const breaking = fix.isSemVerMajor ? " (breaking change)" : "";
+          descriptionParts.push(`Fix available: update ${fix.name} to ${fix.version}${breaking}.`);
+        } else {
+          descriptionParts.push("No fix available.");
+        }
+
+        // Collect all advisory URLs for references
+        const advisoryUrls = viaAdvisories
+          .map((v: any) => v.url)
+          .filter((u: any): u is string => typeof u === "string" && u.length > 0);
+
+        // Collect all CWEs
+        const cwes = viaAdvisories.flatMap((v: any) =>
+          Array.isArray(v.cwe) ? v.cwe : (v.cwe ? [v.cwe] : [])
+        );
+
+        // Use the highest CVSS score across advisories
+        const cvssScore = viaAdvisories.reduce((max: number, v: any) => {
+          const score = v.cvss?.score;
+          return typeof score === "number" && score > max ? score : max;
+        }, 0);
+
+        // snippet: concise technical summary for evidence block
+        // vuln_description: full human-readable narrative for description field
+        const snippetParts: string[] = [];
+        if (vuln.range) snippetParts.push(`Affected: ${pkgName} ${vuln.range}`);
+        if (vuln.isDirect) {
+          snippetParts.push("Direct dependency.");
+        } else if (vuln.effects?.length > 0) {
+          snippetParts.push(`Via: ${vuln.effects.join(" → ")}`);
+        }
+        if (vuln.fixAvailable) {
+          const fix = vuln.fixAvailable;
+          const breaking = fix.isSemVerMajor ? " (breaking)" : "";
+          snippetParts.push(`Fix: ${fix.name}@${fix.version}${breaking}`);
+        } else {
+          snippetParts.push("No fix available.");
+        }
+
         findings.push({
-          title: vuln.title ?? vuln.name ?? "Vulnerability",
+          title,
           severity: mapNpmAuditSeverity(vuln.severity),
           category: "security",
-          file: vuln.findings?.[0]?.paths?.[0] ?? vuln.name ?? "",
+          file: vuln.findings?.[0]?.paths?.[0] ?? pkgName,
           line: 0,
-          snippet: vuln.url ?? "",
+          snippet: snippetParts.join(" "),
           source: command.includes("npm") ? "npm_audit" : "vuln_scanner",
-          ruleId: vuln.cves?.[0] ?? vuln.cwe?.[0] ?? vuln.name ?? "unknown",
-          reference: vuln.url ?? undefined,
+          ruleId: primaryAdvisory?.source?.toString() ?? cwes?.[0] ?? pkgName,
+          reference: advisoryUrls[0] ?? undefined,
+          vuln_description: descriptionParts.join(" "),
+          vuln_range: vuln.range ?? undefined,
+          vuln_installed_version: vuln.nodes?.[0]?.replace("node_modules/", "") ?? undefined,
+          vuln_is_direct: vuln.isDirect ?? undefined,
+          vuln_effects: Array.isArray(vuln.effects) && vuln.effects.length > 0 ? vuln.effects : undefined,
+          vuln_fix: vuln.fixAvailable
+            ? `${vuln.fixAvailable.name}@${vuln.fixAvailable.version}`
+            : undefined,
+          vuln_fix_is_breaking: vuln.fixAvailable?.isSemVerMajor ?? undefined,
+          vuln_cwe: cwes.length > 0 ? cwes : undefined,
+          vuln_cvss_score: cvssScore > 0 ? cvssScore : undefined,
+          vuln_urls: advisoryUrls.length > 0 ? advisoryUrls : undefined,
         });
       }
     }
@@ -414,16 +534,21 @@ function parseVulnJsonOutput(stdout: string, command: string): DeterministicFind
     if (Array.isArray(data.dependencies)) {
       for (const dep of data.dependencies) {
         for (const vuln of dep.vulns ?? []) {
+          const fixVersion = vuln.fix_versions?.[0];
           findings.push({
-            title: vuln.description ?? vuln.advisory ?? "Vulnerability",
+            title: `${dep.name}: ${vuln.description ?? vuln.advisory ?? "Vulnerability"}`,
             severity: mapPipAuditSeverity(vuln.severity),
             category: "security",
             file: dep.name ?? "",
             line: 0,
-            snippet: `${dep.name} ${dep.version}: ${vuln.description ?? "see advisory"}`,
+            snippet: `${dep.name} ${dep.version}: ${vuln.description ?? "see advisory"}${fixVersion ? ` Fix: upgrade to ${fixVersion}.` : ""}`,
             source: "pip_audit",
             ruleId: vuln.id ?? vuln.cve ?? "unknown",
-            reference: vuln.fix_versions?.[0] ? `https://pypi.org/project/${dep.name}/${vuln.fix_versions[0]}/` : undefined,
+            reference: fixVersion ? `https://pypi.org/project/${dep.name}/${fixVersion}/` : undefined,
+            vuln_description: vuln.description ?? vuln.advisory,
+            vuln_installed_version: dep.version ?? undefined,
+            vuln_fix: fixVersion ? `${dep.name}@${fixVersion}` : undefined,
+            vuln_urls: vuln.urls ?? (vuln.url ? [vuln.url] : undefined),
           });
         }
       }
@@ -627,9 +752,40 @@ export function formatToolFindingsForPrompt(findings: DeterministicFinding[]): s
     lines.push("");
     for (const f of sourceFindings) {
       lines.push(`- [${f.severity.toUpperCase()}] ${f.title}`);
-      lines.push(`  File: ${f.file}${f.line > 0 ? `:${f.line}` : ""}`);
-      if (f.snippet) lines.push(`  ${f.snippet}`);
-      if (f.reference) lines.push(`  Ref: ${f.reference}`);
+      if (f.line > 0) {
+        lines.push(`  File: ${f.file}:${f.line}`);
+      } else if (f.file) {
+        lines.push(`  Package/Path: ${f.file}`);
+      }
+      if (f.vuln_description) {
+        lines.push(`  ${f.vuln_description}`);
+      } else if (f.snippet) {
+        lines.push(`  ${f.snippet}`);
+      }
+      if (f.vuln_range) lines.push(`  Affected versions: ${f.vuln_range}`);
+      if (f.vuln_is_direct === true) {
+        lines.push("  Direct dependency.");
+      } else if (f.vuln_is_direct === false) {
+        if (f.vuln_effects && f.vuln_effects.length > 0) {
+          lines.push(`  Transitive dependency (via ${f.vuln_effects.join(" → ")}).`);
+        } else {
+          lines.push("  Transitive dependency.");
+        }
+      }
+      if (f.vuln_fix) {
+        const breaking = f.vuln_fix_is_breaking ? " (breaking change)" : "";
+        lines.push(`  Fix: update to ${f.vuln_fix}${breaking}.`);
+      }
+      if (f.vuln_cvss_score && f.vuln_cvss_score > 0) {
+        lines.push(`  CVSS score: ${f.vuln_cvss_score}`);
+      }
+      if (f.vuln_cwe && f.vuln_cwe.length > 0) {
+        lines.push(`  CWE: ${f.vuln_cwe.join(", ")}`);
+      }
+      const refs: string[] = [];
+      if (f.reference) refs.push(f.reference);
+      if (f.vuln_urls) refs.push(...f.vuln_urls);
+      if (refs.length > 0) lines.push(`  Refs: ${refs.join(", ")}`);
       lines.push("");
     }
   }

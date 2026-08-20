@@ -133,10 +133,14 @@ function renderFinding(f: Finding): string {
 
   // Evidence
   if (f.evidence.file) {
-    const location = f.evidence.line_start === f.evidence.line_end
-      ? `${f.evidence.file}:${f.evidence.line_start}`
-      : `${f.evidence.file}:${f.evidence.line_start}-${f.evidence.line_end}`;
-    lines.push(`📍 \`${location}\``);
+    // For vuln findings (line 0, no meaningful line number), show just the package/path
+    if (f.evidence.line_start === 0 && f.evidence.line_end === 0) {
+      lines.push(`📍 \`${f.evidence.file}\``);
+    } else if (f.evidence.line_start === f.evidence.line_end) {
+      lines.push(`📍 \`${f.evidence.file}:${f.evidence.line_start}\``);
+    } else {
+      lines.push(`📍 \`${f.evidence.file}:${f.evidence.line_start}-${f.evidence.line_end}\``);
+    }
   }
 
   if (f.evidence.snippet) {

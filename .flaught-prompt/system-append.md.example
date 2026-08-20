@@ -1,0 +1,14 @@
+# System Prompt Append
+#
+# This content is appended to the END of the system prompt, regardless
+# of whether you're using the built-in prompt or a custom system.md.
+#
+# This is the simplest way to customize Flaught's review behavior.
+# Just add your team-specific rules and review focus areas below.
+#
+# Example:
+# ## Team-Specific Rules
+# - Flag any use of eval() or Function() — these are never allowed in our codebase
+# - All API endpoints must validate input with a schema library (zod, joi, etc.)
+# - Database queries must use parameterized statements, never string interpolation
+# - Changes to middleware must include integration tests

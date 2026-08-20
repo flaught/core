@@ -162,17 +162,36 @@ export async function runReview(options: ReviewOptions = {}): Promise<ReviewResu
       rule_id: ruleId,
     };
 
+    // Build description: for vulnerability findings, use the rich vuln_description;
+    // for all others, fall back to the generic format.
+    // vuln_description already includes dependency path, fix info, etc.
+    // — only add version range and CVSS if they aren't already in vuln_description.
+    let description: string;
+    if (df.vuln_description) {
+      const parts: string[] = [df.vuln_description];
+      if (df.vuln_range && !df.vuln_description.includes(df.vuln_range)) parts.push(`Affected versions: ${df.vuln_range}.`);
+      if (df.vuln_cvss_score && df.vuln_cvss_score > 0 && !df.vuln_description.includes("CVSS")) parts.push(`CVSS score: ${df.vuln_cvss_score}.`);
+      description = parts.join(" ");
+    } else {
+      description = `${df.source} found: ${df.title}${ruleId ? ` (${ruleId})` : ""}`;
+    }
+
+    // Collect references: explicit reference + vuln_urls
+    const references: string[] = [];
+    if (df.reference) references.push(df.reference);
+    if (df.vuln_urls) references.push(...df.vuln_urls);
+
     findings.push({
       id: `D-${String(findings.length + 1).padStart(4, "0")}`,
       severity,
       category,
       title: df.title,
-      description: `${df.source} found: ${df.title}${ruleId ? ` (${ruleId})` : ""}`,
+      description,
       evidence,
       source: df.source,
       source_type: "deterministic",
       confidence: 1.0, // deterministic tools get full confidence
-      references: df.reference ? [df.reference] : [],
+      references,
       fingerprint: computeFingerprint({
         source_type: "deterministic",
         source: df.source,
