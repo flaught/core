@@ -3,6 +3,9 @@
  * rendering together into a complete adversarial review pipeline.
  */
 
+// Read version from package.json — the compiled output is CJS, so require() works directly
+const pkgVersion: string = require("../package.json").version;
+
 import { assembleContext, type ReviewContext } from "./context/assembler.js";
 import { loadConfig } from "./config.js";
 import type { FlaughtConfig } from "./schemas/config.js";
@@ -176,10 +179,21 @@ export async function runReview(options: ReviewOptions = {}): Promise<ReviewResu
       description = `${df.source} found: ${df.title}${ruleId ? ` (${ruleId})` : ""}`;
     }
 
-    // Collect references: explicit reference + vuln_urls
+    // Collect references: merge reference + vuln_urls, deduplicated
     const references: string[] = [];
-    if (df.reference) references.push(df.reference);
-    if (df.vuln_urls) references.push(...df.vuln_urls);
+    const seenRefs = new Set<string>();
+    if (df.reference) {
+      references.push(df.reference);
+      seenRefs.add(df.reference);
+    }
+    if (df.vuln_urls) {
+      for (const url of df.vuln_urls) {
+        if (!seenRefs.has(url)) {
+          references.push(url);
+          seenRefs.add(url);
+        }
+      }
+    }
 
     findings.push({
       id: `D-${String(findings.length + 1).padStart(4, "0")}`,
@@ -478,7 +492,7 @@ function buildArtifact(
     schema_version: SCHEMA_VERSION,
     _caveat: CAVEAT,
     generated_at: new Date().toISOString(),
-    flaught_version: "0.4.1",
+    flaught_version: pkgVersion,
     repository: {
       name: repoName,
       url: "",

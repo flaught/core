@@ -512,7 +512,7 @@ export function parseVulnJsonOutput(stdout: string, command: string): Determinis
           line: 0,
           snippet: snippetParts.join(" "),
           source: command.includes("npm") ? "npm_audit" : "vuln_scanner",
-          ruleId: primaryAdvisory?.source?.toString() ?? cwes?.[0] ?? pkgName,
+          ruleId: cwes?.[0] ?? primaryAdvisory?.title?.substring(0, 60) ?? pkgName,
           reference: advisoryUrls[0] ?? undefined,
           vuln_description: descriptionParts.join(" "),
           vuln_range: vuln.range ?? undefined,
@@ -783,8 +783,19 @@ export function formatToolFindingsForPrompt(findings: DeterministicFinding[]): s
         lines.push(`  CWE: ${f.vuln_cwe.join(", ")}`);
       }
       const refs: string[] = [];
-      if (f.reference) refs.push(f.reference);
-      if (f.vuln_urls) refs.push(...f.vuln_urls);
+      const seenRefs = new Set<string>();
+      if (f.reference && !seenRefs.has(f.reference)) {
+        refs.push(f.reference);
+        seenRefs.add(f.reference);
+      }
+      if (f.vuln_urls) {
+        for (const url of f.vuln_urls) {
+          if (!seenRefs.has(url)) {
+            refs.push(url);
+            seenRefs.add(url);
+          }
+        }
+      }
       if (refs.length > 0) lines.push(`  Refs: ${refs.join(", ")}`);
       lines.push("");
     }
