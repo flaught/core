@@ -16,14 +16,17 @@ on:
 jobs:
   review:
     runs-on: ubuntu-latest
+    permissions:
+      pull-requests: write
+      contents: read
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
           fetch-depth: 0
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
-          node-version: 20
+          node-version: 22
 
       - name: Install Flaught
         run: npm install -g @flaught/core
@@ -35,19 +38,22 @@ jobs:
         run: npm ci
 
       - name: Run adversarial review (deterministic only)
+        env:
+          PR_BASE_REF: ${{ github.base_ref }}
+          PR_TITLE: ${{ github.event.pull_request.title }}
         run: |
           flaught review \
-            --base origin/${{ github.base_ref }} \
+            --base "origin/${PR_BASE_REF}" \
             --head HEAD \
             --no-llm \
             --output findings.json \
-            --pr-description "${{ github.event.pull_request.title }}" \
+            --pr-description "${PR_TITLE}" \
             --quiet
         continue-on-error: true
 
       - name: Upload findings
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: flaught-findings
           path: findings.json
@@ -56,17 +62,22 @@ jobs:
         if: always()
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_BASE_REF: ${{ github.base_ref }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          PR_TITLE: ${{ github.event.pull_request.title }}
         run: |
           if [ -f findings.json ]; then
             BODY=$(flaught review \
-              --base origin/${{ github.base_ref }} \
+              --base "origin/${PR_BASE_REF}" \
               --head HEAD \
               --no-llm \
-              --pr-description "${{ github.event.pull_request.title }}" \
+              --pr-description "${PR_TITLE}" \
               --quiet 2>/dev/null)
-            gh pr comment ${{ github.event.pull_request.number }} --body "$BODY"
+            echo "$BODY" | gh pr comment "${PR_NUMBER}" --body-file -
           fi
 ```
+
+Actions are pinned to commit SHA (supply-chain integrity) and every `github.*` expression is passed through `env:` rather than interpolated directly into the shell — interpolating a PR title straight into a `run:` block lets an attacker execute arbitrary shell code via the PR title. This is the same pattern this repo's own [dogfooding workflow](../.github/workflows/adversarial-review.yml) uses.
 
 ## Full — with LLM adversarial pass
 
@@ -80,14 +91,17 @@ on:
 jobs:
   review:
     runs-on: ubuntu-latest
+    permissions:
+      pull-requests: write
+      contents: read
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
           fetch-depth: 0
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
-          node-version: 20
+          node-version: 22
 
       - name: Install Flaught
         run: npm install -g @flaught/core
@@ -101,18 +115,20 @@ jobs:
       - name: Run adversarial review
         env:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          PR_BASE_REF: ${{ github.base_ref }}
+          PR_TITLE: ${{ github.event.pull_request.title }}
         run: |
           flaught review \
-            --base origin/${{ github.base_ref }} \
+            --base "origin/${PR_BASE_REF}" \
             --head HEAD \
             --output findings.json \
-            --pr-description "${{ github.event.pull_request.title }}" \
+            --pr-description "${PR_TITLE}" \
             --quiet
         continue-on-error: true
 
       - name: Upload findings
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: flaught-findings
           path: findings.json
@@ -121,18 +137,24 @@ jobs:
         if: always()
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_BASE_REF: ${{ github.base_ref }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          PR_TITLE: ${{ github.event.pull_request.title }}
         run: |
           if [ -f findings.json ]; then
             BODY=$(flaught review \
-              --base origin/${{ github.base_ref }} \
+              --base "origin/${PR_BASE_REF}" \
               --head HEAD \
-              --pr-description "${{ github.event.pull_request.title }}" \
+              --no-llm \
+              --pr-description "${PR_TITLE}" \
               --quiet 2>/dev/null)
-            gh pr comment ${{ github.event.pull_request.number }} --body "$BODY"
+            echo "$BODY" | gh pr comment "${PR_NUMBER}" --body-file -
           fi
 ```
 
 Add `OPENAI_API_KEY` to your repository secrets (Settings → Secrets and variables → Actions).
+
+**Note on the "Comment on PR" step:** it re-runs `flaught review` a second time to get markdown for the comment body, since `--output` only writes the JSON artifact — there's no "render markdown from an existing artifact" command yet. That second run uses `--no-llm` deliberately: running it *without* `--no-llm` would call the LLM API a second time per PR (doubling cost/latency) just to reproduce a report. The tradeoff is that the posted comment only reflects deterministic/test-inversion/scope-creep findings, not the LLM pass — the uploaded `findings.json` artifact from the first (full) run is the source of truth for LLM findings. This matches the pattern used in this repo's own [dogfooding workflow](../.github/workflows/adversarial-review.yml).
 
 ### Using Claude instead of OpenAI
 
@@ -142,12 +164,14 @@ Set `provider: anthropic` and `model: claude-sonnet-5` (or `claude-opus-5`, `cla
       - name: Run adversarial review
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          PR_BASE_REF: ${{ github.base_ref }}
+          PR_TITLE: ${{ github.event.pull_request.title }}
         run: |
           flaught review \
-            --base origin/${{ github.base_ref }} \
+            --base "origin/${PR_BASE_REF}" \
             --head HEAD \
             --output findings.json \
-            --pr-description "${{ github.event.pull_request.title }}" \
+            --pr-description "${PR_TITLE}" \
             --quiet
         continue-on-error: true
 ```
@@ -168,14 +192,16 @@ on:
 jobs:
   review:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
           fetch-depth: 0
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
-          node-version: 20
+          node-version: 22
 
       - name: Install Flaught
         run: npm install -g @flaught/core
@@ -186,18 +212,20 @@ jobs:
       - name: Run adversarial review
         env:
           OLLAMA_API_KEY: ${{ secrets.OLLAMA_API_KEY }}
+          PR_BASE_REF: ${{ github.base_ref }}
+          PR_TITLE: ${{ github.event.pull_request.title }}
         run: |
           flaught review \
-            --base origin/${{ github.base_ref }} \
+            --base "origin/${PR_BASE_REF}" \
             --head HEAD \
             --output findings.json \
-            --pr-description "${{ github.event.pull_request.title }}" \
+            --pr-description "${PR_TITLE}" \
             --quiet
         continue-on-error: true
 
       - name: Upload findings
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: flaught-findings
           path: findings.json
@@ -230,6 +258,8 @@ on:
 jobs:
   review:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     services:
       ollama:
         image: ollama/ollama:latest
@@ -242,13 +272,13 @@ jobs:
           --health-retries 5
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
           fetch-depth: 0
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
-          node-version: 20
+          node-version: 22
 
       - name: Install Flaught
         run: npm install -g @flaught/core
@@ -264,20 +294,22 @@ jobs:
         run: npm ci
 
       - name: Run adversarial review
-        run: |
-          flaught review \
-            --base origin/${{ github.base_ref }} \
-            --head HEAD \
-            --output findings.json \
-            --pr-description "${{ github.event.pull_request.title }}" \
-            --quiet
-        continue-on-error: true
         env:
           OLLAMA_HOST: http://localhost:11434
+          PR_BASE_REF: ${{ github.base_ref }}
+          PR_TITLE: ${{ github.event.pull_request.title }}
+        run: |
+          flaught review \
+            --base "origin/${PR_BASE_REF}" \
+            --head HEAD \
+            --output findings.json \
+            --pr-description "${PR_TITLE}" \
+            --quiet
+        continue-on-error: true
 
       - name: Upload findings
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: flaught-findings
           path: findings.json
@@ -307,7 +339,9 @@ Flaught's exit codes are designed for CI gating:
 
 ```yaml
 - name: Run adversarial review
-  run: flaught review --base origin/${{ github.base_ref }} --quiet
+  env:
+    PR_BASE_REF: ${{ github.base_ref }}
+  run: flaught review --base "origin/${PR_BASE_REF}" --quiet
   # exit 0 = clean, exit 1 = findings exceed gate, exit 2 = error
 ```
 
@@ -318,8 +352,10 @@ Use `continue-on-error: true` if you want to post a comment even when findings a
 ```yaml
 - name: Run adversarial review
   id: review
+  env:
+    PR_BASE_REF: ${{ github.base_ref }}
   run: |
-    flaught review --base origin/${{ github.base_ref }} --output findings.json --quiet || echo "exit_code=$?" >> "$GITHUB_OUTPUT"
+    flaught review --base "origin/${PR_BASE_REF}" --output findings.json --quiet || echo "exit_code=$?" >> "$GITHUB_OUTPUT"
   continue-on-error: true
 
 - name: Check severity gate
@@ -330,21 +366,27 @@ Use `continue-on-error: true` if you want to post a comment even when findings a
   if: always()
   env:
     GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    PR_BASE_REF: ${{ github.base_ref }}
+    PR_NUMBER: ${{ github.event.pull_request.number }}
   run: |
-    BODY=$(flaught review --base origin/${{ github.base_ref }} --quiet 2>/dev/null)
-    gh pr comment ${{ github.event.pull_request.number }} --body "$BODY"
+    BODY=$(flaught review --base "origin/${PR_BASE_REF}" --quiet 2>/dev/null)
+    echo "$BODY" | gh pr comment "${PR_NUMBER}" --body-file -
 ```
 
 ## PR description for scope-creep detection
 
-Pass the PR title or body via `--pr-description` to enable scope-creep detection:
+Pass the PR title or body via `--pr-description` to enable scope-creep detection. Route it through `env:` rather than interpolating it directly into `run:` — a PR title is attacker-controlled text, and inlining it into a shell command is a shell-injection risk:
 
 ```yaml
-# Just the title:
---pr-description "${{ github.event.pull_request.title }}"
+env:
+  PR_TITLE: ${{ github.event.pull_request.title }}
+  PR_BODY: ${{ github.event.pull_request.body }}
+run: |
+  # Just the title:
+  flaught review --pr-description "${PR_TITLE}" --quiet
 
-# Title + body:
---pr-description "${{ github.event.pull_request.title }}: ${{ github.event.pull_request.body }}"
+  # Title + body:
+  flaught review --pr-description "${PR_TITLE}: ${PR_BODY}" --quiet
 ```
 
 The PR description serves as the "intent anchor" — Flaught flags hunks that appear unrelated to it.

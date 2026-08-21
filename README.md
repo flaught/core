@@ -42,7 +42,7 @@ Pick your environment and paste:
 
 ```
 flaught init                    # scaffold .advreview.yml + .flaught-prompt/
-flaught review                  # full adversarial review vs HEAD~1
+flaught review                  # full adversarial review vs the merge-base with main/master (falls back to HEAD~1)
 flaught review --base main      # review against main
 flaught review --no-llm         # deterministic tools only (no API key)
 flaught review --output findings.json --quiet   # CI mode

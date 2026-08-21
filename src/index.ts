@@ -10,7 +10,7 @@ export { loadConfig, initConfig } from "./config.js";
 export { FlaughtConfigSchema, type FlaughtConfig, mergeWithDefaults } from "./schemas/config.js";
 export type { FindingsArtifact, Finding, FindingEvidence, Severity, Category, SourceType, ToolExecuted, TestInversion, ScopeCreep, FlaggedTest, FlaggedHunk, SeverityBudget, NoiseBudget, FindingsSummary } from "./schemas/findings.js";
 export { SCHEMA_VERSION, FINDINGS_SCHEMA_URL, CAVEAT } from "./schemas/findings.js";
-export { createProvider, type LLMProvider, type LLMReviewResult, parseFindingsFromLLM } from "./llm/provider.js";
+export { createProvider, type LLMProvider, type LLMReviewResult, parseFindingsFromLLM, LLMError, MissingAPIKeyError } from "./llm/provider.js";
 export { buildSystemPrompt, buildUserPrompt } from "./llm/prompt.js";
 export {
   loadTemplates,

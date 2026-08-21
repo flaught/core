@@ -18,7 +18,7 @@ version: 1
 
 # ── LLM provider ───────────────────────────────────────────
 llm:
-  provider: openai          # openai | groq | gemini | ollama
+  provider: openai          # openai | groq | gemini | anthropic | ollama
   model: gpt-4o
   api_key_env: OPENAI_API_KEY
   # base_url: null          # override for OpenAI-compatible endpoints
