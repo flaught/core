@@ -352,6 +352,50 @@
         "file": "src/test-inversion/runner.ts"
       },
       "expires_at": null
+    },
+    {
+      "fingerprint": "sha256:3fe0fb9fae6644e1",
+      "dismissed_by": "dgabriel@gmail.com",
+      "dismissed_at": "2026-08-21T21:49:46.755Z",
+      "reason": "Reworded restatement of an already-dismissed theme (prior fingerprint 89ef9d8d84bbd941): genuine but low-probability edge case, matches this heuristic's own documented best-effort framing in docs/troubleshooting.md -- a false positive re-triaged is safer than silently dropping a real one.",
+      "context": {
+        "title": "Vitest slow-test line association may mis‑attribute tests",
+        "file": "src/test-inversion/runner.ts"
+      },
+      "expires_at": null
+    },
+    {
+      "fingerprint": "sha256:0f9337c717c58de9",
+      "dismissed_by": "dgabriel@gmail.com",
+      "dismissed_at": "2026-08-21T21:49:46.817Z",
+      "reason": "Reworded restatement of an already-dismissed theme (prior fingerprint b777cce7fa3dc63d): matches this test file's own pre-existing convention of substring-based assertions on prompt content.",
+      "context": {
+        "title": "Brittle substring assertions added to DEFAULT_CONSTRAINTS tests",
+        "file": "src/prompt/templates.test.ts"
+      },
+      "expires_at": null
+    },
+    {
+      "fingerprint": "sha256:52f6528387e4908b",
+      "dismissed_by": "dgabriel@gmail.com",
+      "dismissed_at": "2026-08-21T21:49:46.879Z",
+      "reason": "Reworded restatement of an already-dismissed theme (prior fingerprint ce61c6ee9e36df73): still far below the 100k-char prompt cap and every supported provider's context window; generic prompt-bloat nag not calibrated to actual budgets.",
+      "context": {
+        "title": "DEFAULT_CONSTRAINTS growth increases prompt token usage",
+        "file": "src/prompt/templates.ts"
+      },
+      "expires_at": null
+    },
+    {
+      "fingerprint": "sha256:16cfbcf0e37892c5",
+      "dismissed_by": "dgabriel@gmail.com",
+      "dismissed_at": "2026-08-21T21:49:46.940Z",
+      "reason": "The dismissal store schema is designed for exactly this -- every entry carries its own who/when/why (see src/schemas/dismissals.ts's own docstring: 'Structured disposition, not silent deletion'). Bulk size doesn't defeat that; each entry is independently auditable by its reason field.",
+      "context": {
+        "title": "Large batch of dismissals added to .flaught-dismissals.json",
+        "file": ".flaught-dismissals.json"
+      },
+      "expires_at": null
     }
   ]
 }
