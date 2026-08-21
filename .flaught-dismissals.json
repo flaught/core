@@ -1,0 +1,181 @@
+{
+  "version": 1,
+  "dismissals": [
+    {
+      "fingerprint": "sha256:6f7a52498e109561",
+      "dismissed_by": "dgabriel@gmail.com",
+      "dismissed_at": "2026-08-21T00:55:55.833Z",
+      "reason": "LLM hallucination: SCHEMA_VERSION is 2 in src/schemas/findings.ts:177 (verified directly in source); the doc's claim of schema_version 2 is correct, not stale.",
+      "context": {
+        "title": "Documentation claims schema_version 2 but code still emits version 1",
+        "file": "docs/findings-schema.md"
+      },
+      "expires_at": null
+    },
+    {
+      "fingerprint": "sha256:c66f6fd2a8d47fb8",
+      "dismissed_by": "dgabriel@gmail.com",
+      "dismissed_at": "2026-08-21T00:55:55.898Z",
+      "reason": "False positive: adding new named exports (LLMError, MissingAPIKeyError) is additive/backward-compatible, not a breaking API change — no existing consumer's code stops working.",
+      "context": {
+        "title": "Exporting internal error types adds breaking API surface",
+        "file": "src/index.ts"
+      },
+      "expires_at": null
+    },
+    {
+      "fingerprint": "sha256:1f46b93bd2fbddaf",
+      "dismissed_by": "dgabriel@gmail.com",
+      "dismissed_at": "2026-08-21T00:55:55.959Z",
+      "reason": "False positive: the LLM misread commented-out (#-prefixed) template documentation as active config. The quoted lines are inert comments in the flaught init scaffold string; the actual ExcludeSchema defaults in src/schemas/config.ts already included these two patterns before this change. No scanning behavior changed.",
+      "context": {
+        "title": "Default ignore patterns now exclude generated CSS and minified files",
+        "file": "src/config.ts"
+      },
+      "expires_at": null
+    },
+    {
+      "fingerprint": "sha256:a85c27560110daa1",
+      "dismissed_by": "dgabriel@gmail.com",
+      "dismissed_at": "2026-08-21T00:55:56.020Z",
+      "reason": "False positive, same root cause as F-003: no new behavior was introduced (the exclude patterns were already active schema defaults), so there's nothing new to test — only a doc comment in the init template was corrected to match.",
+      "context": {
+        "title": "No tests added for new config ignore patterns",
+        "file": "src/config.ts"
+      },
+      "expires_at": null
+    },
+    {
+      "fingerprint": "sha256:472ab918d97e0403",
+      "dismissed_by": "dgabriel@gmail.com",
+      "dismissed_at": "2026-08-21T00:55:56.084Z",
+      "reason": "Not applicable: this repo has no CHANGELOG.md convention, and the additive export doesn't warrant a semver bump on its own.",
+      "context": {
+        "title": "Public API change not reflected in changelog or version bump",
+        "file": "src/index.ts"
+      },
+      "expires_at": null
+    },
+    {
+      "fingerprint": "sha256:99548c79eabd2388",
+      "dismissed_by": "dgabriel@gmail.com",
+      "dismissed_at": "2026-08-21T00:55:56.147Z",
+      "reason": "Test-inversion heuristic limitation, not a real quality gap: this PR only touches docs and a config-template comment string (plus two additive exports). The pre-existing tests in llm/provider.test.ts and prompt/templates.test.ts correctly pass identically on base and head because their underlying logic didn't change — there's nothing here for them to newly verify.",
+      "context": {
+        "title": "Test doesn't verify the change: src/prompt/templates.test.ts (38 tests)",
+        "file": ""
+      },
+      "expires_at": null
+    },
+    {
+      "fingerprint": "sha256:af9296b1808e08d0",
+      "dismissed_by": "dgabriel@gmail.com",
+      "dismissed_at": "2026-08-21T00:55:56.211Z",
+      "reason": "Test-inversion heuristic limitation, not a real quality gap: this PR only touches docs and a config-template comment string (plus two additive exports). The pre-existing tests in llm/provider.test.ts and prompt/templates.test.ts correctly pass identically on base and head because their underlying logic didn't change — there's nothing here for them to newly verify.",
+      "context": {
+        "title": "Test doesn't verify the change: parseFindingsFromLLM > parses well-formed LLM JSON response",
+        "file": ""
+      },
+      "expires_at": null
+    },
+    {
+      "fingerprint": "sha256:a13b40ecb43278f0",
+      "dismissed_by": "dgabriel@gmail.com",
+      "dismissed_at": "2026-08-21T00:55:56.278Z",
+      "reason": "Test-inversion heuristic limitation, not a real quality gap: this PR only touches docs and a config-template comment string (plus two additive exports). The pre-existing tests in llm/provider.test.ts and prompt/templates.test.ts correctly pass identically on base and head because their underlying logic didn't change — there's nothing here for them to newly verify.",
+      "context": {
+        "title": "Test doesn't verify the change: parseFindingsFromLLM > handles LLM response wrapped in markdown code blocks",
+        "file": ""
+      },
+      "expires_at": null
+    },
+    {
+      "fingerprint": "sha256:f0e9359b1601dfcb",
+      "dismissed_by": "dgabriel@gmail.com",
+      "dismissed_at": "2026-08-21T00:55:56.341Z",
+      "reason": "Test-inversion heuristic limitation, not a real quality gap: this PR only touches docs and a config-template comment string (plus two additive exports). The pre-existing tests in llm/provider.test.ts and prompt/templates.test.ts correctly pass identically on base and head because their underlying logic didn't change — there's nothing here for them to newly verify.",
+      "context": {
+        "title": "Test doesn't verify the change: parseFindingsFromLLM > handles LLM response that is just a JSON array",
+        "file": ""
+      },
+      "expires_at": null
+    },
+    {
+      "fingerprint": "sha256:03e86d8d15e0d08d",
+      "dismissed_by": "dgabriel@gmail.com",
+      "dismissed_at": "2026-08-21T00:55:56.404Z",
+      "reason": "Test-inversion heuristic limitation, not a real quality gap: this PR only touches docs and a config-template comment string (plus two additive exports). The pre-existing tests in llm/provider.test.ts and prompt/templates.test.ts correctly pass identically on base and head because their underlying logic didn't change — there's nothing here for them to newly verify.",
+      "context": {
+        "title": "Test doesn't verify the change: parseFindingsFromLLM > defaults missing fields gracefully",
+        "file": ""
+      },
+      "expires_at": null
+    },
+    {
+      "fingerprint": "sha256:34c45b677363627f",
+      "dismissed_by": "dgabriel@gmail.com",
+      "dismissed_at": "2026-08-21T00:55:56.463Z",
+      "reason": "Test-inversion heuristic limitation, not a real quality gap: this PR only touches docs and a config-template comment string (plus two additive exports). The pre-existing tests in llm/provider.test.ts and prompt/templates.test.ts correctly pass identically on base and head because their underlying logic didn't change — there's nothing here for them to newly verify.",
+      "context": {
+        "title": "Test doesn't verify the change: parseFindingsFromLLM > clamps confidence to",
+        "file": ""
+      },
+      "expires_at": null
+    },
+    {
+      "fingerprint": "sha256:0dc8ab8b2cb6808f",
+      "dismissed_by": "dgabriel@gmail.com",
+      "dismissed_at": "2026-08-21T00:55:56.526Z",
+      "reason": "Test-inversion heuristic limitation, not a real quality gap: this PR only touches docs and a config-template comment string (plus two additive exports). The pre-existing tests in llm/provider.test.ts and prompt/templates.test.ts correctly pass identically on base and head because their underlying logic didn't change — there's nothing here for them to newly verify.",
+      "context": {
+        "title": "Test doesn't verify the change: parseFindingsFromLLM > handles invalid JSON gracefully",
+        "file": ""
+      },
+      "expires_at": null
+    },
+    {
+      "fingerprint": "sha256:d0b0aa00fc1142cd",
+      "dismissed_by": "dgabriel@gmail.com",
+      "dismissed_at": "2026-08-21T00:55:56.586Z",
+      "reason": "Test-inversion heuristic limitation, not a real quality gap: this PR only touches docs and a config-template comment string (plus two additive exports). The pre-existing tests in llm/provider.test.ts and prompt/templates.test.ts correctly pass identically on base and head because their underlying logic didn't change — there's nothing here for them to newly verify.",
+      "context": {
+        "title": "Test doesn't verify the change: parseFindingsFromLLM > handles empty findings array",
+        "file": ""
+      },
+      "expires_at": null
+    },
+    {
+      "fingerprint": "sha256:e21e84d7bf74c138",
+      "dismissed_by": "dgabriel@gmail.com",
+      "dismissed_at": "2026-08-21T00:55:56.649Z",
+      "reason": "Test-inversion heuristic limitation, not a real quality gap: this PR only touches docs and a config-template comment string (plus two additive exports). The pre-existing tests in llm/provider.test.ts and prompt/templates.test.ts correctly pass identically on base and head because their underlying logic didn't change — there's nothing here for them to newly verify.",
+      "context": {
+        "title": "Test doesn't verify the change: parseFindingsFromLLM > skips malformed individual findings without failing entirely",
+        "file": ""
+      },
+      "expires_at": null
+    },
+    {
+      "fingerprint": "sha256:d7bd55cb4ededd0b",
+      "dismissed_by": "dgabriel@gmail.com",
+      "dismissed_at": "2026-08-21T00:55:56.709Z",
+      "reason": "Test-inversion heuristic limitation, not a real quality gap: this PR only touches docs and a config-template comment string (plus two additive exports). The pre-existing tests in llm/provider.test.ts and prompt/templates.test.ts correctly pass identically on base and head because their underlying logic didn't change — there's nothing here for them to newly verify.",
+      "context": {
+        "title": "Test doesn't verify the change: parseFindingsFromLLM > handles evidence in nested format from LLM",
+        "file": ""
+      },
+      "expires_at": null
+    },
+    {
+      "fingerprint": "sha256:6a70303d4a34611e",
+      "dismissed_by": "dgabriel@gmail.com",
+      "dismissed_at": "2026-08-21T00:55:56.770Z",
+      "reason": "Already addressed in this same PR: docs/prompt-templates.md:119 adds a Warning note directly below the flagged example explaining that unknown categories (including 'accessibility') are silently coerced to 'architecture'.",
+      "context": {
+        "title": "Docs mention non‑existent `accessibility` category in prompt template example",
+        "file": "docs/prompt-templates.md"
+      },
+      "expires_at": null
+    }
+  ]
+}
