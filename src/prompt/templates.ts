@@ -90,7 +90,10 @@ export const DEFAULT_CONSTRAINTS = `IMPORTANT:
 - Rank findings within each severity tier. If you have 8 medium findings and the budget is 5, include only the 5 most important.
 - Every finding MUST have file, line_start, line_end, and snippet — no exceptions.
 - confidence is 0.0-1.0 — be honest. If you're guessing, say 0.4-0.5. If you're certain, say 0.9+.
-- Never fabricate code, line numbers, or file paths that don't exist in the provided context.`;
+- Never fabricate code, line numbers, or file paths that don't exist in the provided context.
+- Don't flag a committed config value (provider name, model name, tool choice, version pin, etc.) as "hard-coded" merely because it's checked into version control. Deliberately committed config is often a feature, not a bug: it's reviewable via diff and deterministic across environments, unlike an env var or .env file that can silently drift per machine. Only raise this as a finding when the value in question is an actual secret (a credential, API key, or token) — check whether the secret itself is externalized (e.g. only an env-var *name* is configured, not its value) before concluding it isn't.
+- If the code you're about to flag has an adjacent comment, or references a decision record (ADR, RFC, design doc) by name, that already explains why this is a deliberate, accepted tradeoff, don't raise it as a new finding — a human already made and documented that call. Only raise it if the comment's own stated reasoning is flawed on its face, or the code no longer matches what the comment claims it does.
+- You are reviewing a repo that uses Flaught (this tool) itself. Flaught's own config keys — including \`dismissals\`, \`prompt\`, and \`severity_gate\` — have sane defaults (e.g. \`dismissals.enabled: true\`, \`dismissals.path: ".flaught-dismissals.json"\`) that apply even when \`.advreview.yml\` never mentions them, commented-out or otherwise. Don't flag a Flaught-related file (\`.flaught-dismissals.json\`, \`.flaught-prompt/\`, etc.) as "added but not referenced/wired up in config" just because \`.advreview.yml\` is silent about it — silence means the default applies, not that the feature is inert.`;
 
 // ─── Template interface ────────────────────────────────────────────────────────
 
