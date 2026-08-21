@@ -2,7 +2,8 @@ import { describe, it, expect, afterEach } from "vitest";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import * as os from "node:os";
-import { loadConfig, findConfigFile } from "./config.js";
+import { loadConfig, findConfigFile, initConfig } from "./config.js";
+import * as yaml from "js-yaml";
 
 let tempDirs: string[] = [];
 
@@ -88,3 +89,50 @@ describe("findConfigFile", () => {
     expect(findConfigFile(dir)).toBeNull();
   });
 });
+
+describe("initConfig", () => {
+  it("warns that commented-out blocks are already active defaults", () => {
+    // Regression: every commented block (tools, test_inversion, etc.) shows
+    // this schema's actual default, in effect whether or not it's
+    // uncommented -- e.g. tools.semgrep.enabled defaults to true even with
+    // `tools:` fully commented out. A user reading the template as "commented
+    // = off" (the natural reading of a commented-out YAML block) silently
+    // gets semgrep running with no indication it isn't opt-in.
+    const dir = tempRepo();
+    const filePath = initConfig(dir);
+    const content = fs.readFileSync(filePath, "utf-8");
+    expect(content).toContain("already in effect whether or not you uncomment it");
+  });
+
+  it("writes a template whose uncommented values equal the schema defaults", async () => {
+    const dir = tempRepo();
+    initConfig(dir);
+    const raw = fs.readFileSync(path.join(dir, ".advreview.yml"), "utf-8");
+
+    // Extract just the commented `tools:` block (the rest of the template
+    // has prose section-header comments that aren't valid YAML once
+    // uncommented) and strip its leading "# " to get back to the config it
+    // describes, then confirm the documented default matches what the
+    // schema actually defaults to.
+    const toolsBlockMatch = raw.match(/^# tools:\n(?:#.*\n)+/m);
+    expect(toolsBlockMatch).not.toBeNull();
+    const uncommentedTools = toolsBlockMatch![0]
+      .split("\n")
+      .map((line) => line.replace(/^#\s?/, ""))
+      .join("\n");
+    const parsed = yaml.load(uncommentedTools) as Record<string, unknown>;
+    const tools = parsed.tools as Record<string, { enabled?: boolean }>;
+    expect(tools.semgrep?.enabled).toBe(true);
+    expect(tools.linter?.enabled).toBe(true);
+    expect(tools.vuln_scanner?.enabled).toBe(true);
+
+    const config = await loadConfig(filePathFor(dir));
+    expect(config.tools.semgrep.enabled).toBe(true);
+    expect(config.tools.linter.enabled).toBe(true);
+    expect(config.tools.vuln_scanner.enabled).toBe(true);
+  });
+});
+
+function filePathFor(dir: string): string {
+  return path.join(dir, ".advreview.yml");
+}

@@ -189,6 +189,34 @@ describe("renderMarkdownReport", () => {
     expect(md).toContain("Flaught v0.4.1");
     expect(md).toContain("Schema v2");
   });
+
+  it("warns when a deterministic tool failed to run", () => {
+    const artifact = makeArtifact({
+      tools_executed: [
+        { tool: "semgrep", version: "unknown", exit_code: 1, raw_findings_count: 0, command: "(failed)" },
+      ],
+    });
+    const md = renderMarkdownReport(artifact);
+    expect(md).toContain("did not run");
+    expect(md).toContain("`semgrep`");
+    expect(md).toContain("not because the scan came back clean");
+  });
+
+  it("does not warn when every tool ran (even with 0 findings)", () => {
+    const artifact = makeArtifact({
+      tools_executed: [
+        { tool: "semgrep", version: "1.50.0", exit_code: 0, raw_findings_count: 0, command: "semgrep --config auto --json ." },
+      ],
+    });
+    const md = renderMarkdownReport(artifact);
+    expect(md).not.toContain("did not run");
+  });
+
+  it("omits the tools warning entirely when tools_executed is empty", () => {
+    const artifact = makeArtifact({ tools_executed: [] });
+    const md = renderMarkdownReport(artifact);
+    expect(md).not.toContain("did not run");
+  });
 });
 
 describe("renderJsonArtifact", () => {

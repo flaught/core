@@ -41,6 +41,11 @@ export function renderMarkdownReport(artifact: FindingsArtifact): string {
   // Summary
   sections.push(renderSummary(artifact));
 
+  // Tool execution warnings (a tool that didn't run is not the same as a
+  // tool that ran clean — both report 0 findings for that tool otherwise)
+  const toolsWarning = renderToolsWarning(artifact);
+  if (toolsWarning) sections.push(toolsWarning);
+
   // Findings by severity
   for (const severity of SEVERITY_ORDER) {
     const findings = artifact.findings.filter((f) => f.severity === severity);
@@ -69,6 +74,26 @@ function renderHeader(_artifact: FindingsArtifact): string {
 
 function renderCaveat(): string {
   return `> ⚠️ ${CAVEAT}`;
+}
+
+/**
+ * A tool that failed to run at all (not found, crashed, etc.) reports 0
+ * findings the same as a tool that ran and genuinely found nothing --
+ * `command: "(failed)"` is the only signal distinguishing the two, and
+ * nothing surfaced it in the human-facing report before this. Silent 0
+ * findings reads as "clean scan"; this makes "didn't actually scan" visible
+ * instead, in the same place a reader already checks for the review's
+ * findings.
+ */
+function renderToolsWarning(artifact: FindingsArtifact): string | null {
+  const failed = artifact.tools_executed.filter((t) => t.command === "(failed)");
+  if (failed.length === 0) return null;
+
+  const lines = [
+    `> ⚠️ **${failed.length} deterministic tool(s) did not run** — their findings below are 0 because the tool itself failed to execute (not found, crashed, or timed out), not because the scan came back clean:`,
+    ...failed.map((t) => `> - \`${t.tool}\` — not run (is it installed and on \`PATH\`?)`),
+  ];
+  return lines.join("\n");
 }
 
 function renderSummary(artifact: FindingsArtifact): string {
