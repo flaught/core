@@ -131,6 +131,14 @@ git worktree remove .flaught-worktree-<timestamp>
 
 (Worktrees are named `.flaught-worktree-<epoch-ms>`, not by SHA — use `git worktree list` to find the exact path.)
 
+### Too many / unrelated tests flagged
+
+`test_inversion.scope_to_blast_radius` (default `true`) limits flagged findings to tests whose file is a changed file or in its one-hop dependency blast radius — a test file the diff couldn't possibly have affected passing unchanged isn't a quality signal about *this* PR.
+
+This is best-effort: which file a test belongs to is extracted from the test runner's own output. Some shapes don't expose it — Go and Rust's default output has no file info at all, and a slow-running JS/TS test file that your reporter expands into individual per-test lines (rather than one per-file summary line) loses the file association for those individual lines too. In both cases the test is kept **unscoped** rather than silently dropped — a false positive you re-triage is safer than a real issue that quietly disappears — so you may still see some findings for files well outside the diff. If it's still too noisy for your test runner's output format, set `scope_to_blast_radius: false` to go back to flagging everything, or `test_inversion.enabled: false` to disable the check entirely.
+
+If it's specifically a **docs/text-only PR** showing findings like this, `test_inversion.skip_docs_only_diffs` (default `true`) should already prevent it — test inversion doesn't run at all when every changed file is documentation, which avoids the per-test-line gap above entirely rather than relying on scoping to catch it after the fact. If you're still seeing it, check that all the changed files are actually recognized as documentation (markdown/text extensions, or `README`/`LICENSE`/`CHANGELOG`-style extensionless files) — a mixed PR with even one code file will run test inversion normally.
+
 ## Deterministic tool issues
 
 ### Semgrep not found

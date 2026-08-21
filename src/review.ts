@@ -6,7 +6,7 @@
 // Read version from package.json — the compiled output is CJS, so require() works directly
 const pkgVersion: string = require("../package.json").version;
 
-import { assembleContext, type ReviewContext } from "./context/assembler.js";
+import { assembleContext, type ReviewContext, type ChangedFile } from "./context/assembler.js";
 import { loadConfig } from "./config.js";
 import type { FlaughtConfig } from "./schemas/config.js";
 import { createProvider, type LLMReviewResult } from "./llm/provider.js";
@@ -291,7 +291,11 @@ export async function runReview(options: ReviewOptions = {}): Promise<ReviewResu
   // 5. Test inversion
   let testInversion: TestInversion | null = null;
 
-  if (context.changedFiles.length > 0 && config.test_inversion.enabled) {
+  const docsOnlyDiff = config.test_inversion.skip_docs_only_diffs && isDocsOnlyDiff(context.changedFiles);
+
+  if (docsOnlyDiff) {
+    progress("  All changed files are documentation — skipping test inversion (no code for a test to verify).");
+  } else if (context.changedFiles.length > 0 && config.test_inversion.enabled) {
     progress("Running test inversion (pre/post change test comparison)...");
     const relevantFiles = new Set<string>([
       ...context.changedFiles.map((f) => f.path),
@@ -567,6 +571,30 @@ function buildArtifact(
 
 function generateRunId(): string {
   return `flaught-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
+// ─── Docs-only diff detection ───────────────────────────────────────────────
+
+const DOC_EXTENSIONS = new Set([".md", ".mdx", ".txt", ".rst", ".adoc"]);
+
+// Common documentation files with no extension — checked by basename, case-insensitively.
+const DOC_BASENAMES = new Set(["readme", "license", "changelog", "notice", "authors", "contributing"]);
+
+export function isDocFile(filePath: string): boolean {
+  const slash = filePath.lastIndexOf("/");
+  const basename = slash === -1 ? filePath : filePath.slice(slash + 1);
+  const dot = basename.lastIndexOf(".");
+
+  if (dot > 0) {
+    return DOC_EXTENSIONS.has(basename.slice(dot).toLowerCase());
+  }
+  // No extension (or a dotfile with no further extension) — check by basename.
+  return DOC_BASENAMES.has(basename.toLowerCase());
+}
+
+/** True when there's at least one changed file and every one of them is documentation. */
+export function isDocsOnlyDiff(changedFiles: ChangedFile[]): boolean {
+  return changedFiles.length > 0 && changedFiles.every((f) => isDocFile(f.path));
 }
 
 // ─── Exit code computation ──────────────────────────────────────────────────
