@@ -269,6 +269,16 @@ describe("createProvider", () => {
     expect(() => createProvider(config)).toThrow(/Missing API key/);
   });
 
+  it("throws MissingAPIKeyError for a fully-default config (empty llm block) when GROQ_API_KEY is missing", () => {
+    // The zero-config path a brand-new user hits first: no .advreview.yml
+    // llm section at all, so every field — including provider and
+    // api_key_env — comes from the schema default (groq / GROQ_API_KEY).
+    const config = FlaughtConfigSchema.parse({});
+    delete process.env.GROQ_API_KEY;
+    expect(() => createProvider(config)).toThrow(/Missing API key/);
+    expect(() => createProvider(config)).toThrow(/GROQ_API_KEY/);
+  });
+
   it("throws MissingAPIKeyError when Gemini key is missing", () => {
     const config = FlaughtConfigSchema.parse({
       llm: { provider: "gemini", model: "gemini-1.5-pro", api_key_env: "GEMINI_API_KEY" },
