@@ -308,6 +308,50 @@
         "file": ""
       },
       "expires_at": null
+    },
+    {
+      "fingerprint": "sha256:ce61c6ee9e36df73",
+      "dismissed_by": "dgabriel@gmail.com",
+      "dismissed_at": "2026-08-21T21:48:02.478Z",
+      "reason": "Exaggerated context-window nag: a few hundred extra characters against buildUserPrompt's 100k-char total prompt cap and the multi-thousand-token context windows of every supported provider is not a real overflow risk. Recurring shape (also raised, differently worded, when DEFAULT_CONSTRAINTS grew earlier) -- generic prompt-bloat concern not calibrated to actual token budgets.",
+      "context": {
+        "title": "Prompt size inflation risks LLM context overflow",
+        "file": "src/prompt/templates.ts"
+      },
+      "expires_at": null
+    },
+    {
+      "fingerprint": "sha256:b777cce7fa3dc63d",
+      "dismissed_by": "dgabriel@gmail.com",
+      "dismissed_at": "2026-08-21T21:48:02.541Z",
+      "reason": "Fair point in isolation, but matches this file's own pre-existing convention -- the sibling assertions right above (toContain(\"Rank findings\"), toContain(\"Never fabricate\")) are equally substring-based and equally brittle to rewording. Not a new pattern introduced here; consistent with how this test file already verifies prompt content.",
+      "context": {
+        "title": "Brittle tests assert exact wording of constraints",
+        "file": "src/prompt/templates.test.ts"
+      },
+      "expires_at": null
+    },
+    {
+      "fingerprint": "sha256:89ef9d8d84bbd941",
+      "dismissed_by": "dgabriel@gmail.com",
+      "dismissed_at": "2026-08-21T21:48:02.603Z",
+      "reason": "Genuine but low-probability edge case (stray output interleaved between a file's summary line and its own slow-test sub-lines). Matches this exact heuristic's own documented framing in docs/troubleshooting.md as best-effort, not a hard guarantee -- a false positive re-triaged is safer than silently dropping a real one, which is the whole reason this fallback exists.",
+      "context": {
+        "title": "CurrentVitestFile tracking may mis‑associate test lines after unrelated output",
+        "file": "src/test-inversion/runner.ts"
+      },
+      "expires_at": null
+    },
+    {
+      "fingerprint": "sha256:0fad53fd8a320874",
+      "dismissed_by": "dgabriel@gmail.com",
+      "dismissed_at": "2026-08-21T21:48:02.665Z",
+      "reason": "Misreading: the updated comment on extractVitestFile explicitly attributes the sub-line association to parseTextTestOutput ('parseTextTestOutput below associates it...'), not to extractVitestFile itself. The function and comment are not out of sync -- the comment correctly scopes which function does what.",
+      "context": {
+        "title": "Documentation and implementation mismatch for Vitest slow‑test handling",
+        "file": "src/test-inversion/runner.ts"
+      },
+      "expires_at": null
     }
   ]
 }
