@@ -107,6 +107,7 @@ llm:
 #   enabled: true
 #   # command: pytest  # override auto-detected test command
 #   scope_to_blast_radius: true  # only flag tests in the diff's changed/blast-radius files
+#   skip_docs_only_diffs: true   # skip entirely when every changed file is documentation
 
 # ── Scope-creep detection ─────────────────────────────────
 # scope_creep:

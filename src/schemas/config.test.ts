@@ -19,6 +19,7 @@ describe("FlaughtConfigSchema", () => {
     expect(config.tools.vuln_scanner.enabled).toBe(true);
     expect(config.test_inversion.enabled).toBe(true);
     expect(config.test_inversion.scope_to_blast_radius).toBe(true);
+    expect(config.test_inversion.skip_docs_only_diffs).toBe(true);
     expect(config.scope_creep.enabled).toBe(true);
     expect(config.scope_creep.intent_source).toBe("pr_description");
     expect(config.scope_creep.exclude_paths).toEqual([]);
@@ -58,6 +59,8 @@ describe("FlaughtConfigSchema", () => {
       test_inversion: {
         enabled: true,
         command: "pytest -x",
+        scope_to_blast_radius: false,
+        skip_docs_only_diffs: false,
       },
       scope_creep: {
         enabled: true,
@@ -91,6 +94,8 @@ describe("FlaughtConfigSchema", () => {
     expect(config.llm.model).toBe("llama-3.1-70b");
     expect(config.tools.semgrep.enabled).toBe(false);
     expect(config.tools.linter.command).toBe("ruff check");
+    expect(config.test_inversion.scope_to_blast_radius).toBe(false);
+    expect(config.test_inversion.skip_docs_only_diffs).toBe(false);
     expect(config.lighthouse.preview_url).toBe("https://deploy-preview.example.com");
     expect(config.severity_gate.fail_on).toBe("critical");
     expect(config.exclude.patterns).toEqual(["\\.spec\\.ts$"]);

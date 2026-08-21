@@ -76,6 +76,18 @@ const TestInversionSchema = z.object({
    * unscoped rather than silently dropped.
    */
   scope_to_blast_radius: z.boolean().default(true),
+  /**
+   * Skip test inversion entirely when every changed file is documentation
+   * (markdown/text, or a common extensionless doc file like README/LICENSE)
+   * — no test can meaningfully "verify" a prose change, so running the whole
+   * suite twice just to flag it as suspicious is pure noise. This also
+   * sidesteps `scope_to_blast_radius`'s known gap: a slow test file that a
+   * reporter expands into individual per-test lines (rather than one
+   * per-file summary line) loses its file association, so those lines stay
+   * unscoped even on a docs-only diff. Skipping the run outright avoids that
+   * entirely, rather than relying on scoping to filter it after the fact.
+   */
+  skip_docs_only_diffs: z.boolean().default(true),
 });
 
 // ─── Scope creep ───────────────────────────────────────────────────────────

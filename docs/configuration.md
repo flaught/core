@@ -255,6 +255,7 @@ test_inversion:
   enabled: true
   command: pytest                # override auto-detected test command
   scope_to_blast_radius: true    # only flag tests in the diff's changed/blast-radius files
+  skip_docs_only_diffs: true     # skip entirely when every changed file is documentation
 ```
 
 Auto-detection rules:
@@ -267,7 +268,9 @@ Test inversion creates a temporary git worktree at the base SHA, installs depend
 
 **`scope_to_blast_radius`** (default `true`): the whole test suite still runs on both sides — that's how the comparison works — but only a test whose file is a changed file, or in the changed files' one-hop dependency blast radius (the same graph used for LLM context), is reported as a finding. Without this, every test file the diff didn't happen to touch "passes on both base and head" trivially, because nothing about what it tests changed — which is nearly the entire suite on a small PR. Worse, a different PR touches a different subset of files, so the flagged set is different every time and never converges under [dismissal](dismissals.md): each PR produces a disjoint batch of "new" test-quality findings with fresh fingerprints, forever.
 
-This is best-effort: the file a test belongs to is extracted from the test runner's own output, which some formats (Go, Rust) don't include. When a test's file can't be determined, it's kept unscoped rather than silently dropped — a false positive you re-triage is safer than a real issue that quietly disappears. Set `scope_to_blast_radius: false` to go back to flagging every test in the suite.
+This is best-effort: the file a test belongs to is extracted from the test runner's own output, which some formats (Go, Rust) don't include — and even a well-supported format can lose the file for an individual test when a slow test file gets expanded into per-test lines by the reporter instead of one per-file summary line. When a test's file can't be determined, it's kept unscoped rather than silently dropped — a false positive you re-triage is safer than a real issue that quietly disappears. Set `scope_to_blast_radius: false` to go back to flagging every test in the suite.
+
+**`skip_docs_only_diffs`** (default `true`): when every changed file is documentation (markdown/text, or a common extensionless doc file like `README`/`LICENSE`/`CHANGELOG`), test inversion doesn't run at all. No test can meaningfully "verify" a prose change, so running the whole suite twice just to flag some of it as suspicious is pure noise — and it sidesteps `scope_to_blast_radius`'s per-test-line gap above entirely, rather than relying on scoping to filter the result after the fact. Set to `false` to always run test inversion regardless of what changed.
 
 ## Scope-creep detection
 

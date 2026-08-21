@@ -3,7 +3,7 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import * as os from "node:os";
 import { simpleGit, type SimpleGit } from "simple-git";
-import { runReview } from "./review.js";
+import { runReview, isDocFile, isDocsOnlyDiff } from "./review.js";
 import type { Finding } from "./schemas/findings.js";
 import { resolveDismissalsPath, loadDismissalStore, addDismissal, saveDismissalStore } from "./dismissals/store.js";
 
@@ -85,6 +85,54 @@ describe("noise budget enforcement", () => {
     expect(result[0]!.severity).toBe("critical");
     expect(result[1]!.severity).toBe("high");
     expect(result[2]!.severity).toBe("medium");
+  });
+});
+
+// ─── Docs-only diff detection (unit) ──────────────────────────────────────────
+
+describe("isDocFile", () => {
+  it("recognizes markdown and text extensions", () => {
+    expect(isDocFile("docs/troubleshooting.md")).toBe(true);
+    expect(isDocFile("notes.txt")).toBe(true);
+    expect(isDocFile("guide.mdx")).toBe(true);
+    expect(isDocFile("intro.rst")).toBe(true);
+    expect(isDocFile("chapter.adoc")).toBe(true);
+  });
+
+  it("recognizes common extensionless doc files by basename, case-insensitively", () => {
+    expect(isDocFile("README")).toBe(true);
+    expect(isDocFile("LICENSE")).toBe(true);
+    expect(isDocFile("CHANGELOG")).toBe(true);
+    expect(isDocFile("license")).toBe(true);
+    expect(isDocFile("docs/CONTRIBUTING")).toBe(true);
+  });
+
+  it("does not treat code or config files as docs", () => {
+    expect(isDocFile("src/index.ts")).toBe(false);
+    expect(isDocFile(".advreview.yml")).toBe(false);
+    expect(isDocFile("package.json")).toBe(false);
+  });
+});
+
+describe("isDocsOnlyDiff", () => {
+  it("is true when every changed file is documentation", () => {
+    const files = [
+      { path: "README.md", additions: 1, deletions: 0, status: "modified" as const },
+      { path: "docs/api.md", additions: 2, deletions: 1, status: "modified" as const },
+    ];
+    expect(isDocsOnlyDiff(files)).toBe(true);
+  });
+
+  it("is false when any changed file is not documentation", () => {
+    const files = [
+      { path: "README.md", additions: 1, deletions: 0, status: "modified" as const },
+      { path: "src/index.ts", additions: 1, deletions: 0, status: "modified" as const },
+    ];
+    expect(isDocsOnlyDiff(files)).toBe(false);
+  });
+
+  it("is false for an empty changed-files list", () => {
+    expect(isDocsOnlyDiff([])).toBe(false);
   });
 });
 
@@ -350,5 +398,91 @@ describe("runReview (dismissals)", () => {
     expect(stillReported!.dismissal_reason).toContain("flaky");
     expect(second.exitCode).toBe(0);
     expect(second.markdown).toContain("DISMISSED");
+  }, 30_000);
+});
+
+// ─── Test inversion: docs-only diff skip ──────────────────────────────────────
+
+describe("runReview (test inversion — docs-only diffs)", () => {
+  afterEach(() => {
+    cleanup();
+  });
+
+  const advreviewYml = [
+    "version: 1",
+    "test_inversion:",
+    "  enabled: true",
+    "  command: node -e \"console.log('PASSED src/app.test.ts::t1')\"",
+    "scope_creep:",
+    "  enabled: false",
+    "tools:",
+    "  semgrep:",
+    "    enabled: false",
+    "  linter:",
+    "    enabled: false",
+    "  vuln_scanner:",
+    "    enabled: false",
+    "",
+  ].join("\n");
+
+  it("skips test inversion entirely when every changed file is documentation", async () => {
+    const repoPath = fs.mkdtempSync(path.join(os.tmpdir(), "flaught-docsonly-"));
+    tempDirs.push(repoPath);
+
+    const git = simpleGit(repoPath);
+    await git.init();
+    await git.addConfig("user.email", "test@flaught.dev");
+    await git.addConfig("user.name", "Flaught Test");
+
+    await commitFiles(git, {
+      ".advreview.yml": advreviewYml,
+      "README.md": "# Hello\n",
+    }, "initial");
+
+    await commitFiles(git, {
+      "README.md": "# Hello\n\nMore docs.\n",
+    }, "docs-only change");
+
+    const result = await runReview({
+      repoPath,
+      baseRef: "HEAD~1",
+      headRef: "HEAD",
+      configPath: path.join(repoPath, ".advreview.yml"),
+      skipLlm: true,
+    });
+
+    expect(result.artifact.test_inversion).toBeNull();
+    expect(result.artifact.findings.find((f) => f.category === "test-quality")).toBeUndefined();
+  }, 30_000);
+
+  it("still runs test inversion when a code file changed alongside docs", async () => {
+    const repoPath = fs.mkdtempSync(path.join(os.tmpdir(), "flaught-docsonly-"));
+    tempDirs.push(repoPath);
+
+    const git = simpleGit(repoPath);
+    await git.init();
+    await git.addConfig("user.email", "test@flaught.dev");
+    await git.addConfig("user.name", "Flaught Test");
+
+    await commitFiles(git, {
+      ".advreview.yml": advreviewYml,
+      "README.md": "# Hello\n",
+      "src/index.ts": "console.log('hello');",
+    }, "initial");
+
+    await commitFiles(git, {
+      "README.md": "# Hello\n\nMore docs.\n",
+      "src/index.ts": "console.log('hello world');",
+    }, "docs + code change");
+
+    const result = await runReview({
+      repoPath,
+      baseRef: "HEAD~1",
+      headRef: "HEAD",
+      configPath: path.join(repoPath, ".advreview.yml"),
+      skipLlm: true,
+    });
+
+    expect(result.artifact.test_inversion).not.toBeNull();
   }, 30_000);
 });
