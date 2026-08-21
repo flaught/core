@@ -396,6 +396,39 @@
         "file": ".flaught-dismissals.json"
       },
       "expires_at": null
+    },
+    {
+      "fingerprint": "sha256:eb261f80109762fb",
+      "dismissed_by": "dgabriel@gmail.com",
+      "dismissed_at": "2026-08-21T22:25:55.726Z",
+      "reason": "Generic 'documentation could go stale if behavior changes' nag -- true of every comment in every codebase, not specific or actionable here.",
+      "context": {
+        "title": "Stale documentation risk in initConfig template comment",
+        "file": "src/config.ts"
+      },
+      "expires_at": null
+    },
+    {
+      "fingerprint": "sha256:8990111195593bce",
+      "dismissed_by": "dgabriel@gmail.com",
+      "dismissed_at": "2026-08-21T22:25:55.796Z",
+      "reason": "Misreading: comparing config.ts's top-of-file JSDoc (documents the module for flaught developers) against the new comment inside the initConfig template STRING (ships into every user's generated .advreview.yml) as if they're the redundant same thing. Different audience, different artifact -- not duplicated content.",
+      "context": {
+        "title": "Duplicate explanatory comment blocks in initConfig template",
+        "file": "src/config.ts"
+      },
+      "expires_at": null
+    },
+    {
+      "fingerprint": "sha256:8f1ea761765f655a",
+      "dismissed_by": "dgabriel@gmail.com",
+      "dismissed_at": "2026-08-21T22:25:55.860Z",
+      "reason": "Micro-perf nitpick on a array of at most 3 tool entries (semgrep/linter/vuln_scanner), filtered once per review run. Precomputing would add complexity for no measurable benefit.",
+      "context": {
+        "title": "Unnecessary iteration over tools_executed on every markdown render",
+        "file": "src/report/markdown.ts"
+      },
+      "expires_at": null
     }
   ]
 }
