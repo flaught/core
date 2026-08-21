@@ -415,6 +415,19 @@ describe("default content constants", () => {
     expect(DEFAULT_CONSTRAINTS).toContain("Never fabricate");
     expect(DEFAULT_CONSTRAINTS).toContain("confidence");
   });
+
+  it("DEFAULT_CONSTRAINTS distinguishes committed config from actual secrets", () => {
+    expect(DEFAULT_CONSTRAINTS).toContain("hard-coded");
+    expect(DEFAULT_CONSTRAINTS).toContain("actual secret");
+  });
+
+  it("DEFAULT_CONSTRAINTS defers to an adjacent comment or decision record", () => {
+    expect(DEFAULT_CONSTRAINTS).toContain("decision record");
+  });
+
+  it("DEFAULT_CONSTRAINTS knows Flaught's own config defaults", () => {
+    expect(DEFAULT_CONSTRAINTS).toContain("dismissals.enabled");
+  });
 });
 
 // ─── Integration: loadTemplates → assembleSystemPrompt ──────────────────────────

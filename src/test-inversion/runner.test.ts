@@ -71,6 +71,37 @@ describe("parseTextTestOutput — vitest default reporter", () => {
   });
 });
 
+describe("parseTextTestOutput — vitest slow-test sub-lines", () => {
+  it("associates an indented slow-test line with the file summary line that preceded it", () => {
+    const output = [
+      "✓ src/config.test.ts (7 tests) 15ms",
+      "✓ src/context/assembler.test.ts (7 tests) 3956ms",
+      "  ✓ assembleContext (integration) > detects added files  530ms",
+      "  ✓ contextToJSON > serializes Maps to Records for JSON output  530ms",
+      "✓ src/review.test.ts (15 tests) 22433ms",
+      "  ✓ runReview (no-llm mode) > produces valid JSON artifact  4004ms",
+    ].join("\n");
+
+    const { passed } = parseTextTestOutput(output, "npm test");
+    const byName = Object.fromEntries(passed.map((p) => [p.name, p.file]));
+
+    expect(byName["src/config.test.ts (7 tests)"]).toBe("src/config.test.ts");
+    expect(byName["src/context/assembler.test.ts (7 tests)"]).toBe("src/context/assembler.test.ts");
+    expect(byName["assembleContext (integration) > detects added files"]).toBe("src/context/assembler.test.ts");
+    expect(byName["contextToJSON > serializes Maps to Records for JSON output"]).toBe(
+      "src/context/assembler.test.ts",
+    );
+    expect(byName["src/review.test.ts (15 tests)"]).toBe("src/review.test.ts");
+    expect(byName["runReview (no-llm mode) > produces valid JSON artifact"]).toBe("src/review.test.ts");
+  });
+
+  it("still falls back to null when a slow-test line appears before any file summary line", () => {
+    const output = "  ✓ some orphaned test line  530ms";
+    const { passed } = parseTextTestOutput(output, "npm test");
+    expect(passed).toEqual([{ name: "some orphaned test line", file: null }]);
+  });
+});
+
 describe("parseTextTestOutput — go/rust have no file info", () => {
   it("go: file is always null", () => {
     const { passed } = parseTextTestOutput("--- PASS: TestSomething", "go test ./...");

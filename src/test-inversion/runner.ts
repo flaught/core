@@ -353,10 +353,17 @@ export function extractPytestFile(nodeId: string): string | null {
 }
 
 /**
- * Best-effort file extraction from vitest's default (non-verbose) reporter
- * line, which is per-file: "src/foo.test.ts (7 tests)". Returns null for
- * anything else (e.g. an individual "describe > test name" line from a
- * verbose reporter) rather than guessing.
+ * Best-effort file extraction from vitest's per-file summary line: "src/foo.test.ts
+ * (7 tests)". Returns null for anything else (e.g. an individual "describe >
+ * test name" line) rather than guessing.
+ *
+ * Note this per-file line isn't the only shape vitest's *default* reporter
+ * emits, even without `--reporter=verbose`: any individual test slower than
+ * the slow-test threshold (~300ms) also gets its own indented line, printed
+ * right after its file's summary line. That line has no file info of its
+ * own — `parseTextTestOutput` below associates it with the file line that
+ * most recently preceded it, rather than treating the absence of a match
+ * here as unscopable.
  */
 export function extractVitestFile(raw: string): string | null {
   const match = /^(.+?)\s+\(\d+\s+tests?\)$/.exec(raw);
@@ -370,6 +377,10 @@ export function parseTextTestOutput(output: string, _command: string): { passed:
   const seenPassed = new Set<string>();
   const seenFailed = new Set<string>();
   const lines = output.split("\n");
+  // Vitest prints a file's slow sub-test lines immediately after that file's
+  // own summary line — track the most recent one as a fallback for a
+  // sub-test line that doesn't parse as a file summary on its own.
+  let currentVitestFile: string | null = null;
 
   for (const line of lines) {
     // Jest: PASS src/foo.test.ts > test name
@@ -408,7 +419,9 @@ export function parseTextTestOutput(output: string, _command: string): { passed:
     const vitestPass = line.match(/^[\s]*✓\s+(.+?)(?:\s+\d)/);
     if (vitestPass) {
       const name = vitestPass[1]!.trim();
-      if (!seenPassed.has(name)) { seenPassed.add(name); passed.push({ name, file: extractVitestFile(name) }); }
+      const extracted = extractVitestFile(name);
+      if (extracted) currentVitestFile = extracted;
+      if (!seenPassed.has(name)) { seenPassed.add(name); passed.push({ name, file: extracted ?? currentVitestFile }); }
       continue;
     }
 
@@ -416,7 +429,9 @@ export function parseTextTestOutput(output: string, _command: string): { passed:
     const vitestFail = line.match(/^[\s]*✗\s+(.+)/) || line.match(/^[\s]*FAIL\s+(.+)/);
     if (vitestFail) {
       const name = vitestFail[1]!.trim();
-      if (!seenFailed.has(name)) { seenFailed.add(name); failed.push({ name, file: extractVitestFile(name) }); }
+      const extracted = extractVitestFile(name);
+      if (extracted) currentVitestFile = extracted;
+      if (!seenFailed.has(name)) { seenFailed.add(name); failed.push({ name, file: extracted ?? currentVitestFile }); }
       continue;
     }
 
