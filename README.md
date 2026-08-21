@@ -38,18 +38,9 @@ npm install -g @flaught/core
 
 Pick your environment and paste:
 
-### Terminal
-
-```
-flaught init                    # scaffold .advreview.yml + .flaught-prompt/
-flaught review                  # full adversarial review vs the merge-base with main/master (falls back to HEAD~1)
-flaught review --base main      # review against main
-flaught review --no-llm         # deterministic tools only (no API key)
-flaught review --output findings.json --quiet   # CI mode
-flaught dismiss D-0002 --artifact findings.json --reason "..." # suppress a false positive, persisted across runs
-```
-
 ### Any AI coding agent (Claude Code, Codex, Cursor, pi, etc.)
+
+**Prompt:**
 
 ```
 Install and run Flaught (adversarial code review) on this project:
@@ -61,6 +52,28 @@ For the full LLM adversarial pass, set an API key (GROQ_API_KEY by
 default; for another provider, also set llm.provider/api_key_env in
 .advreview.yml) and drop --no-llm.
 ```
+
+### Manual
+
+```
+flaught init                    # scaffold .advreview.yml + .flaught-prompt/
+flaught review                  # full adversarial review vs the merge-base with main/master (falls back to HEAD~1)
+flaught review --base main      # review against main
+flaught review --no-llm         # deterministic tools only (no API key)
+flaught review --output findings.json --quiet   # CI mode
+flaught dismiss D-0002 --artifact findings.json --reason "..." # suppress a false positive, persisted across runs
+```
+
+### API key
+
+`flaught init` defaults to Groq. Generate a free key at [console.groq.com/keys](https://console.groq.com/keys), then:
+
+```bash
+export GROQ_API_KEY=gsk_...
+flaught review
+```
+
+Using OpenAI, Gemini, Anthropic (Claude), or Ollama instead? See [LLM providers](https://github.com/flaught/core/blob/main/docs/configuration.md#llm-providers) for the full config reference.
 
 ### GitHub Actions
 
