@@ -55,3 +55,13 @@ export function findActiveDismissal(
   if (isExpired(entry, now)) return null;
   return entry;
 }
+
+/** All non-expired entries in the store, most-recently-dismissed first. */
+export function getActiveDismissals(
+  store: DismissalStore,
+  now: Date = new Date(),
+): DismissalEntry[] {
+  return store.dismissals
+    .filter((d) => !isExpired(d, now))
+    .sort((a, b) => new Date(b.dismissed_at).getTime() - new Date(a.dismissed_at).getTime());
+}

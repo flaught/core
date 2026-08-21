@@ -383,7 +383,13 @@ function handleError(err: unknown): never {
     console.error(`\n❌ ${String(err)}`);
   }
 
-  process.exit(1);
+  // Exit 1 is reserved for "the review completed and found real findings at
+  // or above the severity gate" (see computeExitCode in review.ts). Any error
+  // reaching here means the review did NOT complete normally — that's a tool
+  // fault (git failure, config error, unclassified LLM/network error), not
+  // evidence of a real code problem. Conflating the two is exactly what let
+  // LLM/infra outages block merges the same way a genuine finding does.
+  process.exit(2);
 }
 
 program.parse();

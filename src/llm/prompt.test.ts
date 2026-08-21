@@ -1,8 +1,21 @@
 import { describe, it, expect } from "vitest";
-import { buildSystemPrompt, buildUserPrompt } from "./prompt.js";
+import { buildSystemPrompt, buildUserPrompt, formatDismissalsForPrompt } from "./prompt.js";
 import { FlaughtConfigSchema } from "../schemas/config.js";
 import type { ReviewContext } from "../context/assembler.js";
 import { NO_TEMPLATES, type PromptTemplates } from "../prompt/templates.js";
+import type { DismissalEntry } from "../schemas/dismissals.js";
+
+function makeDismissal(overrides: Partial<DismissalEntry> = {}): DismissalEntry {
+  return {
+    fingerprint: "sha256:abc123",
+    dismissed_by: "jane@example.com",
+    dismissed_at: "2025-01-15T10:30:00Z",
+    reason: "Doc/ADR diff size is expected for a CI-wiring change",
+    context: { title: "Extensive ADR and documentation changes unrelated to functional code", file: "docs/adr/0018-example.md" },
+    expires_at: null,
+    ...overrides,
+  };
+}
 
 describe("buildSystemPrompt", () => {
   it("includes the adversarial posture", () => {
@@ -205,5 +218,55 @@ describe("buildUserPrompt", () => {
 
     expect(reviewIdx).toBeGreaterThan(-1);
     expect(appendIdx).toBeGreaterThan(reviewIdx);
+  });
+
+  it("omits the dismissals section when there are no active dismissals", () => {
+    const config = FlaughtConfigSchema.parse({});
+    const context = mockContext();
+    const prompt = buildUserPrompt(context, config, undefined, NO_TEMPLATES, []);
+
+    expect(prompt).not.toContain("Previously Reviewed & Dismissed");
+  });
+
+  it("injects active dismissals as a don't-re-raise digest", () => {
+    const config = FlaughtConfigSchema.parse({});
+    const context = mockContext();
+    const dismissals = [makeDismissal()];
+    const prompt = buildUserPrompt(context, config, undefined, NO_TEMPLATES, dismissals);
+
+    expect(prompt).toContain("Previously Reviewed & Dismissed");
+    expect(prompt).toContain("Extensive ADR and documentation changes unrelated to functional code");
+    expect(prompt).toContain("docs/adr/0018-example.md");
+    expect(prompt).toContain("Doc/ADR diff size is expected for a CI-wiring change");
+    expect(prompt).toContain("Do not re-raise");
+  });
+
+  it("places the dismissals digest before the review instructions", () => {
+    const config = FlaughtConfigSchema.parse({});
+    const context = mockContext();
+    const prompt = buildUserPrompt(context, config, undefined, NO_TEMPLATES, [makeDismissal()]);
+
+    const dismissalsIdx = prompt.indexOf("Previously Reviewed & Dismissed");
+    const reviewIdx = prompt.indexOf("Review Instructions");
+    expect(dismissalsIdx).toBeGreaterThan(-1);
+    expect(reviewIdx).toBeGreaterThan(dismissalsIdx);
+  });
+});
+
+describe("formatDismissalsForPrompt", () => {
+  it("returns an empty string for no entries", () => {
+    expect(formatDismissalsForPrompt([])).toBe("");
+  });
+
+  it("caps the list and notes how many were omitted", () => {
+    const entries = Array.from({ length: 30 }, (_, i) =>
+      makeDismissal({ fingerprint: `sha256:${i}`, context: { title: `Finding ${i}`, file: "f.ts" } }),
+    );
+    const formatted = formatDismissalsForPrompt(entries);
+
+    expect(formatted).toContain("Finding 0");
+    expect(formatted).toContain("Finding 24");
+    expect(formatted).not.toContain("Finding 25");
+    expect(formatted).toContain("…and 5 older dismissal(s)");
   });
 });

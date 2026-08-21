@@ -333,21 +333,25 @@ Flaught's exit codes are designed for CI gating:
 |---|---|---|
 | `0` | Clean — no findings at or above severity gate | Workflow passes |
 | `1` | Gated — undismissed findings exceed threshold | Workflow fails (or continues if `continue-on-error: true`) |
-| `2` | Error — config problem, missing API key, LLM failure | Workflow fails |
+| `2` | Error — config problem, missing API key, LLM failure | Warns; does **not** fail the job (recommended — see below) |
 
-### Gating example
+**Do not treat exit 2 like exit 1.** A Groq outage, a rate limit, or a malformed LLM response is a tool fault, not evidence of a problem in the PR. If your workflow fails the job on any nonzero exit code (the naive `run: flaught review ...` form below), every PR becomes unmergeable whenever the LLM provider has a bad five minutes — a denial-of-service vector against your own repo. Always branch on the exit code explicitly and fail-open on `2`.
+
+### Gating example (naive — do not use for exit 2)
 
 ```yaml
 - name: Run adversarial review
   env:
     PR_BASE_REF: ${{ github.base_ref }}
   run: flaught review --base "origin/${PR_BASE_REF}" --quiet
-  # exit 0 = clean, exit 1 = findings exceed gate, exit 2 = error
+  # BEWARE: any nonzero exit fails this step, including exit 2 (LLM/infra
+  # error) — this blocks merge on provider outages. Use the fail-open
+  # pattern below instead.
 ```
 
-### Comment-then-gate example
+### Comment-then-gate example (recommended — fails open on errors)
 
-Use `continue-on-error: true` if you want to post a comment even when findings are found, then check the exit code:
+Use `continue-on-error: true` so the step never fails the job on its own, capture the exit code, then branch explicitly: block on `1`, warn (don't block) on `2`.
 
 ```yaml
 - name: Run adversarial review
@@ -360,7 +364,12 @@ Use `continue-on-error: true` if you want to post a comment even when findings a
 
 - name: Check severity gate
   if: steps.review.outputs.exit_code == '1'
-  run: echo "Findings exceed severity gate threshold" && exit 1
+  run: echo "::error::Findings exceed severity gate threshold" && exit 1
+
+- name: Check for errors
+  if: steps.review.outputs.exit_code == '2'
+  run: echo "::warning::Flaught could not complete the review (config, API, or runtime error). Not blocking merge — check the workflow logs."
+  # No `exit 1` here — this step intentionally warns and passes.
 
 - name: Comment on PR
   if: always()
@@ -372,6 +381,8 @@ Use `continue-on-error: true` if you want to post a comment even when findings a
     BODY=$(flaught review --base "origin/${PR_BASE_REF}" --quiet 2>/dev/null)
     echo "$BODY" | gh pr comment "${PR_NUMBER}" --body-file -
 ```
+
+See [`.github/workflows/adversarial-review.yml`](https://github.com/flaught/core/blob/main/.github/workflows/adversarial-review.yml) in this repo for the full working version of this pattern (Flaught dogfoods itself with it).
 
 ## PR description for scope-creep detection
 

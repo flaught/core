@@ -111,6 +111,10 @@ llm:
 # scope_creep:
 #   enabled: true
 #   intent_source: pr_description  # pr_description | linked_issue | both
+#   # Paths that are never scored as scope creep (e.g. an ADR accompanying
+#   # the change it documents), regardless of the PR's stated intent.
+#   exclude_paths: []
+#   #   - "docs/adr/**"
 
 # ── Lighthouse (optional, degrades cleanly) ─────────────────
 # lighthouse:

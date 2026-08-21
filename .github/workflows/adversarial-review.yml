@@ -4,6 +4,8 @@
 # Uses Groq (groq/compound-mini) for the LLM adversarial pass.
 # The review comment is posted to the PR; the JSON artifact is uploaded
 # for trend tracking. Exit code 1 (findings exceed severity gate) blocks merge.
+# Exit code 2 (config/API/LLM error) does NOT block merge — it's a tool
+# fault, not evidence of a real code problem; it only warns.
 
 name: Adversarial Review
 
@@ -97,5 +99,4 @@ jobs:
       - name: Check for errors
         if: steps.review.outputs.exit_code == '2'
         run: |
-          echo "::error::Flaught encountered an error (config, API, or runtime). Check the workflow logs."
-          exit 1
+          echo "::warning::Flaught encountered an error (config, API, or runtime) and could not complete the review. This does NOT block merge — an LLM/infra outage is not evidence of a real code problem. Check the workflow logs and consider re-running."
