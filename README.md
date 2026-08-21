@@ -49,19 +49,17 @@ flaught review --output findings.json --quiet   # CI mode
 flaught dismiss D-0002 --artifact findings.json --reason "..." # suppress a false positive, persisted across runs
 ```
 
-### pi.dev
+### Any AI coding agent (Claude Code, Codex, Cursor, pi, etc.)
 
 ```
-Run Flaught on this project. Install it globally (npm install -g @flaught/core),
-run `flaught init` to scaffold config, then `flaught review --base main`.
-If the review finds issues, fix them and re-run until it's clean.
-```
+Install and run Flaught (adversarial code review) on this project:
+npm install -g @flaught/core, then `flaught init` to scaffold config,
+then `flaught review --no-llm` to run deterministic checks — no API
+key needed. Fix anything it flags and re-run until clean.
 
-### Claude Code / Codex / Cursor
-
-```
-# Paste this into your session:
-npm install -g @flaught/core && flaught init && flaught review --base main
+For the full LLM adversarial pass, set an API key (OPENAI_API_KEY by
+default; for another provider, also set llm.provider/api_key_env in
+.advreview.yml) and drop --no-llm.
 ```
 
 ### GitHub Actions
