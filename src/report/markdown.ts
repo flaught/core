@@ -86,6 +86,12 @@ function renderCaveat(): string {
  * findings.
  */
 function renderToolsWarning(artifact: FindingsArtifact): string | null {
+  // renderMarkdownReport is re-exported as public API (src/index.ts) -- an
+  // external caller can hand it a hand-built or pre-this-feature JSON
+  // artifact where tools_executed is missing or malformed, not just the
+  // always-populated artifact review.ts constructs internally.
+  if (!Array.isArray(artifact.tools_executed)) return null;
+
   const failed = artifact.tools_executed.filter((t) => t.command === "(failed)");
   if (failed.length === 0) return null;
 

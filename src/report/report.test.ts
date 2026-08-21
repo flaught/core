@@ -217,6 +217,29 @@ describe("renderMarkdownReport", () => {
     const md = renderMarkdownReport(artifact);
     expect(md).not.toContain("did not run");
   });
+
+  it("doesn't throw when tools_executed is missing (public-API callers may pass an unvalidated artifact)", () => {
+    const artifact = makeArtifact();
+    // renderMarkdownReport is exported as public API; a caller isn't
+    // guaranteed to hand it an artifact that satisfies the full type at
+    // runtime (e.g. an older findings.json, or a hand-built object).
+    delete (artifact as { tools_executed?: unknown }).tools_executed;
+    expect(() => renderMarkdownReport(artifact)).not.toThrow();
+    expect(renderMarkdownReport(artifact)).not.toContain("did not run");
+  });
+
+  it("warns once per failed tool when multiple tools fail to run", () => {
+    const artifact = makeArtifact({
+      tools_executed: [
+        { tool: "semgrep", version: "unknown", exit_code: 1, raw_findings_count: 0, command: "(failed)" },
+        { tool: "linter", version: "unknown", exit_code: -1, raw_findings_count: 0, command: "(failed)" },
+      ],
+    });
+    const md = renderMarkdownReport(artifact);
+    expect(md).toContain("2 deterministic tool(s) did not run");
+    expect(md).toContain("`semgrep`");
+    expect(md).toContain("`linter`");
+  });
 });
 
 describe("renderJsonArtifact", () => {
