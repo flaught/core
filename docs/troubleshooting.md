@@ -139,6 +139,8 @@ This is best-effort: which file a test belongs to is extracted from the test run
 
 If it's specifically a **docs/text-only PR** showing findings like this, `test_inversion.skip_docs_only_diffs` (default `true`) should already prevent it — test inversion doesn't run at all when every changed file is documentation, which avoids the per-test-line gap above entirely rather than relying on scoping to catch it after the fact. If you're still seeing it, check that all the changed files are actually recognized as documentation (markdown/text extensions, or `README`/`LICENSE`/`CHANGELOG`-style extensionless files) — a mixed PR with even one code file will run test inversion normally.
 
+See [Test inversion](configuration.md#test-inversion) in the configuration reference for the full option list and defaults.
+
 ## Deterministic tool issues
 
 ### Semgrep not found
