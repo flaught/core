@@ -18,9 +18,9 @@ version: 1
 
 # ── LLM provider ───────────────────────────────────────────
 llm:
-  provider: openai          # openai | groq | gemini | anthropic | ollama
-  model: gpt-4o
-  api_key_env: OPENAI_API_KEY
+  provider: groq             # openai | groq | gemini | anthropic | ollama
+  model: groq/compound-mini
+  api_key_env: GROQ_API_KEY
   # base_url: null          # override for OpenAI-compatible endpoints
   temperature: 0.2           # 0.0–1.0 (lower = more deterministic)
   max_tokens: 4096           # max response length
@@ -100,7 +100,7 @@ export OPENAI_API_KEY=sk-...
 flaught review
 ```
 
-### Groq
+### Groq (default)
 
 ```yaml
 llm:
@@ -178,7 +178,7 @@ export OLLAMA_API_KEY=...   # generate at ollama.com/settings/keys
 flaught review
 ```
 
-`api_key_env` must be set explicitly to enable this — a bare `provider: ollama` with no `api_key_env` never sends an `Authorization` header, even if `OPENAI_API_KEY` (the config schema's unrelated default) happens to be set in your shell. This is deliberate: it stops an ambient key meant for a different provider from silently leaking to whatever `base_url` your Ollama config points at.
+`api_key_env` must be set explicitly to enable this — a bare `provider: ollama` with no `api_key_env` never sends an `Authorization` header, even if `GROQ_API_KEY` (the config schema's default) or `OPENAI_API_KEY` happens to be set in your shell. This is deliberate: it stops an ambient key meant for a different provider from silently leaking to whatever `base_url` your Ollama config points at.
 
 ### Custom OpenAI-compatible endpoint
 

@@ -3,10 +3,10 @@
 ## Missing API key
 
 ```
-❌ Missing API key. Set the OPENAI_API_KEY environment variable to use the OpenAI provider.
+❌ Missing API key. Set the GROQ_API_KEY environment variable to use the Groq provider.
 
 Options:
-  1. Set the key: export OPENAI_API_KEY=sk-...
+  1. Set the key: export GROQ_API_KEY=<your-api-key>
   2. Use a different provider in .advreview.yml:
        llm:
          provider: ollama
@@ -14,10 +14,12 @@ Options:
   3. Skip the LLM review entirely: flaught review --no-llm
 ```
 
+This is the default provider's version of the message (`flaught init` sets `provider: groq`) — the wording adapts to whatever `llm.provider`/`llm.api_key_env` your config actually has.
+
 Every LLM error message includes three actionable suggestions. The `--no-llm` flag is always offered as an escape hatch.
 
 **Quick fixes:**
-- Set the env var: `export OPENAI_API_KEY=sk-...`
+- Set the env var: `export GROQ_API_KEY=<your-api-key>` (or the key for whichever provider your config uses)
 - Switch providers in `.advreview.yml` (see [configuration](configuration.md))
 - Skip the LLM: `flaught review --no-llm`
 
@@ -68,7 +70,7 @@ Run with --no-llm to skip the LLM review entirely.
 This usually means the key is missing, empty, expired, or invalid.
 
 Options:
-  • Set the key: export OPENAI_API_KEY=sk-...
+  • Set the key: export OPENAI_API_KEY=...
   • Check that the key in .advreview.yml (llm.api_key_env) points to a set env var
   • Switch to a different provider in .advreview.yml (e.g., groq, anthropic, ollama)
   • Run with --no-llm to skip the LLM review entirely
@@ -163,11 +165,13 @@ Same pattern — auto-detects `npm audit`, `pip-audit`, or `govulncheck`. Overri
 Flaught validates `.advreview.yml` with Zod. If your config is invalid:
 
 ```
-❌ Invalid config: [
+❌ [
   {
+    "received": "azure",
     "code": "invalid_enum_value",
+    "options": ["openai", "groq", "gemini", "ollama", "anthropic"],
     "path": ["llm", "provider"],
-    "message": "Expected 'openai' | 'groq' | 'gemini' | 'ollama', received 'anthropic'"
+    "message": "Invalid enum value. Expected 'openai' | 'groq' | 'gemini' | 'ollama' | 'anthropic', received 'azure'"
   }
 ]
 ```

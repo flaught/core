@@ -196,21 +196,25 @@ describe("parseFindingsFromLLM", () => {
 describe("createProvider", () => {
   it("creates an OpenAI-compatible provider for openai config", () => {
     const config = FlaughtConfigSchema.parse({
-      llm: { provider: "openai", model: "gpt-4o" },
+      llm: { provider: "openai", model: "gpt-4o", api_key_env: "OPENAI_API_KEY" },
     });
+    process.env.OPENAI_API_KEY = "sk-test";
     const provider = createProvider(config);
     expect(provider).toBeInstanceOf(OpenAICompatibleProvider);
     expect(provider.name).toBe("openai-compatible");
     expect(provider.model).toBe("gpt-4o");
+    delete process.env.OPENAI_API_KEY;
   });
 
   it("creates an OpenAI-compatible provider for groq config", () => {
     const config = FlaughtConfigSchema.parse({
-      llm: { provider: "groq", model: "llama-3.1-70b" },
+      llm: { provider: "groq", model: "llama-3.1-70b", api_key_env: "GROQ_API_KEY" },
     });
+    process.env.GROQ_API_KEY = "gsk-test";
     const provider = createProvider(config);
     expect(provider).toBeInstanceOf(OpenAICompatibleProvider);
     expect(provider.model).toBe("llama-3.1-70b");
+    delete process.env.GROQ_API_KEY;
   });
 
   it("creates an Ollama provider for ollama config", () => {
@@ -240,15 +244,17 @@ describe("createProvider", () => {
 
   it("creates a Gemini provider (OpenAI-compatible endpoint)", () => {
     const config = FlaughtConfigSchema.parse({
-      llm: { provider: "gemini", model: "gemini-1.5-pro" },
+      llm: { provider: "gemini", model: "gemini-1.5-pro", api_key_env: "GEMINI_API_KEY" },
     });
+    process.env.GEMINI_API_KEY = "gemini-test";
     const provider = createProvider(config);
     expect(provider).toBeInstanceOf(OpenAICompatibleProvider);
+    delete process.env.GEMINI_API_KEY;
   });
 
   it("throws MissingAPIKeyError when OpenAI key is missing", () => {
     const config = FlaughtConfigSchema.parse({
-      llm: { provider: "openai", model: "gpt-4o" },
+      llm: { provider: "openai", model: "gpt-4o", api_key_env: "OPENAI_API_KEY" },
     });
     // Ensure the env var is not set
     delete process.env.OPENAI_API_KEY;
@@ -257,15 +263,25 @@ describe("createProvider", () => {
 
   it("throws MissingAPIKeyError when Groq key is missing", () => {
     const config = FlaughtConfigSchema.parse({
-      llm: { provider: "groq", model: "llama-3.1-70b" },
+      llm: { provider: "groq", model: "llama-3.1-70b", api_key_env: "GROQ_API_KEY" },
     });
     delete process.env.GROQ_API_KEY;
     expect(() => createProvider(config)).toThrow(/Missing API key/);
   });
 
+  it("throws MissingAPIKeyError for a fully-default config (empty llm block) when GROQ_API_KEY is missing", () => {
+    // The zero-config path a brand-new user hits first: no .advreview.yml
+    // llm section at all, so every field — including provider and
+    // api_key_env — comes from the schema default (groq / GROQ_API_KEY).
+    const config = FlaughtConfigSchema.parse({});
+    delete process.env.GROQ_API_KEY;
+    expect(() => createProvider(config)).toThrow(/Missing API key/);
+    expect(() => createProvider(config)).toThrow(/GROQ_API_KEY/);
+  });
+
   it("throws MissingAPIKeyError when Gemini key is missing", () => {
     const config = FlaughtConfigSchema.parse({
-      llm: { provider: "gemini", model: "gemini-1.5-pro" },
+      llm: { provider: "gemini", model: "gemini-1.5-pro", api_key_env: "GEMINI_API_KEY" },
     });
     delete process.env.GEMINI_API_KEY;
     expect(() => createProvider(config)).toThrow(/Missing API key/);
@@ -420,6 +436,7 @@ describe("OllamaProvider — Ollama Cloud auth", () => {
     vi.unstubAllGlobals();
     delete process.env.OLLAMA_API_KEY;
     delete process.env.OPENAI_API_KEY;
+    delete process.env.GROQ_API_KEY;
   });
 
   function mockFetchOnce(responseBody: unknown, ok = true): ReturnType<typeof vi.fn> {
@@ -478,6 +495,21 @@ describe("OllamaProvider — Ollama Cloud auth", () => {
 
   it("createProvider does not leak an ambient OPENAI_API_KEY into Ollama requests when api_key_env was never configured", async () => {
     process.env.OPENAI_API_KEY = "sk-should-not-leak";
+    const config = FlaughtConfigSchema.parse({
+      llm: { provider: "ollama", model: "codellama" }, // api_key_env left at its default
+    });
+    const provider = createProvider(config) as OllamaProvider;
+
+    const fetchMock = mockFetchOnce({ message: { content: '{"findings":[]}' } });
+    await provider.review("system", "user");
+
+    const [, init] = fetchMock.mock.calls[0]! as [string, RequestInit];
+    const headers = init.headers as Record<string, string>;
+    expect(headers.Authorization).toBeUndefined();
+  });
+
+  it("createProvider does not leak an ambient GROQ_API_KEY (the schema default) into Ollama requests when api_key_env was never configured", async () => {
+    process.env.GROQ_API_KEY = "gsk-should-not-leak";
     const config = FlaughtConfigSchema.parse({
       llm: { provider: "ollama", model: "codellama" }, // api_key_env left at its default
     });

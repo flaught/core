@@ -114,7 +114,7 @@ jobs:
 
       - name: Run adversarial review
         env:
-          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
           PR_BASE_REF: ${{ github.base_ref }}
           PR_TITLE: ${{ github.event.pull_request.title }}
         run: |
@@ -152,13 +152,13 @@ jobs:
           fi
 ```
 
-Add `OPENAI_API_KEY` to your repository secrets (Settings → Secrets and variables → Actions).
+Add `GROQ_API_KEY` to your repository secrets (Settings → Secrets and variables → Actions). This matches the default `.advreview.yml` that `flaught init` generates (`provider: groq`, `api_key_env: GROQ_API_KEY`) — no config changes needed, and it's the same pattern this repo's own [dogfooding workflow](../.github/workflows/adversarial-review.yml) uses.
 
-**Note on the "Comment on PR" step:** it re-runs `flaught review` a second time to get markdown for the comment body, since `--output` only writes the JSON artifact — there's no "render markdown from an existing artifact" command yet. That second run uses `--no-llm` deliberately: running it *without* `--no-llm` would call the LLM API a second time per PR (doubling cost/latency) just to reproduce a report. The tradeoff is that the posted comment only reflects deterministic/test-inversion/scope-creep findings, not the LLM pass — the uploaded `findings.json` artifact from the first (full) run is the source of truth for LLM findings. This matches the pattern used in this repo's own [dogfooding workflow](../.github/workflows/adversarial-review.yml).
+**Note on the "Comment on PR" step:** it re-runs `flaught review` a second time to get markdown for the comment body, since `--output` only writes the JSON artifact — there's no "render markdown from an existing artifact" command yet. That second run uses `--no-llm` deliberately: running it *without* `--no-llm` would call the LLM API a second time per PR (doubling cost/latency) just to reproduce a report. The tradeoff is that the posted comment only reflects deterministic/test-inversion/scope-creep findings, not the LLM pass — the uploaded `findings.json` artifact from the first (full) run is the source of truth for LLM findings.
 
-### Using Claude instead of OpenAI
+### Using OpenAI, Claude, or another provider instead of Groq
 
-Set `provider: anthropic` and `model: claude-sonnet-5` (or `claude-opus-5`, `claude-haiku-4-5`) in `.advreview.yml`, then swap the secret in the step above:
+Set `provider`/`model`/`api_key_env` in `.advreview.yml` for whichever provider you want (see [Configuration](configuration.md#llm-providers) for the full list), then swap the secret in the step above. For example, Claude:
 
 ```yaml
       - name: Run adversarial review
@@ -176,7 +176,7 @@ Set `provider: anthropic` and `model: claude-sonnet-5` (or `claude-opus-5`, `cla
         continue-on-error: true
 ```
 
-No other workflow changes needed — just make sure `.advreview.yml` sets `llm.api_key_env: ANTHROPIC_API_KEY` (the config default is `OPENAI_API_KEY` regardless of provider, so this must be set explicitly) and the `env:` var above matches it.
+No other workflow changes needed — just make sure `.advreview.yml` sets `llm.provider: anthropic` and `llm.api_key_env: ANTHROPIC_API_KEY` (the config default is `provider: groq` / `api_key_env: GROQ_API_KEY`, so this must be set explicitly for any other provider) and the `env:` var above matches it.
 
 ## Using Ollama Cloud in CI
 

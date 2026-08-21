@@ -34,7 +34,7 @@ describe("loadConfig", () => {
 
     // process.cwd() during `npm test` is the repo root, which has no
     // .advreview.yml — so if repoPath weren't honored, this would silently
-    // fall back to defaults (provider: openai) instead of throwing/finding.
+    // fall back to defaults (provider: groq) instead of throwing/finding.
     expect(path.resolve(process.cwd(), ".advreview.yml")).not.toBe(path.join(repoPath, ".advreview.yml"));
 
     const config = await loadConfig(undefined, repoPath);
@@ -57,7 +57,7 @@ describe("loadConfig", () => {
   it("falls back to defaults when repoPath has no config file", async () => {
     const repoPath = tempRepo(); // empty, no .advreview.yml
     const config = await loadConfig(undefined, repoPath);
-    expect(config.llm.provider).toBe("openai"); // schema default
+    expect(config.llm.provider).toBe("groq"); // schema default
   });
 
   it("still falls back to process.cwd() when neither configPath nor repoPath is given", async () => {

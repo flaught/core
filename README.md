@@ -57,7 +57,7 @@ npm install -g @flaught/core, then `flaught init` to scaffold config,
 then `flaught review --no-llm` to run deterministic checks — no API
 key needed. Fix anything it flags and re-run until clean.
 
-For the full LLM adversarial pass, set an API key (OPENAI_API_KEY by
+For the full LLM adversarial pass, set an API key (GROQ_API_KEY by
 default; for another provider, also set llm.provider/api_key_env in
 .advreview.yml) and drop --no-llm.
 ```
@@ -98,8 +98,8 @@ Self-review is the weak spot in AI-assisted development. The model that wrote yo
 
 | Provider               | Config                                                                                                    |
 | ---------------------- | ----------------------------------------------------------------------------------------------------------|
+| **Groq** (default)     | `provider: groq`, `model: groq/compound-mini`                                                            |
 | **OpenAI**              | `provider: openai`, `model: gpt-4o`                                                                      |
-| **Groq**                | `provider: groq`, `model: groq/compound-mini`                                                            |
 | **Gemini**              | `provider: gemini`, `model: gemini-1.5-pro`                                                              |
 | **Anthropic (Claude)**  | `provider: anthropic`, `model: claude-sonnet-5`                                                          |
 | **Ollama** (local)      | `provider: ollama`, `model: codellama`                                                                   |
