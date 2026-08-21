@@ -270,11 +270,16 @@ export async function runReview(options: ReviewOptions = {}): Promise<ReviewResu
 
   if (context.changedFiles.length > 0 && config.test_inversion.enabled) {
     progress("Running test inversion (pre/post change test comparison)...");
+    const relevantFiles = new Set<string>([
+      ...context.changedFiles.map((f) => f.path),
+      ...context.neighborhoodFiles,
+    ]);
     testInversion = await runTestInversion(
       config,
       context.repoRoot,
       context.baseSha,
       context.headSha,
+      relevantFiles,
       progress,
     );
 

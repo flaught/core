@@ -65,6 +65,17 @@ const ToolsSchema = z.object({
 const TestInversionSchema = z.object({
   enabled: z.boolean().default(true),
   command: z.string().nullable().default(null),
+  /**
+   * Only flag a "passes on both base and head" test if its file is one of
+   * the changed files or in their one-hop dependency blast radius. Without
+   * this, test inversion runs the whole suite and flags every test file the
+   * diff didn't happen to touch — which is nearly the entire suite on any
+   * small PR, and a different (so never-dismissable) subset on every PR.
+   * Best-effort: when the test runner's output doesn't let us determine
+   * which file a test belongs to (e.g. Go, Rust), that test is kept
+   * unscoped rather than silently dropped.
+   */
+  scope_to_blast_radius: z.boolean().default(true),
 });
 
 // ─── Scope creep ───────────────────────────────────────────────────────────
