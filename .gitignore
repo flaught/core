@@ -3,5 +3,4 @@ dist/
 *.tgz
 .env
 findings.json
-.flaught-dismissals.json
 .npmrc

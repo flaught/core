@@ -11,7 +11,7 @@ Every finding carries a `fingerprint` field, derived differently depending on it
 | Source | Fingerprint basis |
 |---|---|
 | Deterministic (semgrep, linter, vuln scanner) | `source` + the tool's own rule ID (`evidence.rule_id`) + `file` |
-| Test inversion | `"test-inversion"` + the flagged test's name |
+| Test inversion | Goes through the same deterministic path as above, with `source: "test-inversion"`, `evidence.rule_id: null`, and `file` always `""` (test-inversion findings never set `evidence.file`) — so it fingerprints on `"test-inversion"` + the normalized title string (`"Test doesn't verify the change: <test name>"`, not just the bare test name) |
 | LLM | `category` + `file` + a normalized (trimmed, lowercased, whitespace-collapsed) `title` |
 
 Line numbers are deliberately excluded — code shifting up or down shouldn't invalidate a dismissal.

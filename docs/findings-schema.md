@@ -2,7 +2,7 @@
 
 Every finding carries a `source_type` field that distinguishes **deterministic** (tool-asserted) from **LLM-asserted** evidence. This is the governance-critical field — it tells you whether a finding came from a tool that always produces the same output, or from an LLM that may hallucinate.
 
-The schema is versioned from day one (`schema_version: 1`) and self-describing (`$schema` URL). Every artifact includes the `_caveat` field — an honest disclaimer about what the data represents.
+The schema is versioned from day one — currently `schema_version: 2` — and self-describing (`$schema` URL). Every artifact includes the `_caveat` field — an honest disclaimer about what the data represents.
 
 ## Finding structure
 
@@ -37,10 +37,12 @@ The schema is versioned from day one (`schema_version: 1`) and self-describing (
 
 | Prefix | Source | Confidence |
 |---|---|---|
-| `D-` | Deterministic tool finding (semgrep, linter, vuln scanner, test inversion) | Always 1.0 |
-| `F-` | LLM-asserted finding | Self-reported, typically 0.5–0.9 |
+| `D-` | Deterministic tool finding (semgrep, linter, vuln scanner) | Always 1.0 |
+| `F-` | LLM-asserted finding, or a flagged test-inversion result | LLM findings: self-reported, typically 0.5–0.9. Test-inversion findings: always 1.0 |
 
-`id` is **run-local** — it's just array position and is not stable across runs. Use `fingerprint` for anything that needs to identify "the same finding" across separate runs (most notably, [dismissals](dismissals.md)). `evidence.rule_id` is the source tool's own stable check/rule identifier (e.g. a semgrep `check_id`); it's `null` for LLM findings, which have no such concept.
+**Note:** `id` prefix tracks *when in the pipeline* a finding was assigned an id, not `source_type`. Test-inversion findings get an `F-` id even though their `source_type` is `"deterministic"` (confidence 1.0, no hallucination risk) — don't use the id prefix as a proxy for `source_type` when filtering; check `source_type` directly instead.
+
+`id` is **run-local** — it's just array position and is not stable across runs. Use `fingerprint` for anything that needs to identify "the same finding" across separate runs (most notably, [dismissals](dismissals.md)). `evidence.rule_id` is the source tool's own stable check/rule identifier (e.g. a semgrep `check_id`); it's `null` for LLM findings and test-inversion findings, which have no such concept.
 
 ## Severity levels
 

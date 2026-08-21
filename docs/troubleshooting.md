@@ -79,9 +79,15 @@ Flaught never guesses about billing — the error message always says "key not c
 ## 429 rate limiting
 
 ```
-❌ API key not configured or not valid for gpt-4o.
+❌ Rate limited by openai for model "gpt-4o".
 
-This usually means your API key is missing, on a free tier with no credits, or being rate-limited.
+This means you've hit the rate limit on your plan (free tier: 30 RPM, 6K TPM).
+
+Options:
+  • Wait a minute and retry
+  • Upgrade your OpenAI plan for higher limits
+  • Switch to a different provider in .advreview.yml (e.g., groq, anthropic, ollama)
+  • Run with --no-llm to skip the LLM review entirely
 ```
 
 **Quick fixes:**
@@ -118,30 +124,32 @@ If a Flaught run is killed mid-test-inversion, the worktree may be left behind. 
 
 ```bash
 git worktree list
-git worktree remove .flaught-worktree-<sha>
+git worktree remove .flaught-worktree-<timestamp>
 ```
+
+(Worktrees are named `.flaught-worktree-<epoch-ms>`, not by SHA — use `git worktree list` to find the exact path.)
 
 ## Deterministic tool issues
 
 ### Semgrep not found
 
-Semgrep is optional. If it's not installed, Flaught skips it:
+Semgrep is optional. If it's not installed, the command fails silently and Flaught just reports 0 findings for that tool — it doesn't block the review:
 
 ```
 Running deterministic tools...
   Running semgrep...
-    semgrep: not installed — skipping
+    semgrep: 0 findings (12ms)
 ```
 
 Install it: `pip install semgrep`
 
 ### Linter not found
 
-Flaught auto-detects your linter. If it can't find one:
+Flaught auto-detects your linter based on repo contents (`.eslintrc*`/`eslint.config.*` for JS/TS, `ruff`/`flake8` for Python, `go vet` for Go). If none of those markers are found and no `tools.linter.command` is set, the linter step reports 0 findings:
 
 ```
   Running linter...
-    linter: no linter detected — skipping
+    linter: 0 findings (0ms)
 ```
 
 Override in config: `tools.linter.command: eslint`

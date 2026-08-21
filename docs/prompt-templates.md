@@ -116,6 +116,8 @@ CATEGORIES (use exactly these):
 - accessibility: A11y violations, missing ARIA labels, keyboard navigation issues
 ```
 
+**Warning:** `category` is a fixed 6-value enum in the schema (`security`, `architecture`, `scope-creep`, `test-quality`, `performance`, `maintainability`) — it isn't actually extensible. If the LLM returns a category outside that set (e.g. `compliance` or `accessibility` from the example above), Flaught silently relabels the finding as `architecture` with no warning. Custom categories like this are useful as *prompt guidance* to steer what the LLM looks for, but the finding will still be filed under `architecture` in the output — don't rely on filtering or displaying by the custom category name.
+
 ### Shift to a security-focused posture
 
 ```bash

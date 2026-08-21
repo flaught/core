@@ -150,6 +150,8 @@ llm:
 #     - "node_modules/**"
 #     - "vendor/**"
 #     - "**/*.min.js"
+#     - "**/*.min.css"
+#     - "**/*.generated.*"
 #   patterns: []
 `;
 
