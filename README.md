@@ -57,7 +57,7 @@ npm install -g @flaught/core, then `flaught init` to scaffold config,
 then `flaught review --no-llm` to run deterministic checks — no API
 key needed. Fix anything it flags and re-run until clean.
 
-For the full LLM adversarial pass, set an API key (OPENAI_API_KEY by
+For the full LLM adversarial pass, set an API key (GROQ_API_KEY by
 default; for another provider, also set llm.provider/api_key_env in
 .advreview.yml) and drop --no-llm.
 ```
