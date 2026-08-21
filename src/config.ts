@@ -106,6 +106,7 @@ llm:
 # test_inversion:
 #   enabled: true
 #   # command: pytest  # override auto-detected test command
+#   scope_to_blast_radius: true  # only flag tests in the diff's changed/blast-radius files
 
 # ── Scope-creep detection ─────────────────────────────────
 # scope_creep:

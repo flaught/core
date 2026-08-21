@@ -18,6 +18,7 @@ describe("FlaughtConfigSchema", () => {
     expect(config.tools.linter.enabled).toBe(true);
     expect(config.tools.vuln_scanner.enabled).toBe(true);
     expect(config.test_inversion.enabled).toBe(true);
+    expect(config.test_inversion.scope_to_blast_radius).toBe(true);
     expect(config.scope_creep.enabled).toBe(true);
     expect(config.scope_creep.intent_source).toBe("pr_description");
     expect(config.scope_creep.exclude_paths).toEqual([]);

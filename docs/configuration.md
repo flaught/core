@@ -253,7 +253,8 @@ Test inversion runs your test suite on both the pre-change (base) and post-chang
 ```yaml
 test_inversion:
   enabled: true
-  command: pytest   # override auto-detected test command
+  command: pytest                # override auto-detected test command
+  scope_to_blast_radius: true    # only flag tests in the diff's changed/blast-radius files
 ```
 
 Auto-detection rules:
@@ -263,6 +264,10 @@ Auto-detection rules:
 - Rust: `cargo test`
 
 Test inversion creates a temporary git worktree at the base SHA, installs dependencies there, and runs the test command. The worktree is cleaned up automatically.
+
+**`scope_to_blast_radius`** (default `true`): the whole test suite still runs on both sides — that's how the comparison works — but only a test whose file is a changed file, or in the changed files' one-hop dependency blast radius (the same graph used for LLM context), is reported as a finding. Without this, every test file the diff didn't happen to touch "passes on both base and head" trivially, because nothing about what it tests changed — which is nearly the entire suite on a small PR. Worse, a different PR touches a different subset of files, so the flagged set is different every time and never converges under [dismissal](dismissals.md): each PR produces a disjoint batch of "new" test-quality findings with fresh fingerprints, forever.
+
+This is best-effort: the file a test belongs to is extracted from the test runner's own output, which some formats (Go, Rust) don't include. When a test's file can't be determined, it's kept unscoped rather than silently dropped — a false positive you re-triage is safer than a real issue that quietly disappears. Set `scope_to_blast_radius: false` to go back to flagging every test in the suite.
 
 ## Scope-creep detection
 

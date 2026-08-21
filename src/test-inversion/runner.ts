@@ -9,6 +9,11 @@
  * 2. Run tests on HEAD (post-change) — record which pass
  * 3. Create a temporary git worktree at the base SHA — run tests there
  * 4. Compare: tests that pass on BOTH sides are flagged as not testing the change
+ * 5. Scope step 4's results to tests whose file is a changed file or in its
+ *    blast radius — the whole test command runs regardless (that's how we
+ *    learn what passes on both sides at all), but a test file the diff
+ *    couldn't possibly have affected passing unchanged isn't a quality
+ *    signal, it's just... unrelated. See `isRelevantTestFile` below.
  */
 
 import * as fs from "node:fs";
@@ -19,6 +24,16 @@ import type { FlaggedTest, TestInversion } from "../schemas/findings.js";
 
 // ─── Test result parsing ──────────────────────────────────────────────────────
 
+/**
+ * A single test result. `file` is the best-effort source file it belongs to
+ * (repo-relative or absolute, format-dependent) — null when the test
+ * runner's output doesn't let us determine it (e.g. Go, Rust).
+ */
+export interface TestEntry {
+  name: string;
+  file: string | null;
+}
+
 export interface TestRunResult {
   /** The command that was run */
   command: string;
@@ -26,10 +41,10 @@ export interface TestRunResult {
   success: boolean;
   /** Exit code from the test runner */
   exitCode: number;
-  /** Names of tests that passed */
-  passed: string[];
-  /** Names of tests that failed */
-  failed: string[];
+  /** Tests that passed */
+  passed: TestEntry[];
+  /** Tests that failed */
+  failed: TestEntry[];
   /** Raw stdout */
   stdout: string;
   /** Raw stderr */
@@ -45,6 +60,12 @@ export async function runTestInversion(
   repoPath: string,
   baseSha: string,
   _headSha: string,
+  /**
+   * Changed files + their one-hop dependency blast radius (repo-relative
+   * paths), used to scope which "passes on both sides" tests get flagged.
+   * Ignored when `test_inversion.scope_to_blast_radius` is false.
+   */
+  relevantFiles: Set<string>,
   onProgress?: (message: string) => void,
 ): Promise<TestInversion | null> {
   const progress = onProgress ?? (() => {});
@@ -82,20 +103,43 @@ export async function runTestInversion(
     progress(`    BASE: ${baseResult.passed.length} passed, ${baseResult.failed.length} failed (${baseResult.durationMs}ms)`);
 
     // 3. Compare: tests that pass on BOTH sides don't test the change
-    const headPassedSet = new Set(headResult.passed);
-    const basePassedSet = new Set(baseResult.passed);
+    const headPassedNames = new Set(headResult.passed.map((t) => t.name));
+    const basePassedNames = new Set(baseResult.passed.map((t) => t.name));
+    // File lookup for scoping — head and base should agree on a test's file,
+    // but prefer head's (the version actually being reviewed) if they differ.
+    const fileByName = new Map<string, string | null>();
+    for (const t of baseResult.passed) fileByName.set(t.name, t.file);
+    for (const t of headResult.passed) fileByName.set(t.name, t.file);
 
     const flagged: FlaggedTest[] = [];
+    let scopedOutCount = 0;
 
-    for (const testName of headPassedSet) {
-      if (basePassedSet.has(testName)) {
-        flagged.push({
-          test: testName,
-          reason: "Test passes on both base and head — does not verify the change it claims to test",
-        });
+    for (const testName of headPassedNames) {
+      if (!basePassedNames.has(testName)) continue;
+
+      const file = fileByName.get(testName) ?? null;
+      // Scope to the diff's blast radius when we could determine the file —
+      // an unrelated test file passing unchanged isn't a quality signal.
+      // When the file couldn't be determined (Go, Rust, unrecognized
+      // formats), keep it unscoped rather than silently dropping it.
+      if (
+        config.test_inversion.scope_to_blast_radius &&
+        file !== null &&
+        !isRelevantTestFile(file, relevantFiles)
+      ) {
+        scopedOutCount++;
+        continue;
       }
+
+      flagged.push({
+        test: testName,
+        reason: "Test passes on both base and head — does not verify the change it claims to test",
+      });
     }
 
+    if (scopedOutCount > 0) {
+      progress(`  (scoped out ${scopedOutCount} test(s) unrelated to this diff's changed/blast-radius files)`);
+    }
     if (flagged.length > 0) {
       progress(`  ⚠ ${flagged.length} test(s) pass on both base and head (don't test the change)`);
     } else {
@@ -104,8 +148,8 @@ export async function runTestInversion(
 
     return {
       command: testCommand,
-      base_passed: [...basePassedSet].sort(),
-      head_passed: [...headPassedSet].sort(),
+      base_passed: [...basePassedNames].sort(),
+      head_passed: [...headPassedNames].sort(),
       flagged,
     };
   } finally {
@@ -113,6 +157,23 @@ export async function runTestInversion(
       await removeWorktree(repoPath, worktreePath);
     }
   }
+}
+
+// ─── Blast-radius scoping ──────────────────────────────────────────────────────
+
+/**
+ * Whether a test file counts as within the diff's blast radius. Handles
+ * absolute-vs-repo-relative mismatches (some test runners report absolute
+ * paths) by allowing a suffix match on path segments, not just exact equality.
+ */
+export function isRelevantTestFile(file: string, relevantFiles: Set<string>): boolean {
+  const normalized = file.replace(/^\.\//, "");
+  for (const rel of relevantFiles) {
+    if (normalized === rel) return true;
+    if (normalized.endsWith(`/${rel}`)) return true;
+    if (rel.endsWith(`/${normalized}`)) return true;
+  }
+  return false;
 }
 
 // ─── Test command detection ──────────────────────────────────────────────────
@@ -220,7 +281,7 @@ async function runTests(command: string, cwd: string): Promise<TestRunResult> {
 
 // ─── Test output parsing ──────────────────────────────────────────────────────
 
-function parseTestOutput(output: string, command: string): { passed: string[]; failed: string[] } {
+function parseTestOutput(output: string, command: string): { passed: TestEntry[]; failed: TestEntry[] } {
   // Try JSON formats first
   const jsonResult = parseJsonTestOutput(output);
   if (jsonResult) return jsonResult;
@@ -229,21 +290,22 @@ function parseTestOutput(output: string, command: string): { passed: string[]; f
   return parseTextTestOutput(output, command);
 }
 
-function parseJsonTestOutput(output: string): { passed: string[]; failed: string[] } | null {
+function parseJsonTestOutput(output: string): { passed: TestEntry[]; failed: TestEntry[] } | null {
   // Try to find JSON in the output (some runners wrap it in other text)
   const jsonMatch = output.match(/\{[\s\S]*"testResults"[\s\S]*\}/);
   if (jsonMatch) {
     try {
       const data = JSON.parse(jsonMatch[0]);
       if (data.testResults && Array.isArray(data.testResults)) {
-        // Jest format
-        const passed: string[] = [];
-        const failed: string[] = [];
+        // Jest format — suite.name is the test file's path
+        const passed: TestEntry[] = [];
+        const failed: TestEntry[] = [];
         for (const suite of data.testResults) {
+          const file = typeof suite.name === "string" ? suite.name : null;
           for (const test of suite.assertionResults ?? []) {
             const name = `${suite.name}::${test.fullName ?? test.title}`;
-            if (test.status === "passed") passed.push(name);
-            else if (test.status === "failed") failed.push(name);
+            if (test.status === "passed") passed.push({ name, file });
+            else if (test.status === "failed") failed.push({ name, file });
           }
         }
         if (passed.length > 0 || failed.length > 0) return { passed, failed };
@@ -259,12 +321,13 @@ function parseJsonTestOutput(output: string): { passed: string[]; failed: string
     try {
       const data = JSON.parse(vitestMatch[0]);
       if (data.tests && Array.isArray(data.tests)) {
-        const passed: string[] = [];
-        const failed: string[] = [];
+        const passed: TestEntry[] = [];
+        const failed: TestEntry[] = [];
         for (const test of data.tests) {
-          const name = `${test.filepath ?? test.file ?? ""}::${test.name ?? test.taskId ?? ""}`;
-          if (test.type === "pass" || test.status === "pass") passed.push(name);
-          else if (test.type === "fail" || test.status === "fail") failed.push(name);
+          const file = typeof (test.filepath ?? test.file) === "string" ? (test.filepath ?? test.file) : null;
+          const name = `${file ?? ""}::${test.name ?? test.taskId ?? ""}`;
+          if (test.type === "pass" || test.status === "pass") passed.push({ name, file });
+          else if (test.type === "fail" || test.status === "fail") failed.push({ name, file });
         }
         if (passed.length > 0 || failed.length > 0) return { passed, failed };
       }
@@ -276,88 +339,121 @@ function parseJsonTestOutput(output: string): { passed: string[]; failed: string
   return null;
 }
 
-function parseTextTestOutput(output: string, _command: string): { passed: string[]; failed: string[] } {
-  const passed: string[] = [];
-  const failed: string[] = [];
+/**
+ * Best-effort file extraction from a pytest node id ("tests/test_foo.py::test_bar").
+ * Returns null when the prefix before "::" doesn't look like a real path —
+ * conservative, so an unrecognized shape falls back to "unknown" rather than
+ * a wrong file.
+ */
+export function extractPytestFile(nodeId: string): string | null {
+  const idx = nodeId.indexOf("::");
+  if (idx === -1) return null;
+  const candidate = nodeId.slice(0, idx);
+  return candidate.includes("/") || candidate.endsWith(".py") ? candidate : null;
+}
+
+/**
+ * Best-effort file extraction from vitest's default (non-verbose) reporter
+ * line, which is per-file: "src/foo.test.ts (7 tests)". Returns null for
+ * anything else (e.g. an individual "describe > test name" line from a
+ * verbose reporter) rather than guessing.
+ */
+export function extractVitestFile(raw: string): string | null {
+  const match = /^(.+?)\s+\(\d+\s+tests?\)$/.exec(raw);
+  const candidate = match ? match[1]! : raw;
+  return candidate.includes("/") && /\.(test|spec)\.[jt]sx?$/.test(candidate) ? candidate : null;
+}
+
+export function parseTextTestOutput(output: string, _command: string): { passed: TestEntry[]; failed: TestEntry[] } {
+  const passed: TestEntry[] = [];
+  const failed: TestEntry[] = [];
+  const seenPassed = new Set<string>();
+  const seenFailed = new Set<string>();
   const lines = output.split("\n");
 
   for (const line of lines) {
     // Jest: PASS src/foo.test.ts > test name
     const jestPass = line.match(/^PASS\s+(.+?)(?:\s+>|›)/);
     if (jestPass) {
-      passed.push(jestPass[1]!.trim());
+      const name = jestPass[1]!.trim();
+      if (!seenPassed.has(name)) { seenPassed.add(name); passed.push({ name, file: name }); }
       continue;
     }
 
     // Jest: FAIL src/foo.test.ts > test name
     const jestFail = line.match(/^FAIL\s+(.+?)(?:\s+>|›)/);
     if (jestFail) {
-      failed.push(jestFail[1]!.trim());
+      const name = jestFail[1]!.trim();
+      if (!seenFailed.has(name)) { seenFailed.add(name); failed.push({ name, file: name }); }
       continue;
     }
 
     // pytest: PASSED test_module::test_name
     const pytestPass = line.match(/^PASSED\s+(.+)/);
     if (pytestPass) {
-      passed.push(pytestPass[1]!.trim());
+      const name = pytestPass[1]!.trim();
+      if (!seenPassed.has(name)) { seenPassed.add(name); passed.push({ name, file: extractPytestFile(name) }); }
       continue;
     }
 
     // pytest: FAILED test_module::test_name
     const pytestFail = line.match(/^FAILED\s+(.+)/);
     if (pytestFail) {
-      failed.push(pytestFail[1]!.trim());
+      const name = pytestFail[1]!.trim();
+      if (!seenFailed.has(name)) { seenFailed.add(name); failed.push({ name, file: extractPytestFile(name) }); }
       continue;
     }
 
     // Vitest / generic: ✓ test name (Nms)
     const vitestPass = line.match(/^[\s]*✓\s+(.+?)(?:\s+\d)/);
     if (vitestPass) {
-      passed.push(vitestPass[1]!.trim());
+      const name = vitestPass[1]!.trim();
+      if (!seenPassed.has(name)) { seenPassed.add(name); passed.push({ name, file: extractVitestFile(name) }); }
       continue;
     }
 
     // Vitest / generic: ✗ test name
     const vitestFail = line.match(/^[\s]*✗\s+(.+)/) || line.match(/^[\s]*FAIL\s+(.+)/);
     if (vitestFail) {
-      failed.push(vitestFail[1]!.trim());
+      const name = vitestFail[1]!.trim();
+      if (!seenFailed.has(name)) { seenFailed.add(name); failed.push({ name, file: extractVitestFile(name) }); }
       continue;
     }
 
-    // Go: --- PASS: TestName
+    // Go: --- PASS: TestName (no file info in this output format)
     const goPass = line.match(/^--- PASS:\s+(.+)/);
     if (goPass) {
-      passed.push(goPass[1]!.trim());
+      const name = goPass[1]!.trim();
+      if (!seenPassed.has(name)) { seenPassed.add(name); passed.push({ name, file: null }); }
       continue;
     }
 
     // Go: --- FAIL: TestName
     const goFail = line.match(/^--- FAIL:\s+(.+)/);
     if (goFail) {
-      failed.push(goFail[1]!.trim());
+      const name = goFail[1]!.trim();
+      if (!seenFailed.has(name)) { seenFailed.add(name); failed.push({ name, file: null }); }
       continue;
     }
 
-    // Rust: test name ... ok
+    // Rust: test name ... ok (no file info in this output format)
     const rustPass = line.match(/^test\s+(.+?)\s+\.\.\.\s+ok/);
     if (rustPass) {
-      passed.push(rustPass[1]!.trim());
+      const name = rustPass[1]!.trim();
+      if (!seenPassed.has(name)) { seenPassed.add(name); passed.push({ name, file: null }); }
       continue;
     }
 
     // Rust: test name ... FAILED
     const rustFail = line.match(/^test\s+(.+?)\s+\.\.\.\s+FAILED/);
     if (rustFail) {
-      failed.push(rustFail[1]!.trim());
+      const name = rustFail[1]!.trim();
+      if (!seenFailed.has(name)) { seenFailed.add(name); failed.push({ name, file: null }); }
       continue;
     }
   }
 
-  // Deduplicate
-  return {
-    passed: [...new Set(passed)],
-    failed: [...new Set(failed)],
-  };
+  return { passed, failed };
 }
 
 // ─── Git worktree management ──────────────────────────────────────────────────
