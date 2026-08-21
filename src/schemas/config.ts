@@ -28,9 +28,9 @@ const StackSchema = z.object({
 const LlmSchema = z.object({
   provider: z
     .enum(["openai", "groq", "gemini", "ollama", "anthropic"])
-    .default("openai"),
-  model: z.string().default("gpt-4o"),
-  api_key_env: z.string().default("OPENAI_API_KEY"),
+    .default("groq"),
+  model: z.string().default("groq/compound-mini"),
+  api_key_env: z.string().default("GROQ_API_KEY"),
   base_url: z.string().nullable().default(null),
   temperature: z.number().min(0).max(1).default(0.2),
   max_tokens: z.number().int().positive().default(4096),

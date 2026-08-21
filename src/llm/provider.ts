@@ -35,7 +35,7 @@ export class MissingAPIKeyError extends LLMError {
     super(
       `Missing API key. Set the ${envVarName} environment variable to use the ${provider} provider.\n\n` +
       `Options:\n` +
-      `  1. Set the key: export ${envVarName}=sk-...\n` +
+      `  1. Set the key: export ${envVarName}=<your-api-key>\n` +
       `  2. Use a different provider in .advreview.yml:\n` +
       `       llm:\n` +
       `         provider: ollama\n` +
@@ -159,20 +159,22 @@ export function createProvider(config: FlaughtConfig): LLMProvider {
       // Local Ollama needs no API key. Ollama Cloud (:cloud-tagged models,
       // base_url: https://ollama.com) needs Authorization: Bearer — same
       // /api/chat endpoint shape either way. Only attach a key when the
-      // user has explicitly pointed api_key_env somewhere other than the
-      // schema's default ("OPENAI_API_KEY") — otherwise a user who has
-      // OPENAI_API_KEY set for unrelated reasons would silently leak it as
-      // a bearer header to whatever base_url their Ollama config points at.
-      const ollamaApiKeyConfigured = config.llm.api_key_env !== "OPENAI_API_KEY";
+      // user has explicitly pointed api_key_env somewhere other than one of
+      // the schema's own default values — otherwise a user who has, say,
+      // GROQ_API_KEY (the current default) or OPENAI_API_KEY (a past
+      // default) set for unrelated reasons would silently leak it as a
+      // bearer header to whatever base_url their Ollama config points at.
+      const DEFAULT_API_KEY_ENV_SENTINELS = new Set(["OPENAI_API_KEY", "GROQ_API_KEY"]);
+      const ollamaApiKeyConfigured = !DEFAULT_API_KEY_ENV_SENTINELS.has(config.llm.api_key_env);
       return new OllamaProvider({
         baseUrl: config.llm.base_url ?? "http://localhost:11434",
         model: config.llm.model,
         temperature: config.llm.temperature,
         timeoutSeconds: config.llm.timeout_seconds,
         apiKey: ollamaApiKeyConfigured ? (apiKey || undefined) : undefined,
-        // Only set when opted in, so a plain local config never surfaces an
-        // "OPENAI_API_KEY" hint in error messages for a provider that
-        // doesn't need one.
+        // Only set when opted in, so a plain local config never surfaces a
+        // default-sentinel env var hint in error messages for a provider
+        // that doesn't need one.
         apiKeyEnvVar: ollamaApiKeyConfigured ? config.llm.api_key_env : undefined,
       });
     }

@@ -100,8 +100,8 @@ Self-review is the weak spot in AI-assisted development. The model that wrote yo
 
 | Provider               | Config                                                                                                    |
 | ---------------------- | ----------------------------------------------------------------------------------------------------------|
+| **Groq** (default)     | `provider: groq`, `model: groq/compound-mini`                                                            |
 | **OpenAI**              | `provider: openai`, `model: gpt-4o`                                                                      |
-| **Groq**                | `provider: groq`, `model: groq/compound-mini`                                                            |
 | **Gemini**              | `provider: gemini`, `model: gemini-1.5-pro`                                                              |
 | **Anthropic (Claude)**  | `provider: anthropic`, `model: claude-sonnet-5`                                                          |
 | **Ollama** (local)      | `provider: ollama`, `model: codellama`                                                                   |
