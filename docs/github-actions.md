@@ -2,6 +2,8 @@
 
 Flaught is designed to run in CI. This page has three ready-to-use workflows and guidance on exit code handling.
 
+> **If you want findings to block merge, don't stop at copy-pasting an example below.** The Minimal, Ollama Cloud, and self-hosted Ollama workflows use `continue-on-error: true`, which never fails the job — not on exit 1 (real findings) and not on exit 2 (tool/LLM error). The "Full" workflow below is the one exception: it already uses the exit-code-split pattern from [Exit code handling](#exit-code-handling), so real findings block merge while a Groq outage only warns. If you hand-modify any of these to make findings block merge (e.g. by just dropping `continue-on-error: true`), you will also make tool/LLM errors block merge unless you re-derive the split — that's exactly the bug [Exit code handling](#exit-code-handling) exists to prevent.
+
 ## Minimal — deterministic tools only (no API key needed)
 
 Runs Semgrep, your linter, and vulnerability scanner with zero LLM cost. Test inversion and scope-creep heuristics still work.
@@ -81,6 +83,8 @@ Actions are pinned to commit SHA (supply-chain integrity) and every `github.*` e
 
 ## Full — with LLM adversarial pass
 
+This workflow blocks merge on real findings (exit 1) but fails open on a tool/LLM error (exit 2, e.g. a Groq outage) — see [Exit code handling](#exit-code-handling) for why that split matters. It's the same pattern this repo's own [dogfooding workflow](../.github/workflows/adversarial-review.yml) uses.
+
 ```yaml
 # .github/workflows/adversarial-review.yml
 name: Adversarial Review
@@ -113,18 +117,25 @@ jobs:
         run: npm ci
 
       - name: Run adversarial review
+        id: review
         env:
           GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
           PR_BASE_REF: ${{ github.base_ref }}
           PR_TITLE: ${{ github.event.pull_request.title }}
+        # set +e / explicit exit 0: this step's own pass/fail no longer
+        # gates the job — the two Check steps below do that, branching on
+        # exit_code so exit 1 (findings) and exit 2 (tool/LLM error) are
+        # handled differently instead of alike.
         run: |
+          set +e
           flaught review \
             --base "origin/${PR_BASE_REF}" \
             --head HEAD \
             --output findings.json \
             --pr-description "${PR_TITLE}" \
             --quiet
-        continue-on-error: true
+          echo "exit_code=$?" >> "$GITHUB_OUTPUT"
+          exit 0
 
       - name: Upload findings
         if: always()
@@ -150,9 +161,20 @@ jobs:
               --quiet 2>/dev/null)
             echo "$BODY" | gh pr comment "${PR_NUMBER}" --body-file -
           fi
+
+      - name: Check severity gate
+        if: steps.review.outputs.exit_code == '1'
+        run: |
+          echo "::error::Flaught found findings that exceed the severity gate threshold"
+          exit 1
+
+      - name: Check for errors
+        if: steps.review.outputs.exit_code == '2'
+        run: |
+          echo "::warning::Flaught encountered an error (config, API, or runtime) and could not complete the review. This does NOT block merge — an LLM/infra outage is not evidence of a real code problem. Check the workflow logs and consider re-running."
 ```
 
-Add `GROQ_API_KEY` to your repository secrets (Settings → Secrets and variables → Actions). This matches the default `.advreview.yml` that `flaught init` generates (`provider: groq`, `api_key_env: GROQ_API_KEY`) — no config changes needed, and it's the same pattern this repo's own [dogfooding workflow](../.github/workflows/adversarial-review.yml) uses.
+Add `GROQ_API_KEY` to your repository secrets (Settings → Secrets and variables → Actions). This matches the default `.advreview.yml` that `flaught init` generates (`provider: groq`, `api_key_env: GROQ_API_KEY`) — no config changes needed.
 
 **Note on the "Comment on PR" step:** it re-runs `flaught review` a second time to get markdown for the comment body, since `--output` only writes the JSON artifact — there's no "render markdown from an existing artifact" command yet. That second run uses `--no-llm` deliberately: running it *without* `--no-llm` would call the LLM API a second time per PR (doubling cost/latency) just to reproduce a report. The tradeoff is that the posted comment only reflects deterministic/test-inversion/scope-creep findings, not the LLM pass — the uploaded `findings.json` artifact from the first (full) run is the source of truth for LLM findings.
 
@@ -349,9 +371,9 @@ Flaught's exit codes are designed for CI gating:
   # pattern below instead.
 ```
 
-### Comment-then-gate example (recommended — fails open on errors)
+### Recommended pattern — fails open on errors
 
-Use `continue-on-error: true` so the step never fails the job on its own, capture the exit code, then branch explicitly: block on `1`, warn (don't block) on `2`.
+Capture the exit code with `set +e` and an explicit `exit 0` (the step's own pass/fail no longer gates the job), then branch in two follow-up steps: block on `1`, warn (don't block) on `2`. This is exactly what the [Full workflow](#full--with-llm-adversarial-pass) above does — see that section for the complete, working version (including the PR comment step), or [`.github/workflows/adversarial-review.yml`](https://github.com/flaught/core/blob/main/.github/workflows/adversarial-review.yml) in this repo, which Flaught dogfoods on itself.
 
 ```yaml
 - name: Run adversarial review
@@ -359,8 +381,10 @@ Use `continue-on-error: true` so the step never fails the job on its own, captur
   env:
     PR_BASE_REF: ${{ github.base_ref }}
   run: |
-    flaught review --base "origin/${PR_BASE_REF}" --output findings.json --quiet || echo "exit_code=$?" >> "$GITHUB_OUTPUT"
-  continue-on-error: true
+    set +e
+    flaught review --base "origin/${PR_BASE_REF}" --output findings.json --quiet
+    echo "exit_code=$?" >> "$GITHUB_OUTPUT"
+    exit 0
 
 - name: Check severity gate
   if: steps.review.outputs.exit_code == '1'
@@ -370,19 +394,7 @@ Use `continue-on-error: true` so the step never fails the job on its own, captur
   if: steps.review.outputs.exit_code == '2'
   run: echo "::warning::Flaught could not complete the review (config, API, or runtime error). Not blocking merge — check the workflow logs."
   # No `exit 1` here — this step intentionally warns and passes.
-
-- name: Comment on PR
-  if: always()
-  env:
-    GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-    PR_BASE_REF: ${{ github.base_ref }}
-    PR_NUMBER: ${{ github.event.pull_request.number }}
-  run: |
-    BODY=$(flaught review --base "origin/${PR_BASE_REF}" --quiet 2>/dev/null)
-    echo "$BODY" | gh pr comment "${PR_NUMBER}" --body-file -
 ```
-
-See [`.github/workflows/adversarial-review.yml`](https://github.com/flaught/core/blob/main/.github/workflows/adversarial-review.yml) in this repo for the full working version of this pattern (Flaught dogfoods itself with it).
 
 ## PR description for scope-creep detection
 
