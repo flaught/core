@@ -272,9 +272,14 @@ Compares each changed file/hunk against the PR description (the "intent anchor")
 scope_creep:
   enabled: true
   intent_source: pr_description   # pr_description | linked_issue | both
+  exclude_paths: []                # e.g. ["docs/adr/**"] — never scored as scope creep
 ```
 
 Pass the PR description via `--pr-description` on the CLI. Without a PR description, only heuristic detection runs.
+
+`exclude_paths` is for paths that are *structurally* expected to ride along with certain changes — most commonly an ADR or design doc that accompanies the change it documents, which would otherwise get flagged every time as "large documentation diff unrelated to the code change." It's enforced twice: as explicit guidance in the LLM prompt, and as a post-hoc filter on the LLM's findings (so it holds even if the LLM ignores the guidance). Same `*`/`**` glob syntax as `exclude.paths`.
+
+This is a proactive alternative to [dismissing](dismissals.md) the same scope-creep theme over and over — dismissal-by-fingerprint only matches a finding whose title is worded identically to a prior one, so an LLM that phrases "large ADR diff" differently on every run will keep re-triggering the gate even after you've dismissed it once. If a path pattern is *always* fine to change alongside anything else, exclude it here instead of dismissing it repeatedly.
 
 ## Prompt templates
 

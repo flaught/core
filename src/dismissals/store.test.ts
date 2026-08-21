@@ -9,6 +9,7 @@ import {
   removeDismissal,
   isExpired,
   findActiveDismissal,
+  getActiveDismissals,
   resolveDismissalsPath,
   DEFAULT_DISMISSALS_FILENAME,
 } from "./store.js";
@@ -127,5 +128,37 @@ describe("isExpired / findActiveDismissal", () => {
   it("findActiveDismissal returns null when no fingerprint matches", () => {
     const store = { version: 1, dismissals: [makeEntry()] };
     expect(findActiveDismissal(store, "sha256:does-not-exist")).toBeNull();
+  });
+});
+
+describe("getActiveDismissals", () => {
+  it("excludes expired entries", () => {
+    const store = {
+      version: 1,
+      dismissals: [
+        makeEntry({ fingerprint: "sha256:a", expires_at: "2020-01-01T00:00:00Z" }),
+        makeEntry({ fingerprint: "sha256:b", expires_at: null }),
+      ],
+    };
+    const active = getActiveDismissals(store, new Date("2025-01-01T00:00:00Z"));
+    expect(active).toHaveLength(1);
+    expect(active[0]!.fingerprint).toBe("sha256:b");
+  });
+
+  it("orders most-recently-dismissed first", () => {
+    const store = {
+      version: 1,
+      dismissals: [
+        makeEntry({ fingerprint: "sha256:a", dismissed_at: "2025-01-01T00:00:00Z" }),
+        makeEntry({ fingerprint: "sha256:b", dismissed_at: "2025-06-01T00:00:00Z" }),
+        makeEntry({ fingerprint: "sha256:c", dismissed_at: "2025-03-01T00:00:00Z" }),
+      ],
+    };
+    const active = getActiveDismissals(store);
+    expect(active.map((d) => d.fingerprint)).toEqual(["sha256:b", "sha256:c", "sha256:a"]);
+  });
+
+  it("returns an empty array for an empty store", () => {
+    expect(getActiveDismissals({ version: 1, dismissals: [] })).toEqual([]);
   });
 });

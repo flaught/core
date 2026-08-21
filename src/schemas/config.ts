@@ -74,6 +74,14 @@ const ScopeCreepSchema = z.object({
   intent_source: z
     .enum(["pr_description", "linked_issue", "both"])
     .default("pr_description"),
+  /**
+   * Glob patterns for paths that are never scored as scope creep, regardless
+   * of the PR's stated intent (e.g. an ADR that accompanies the change it
+   * documents). Enforced both as prompt guidance to the LLM and as a
+   * post-hoc filter on its findings, so it holds even if the LLM ignores the
+   * guidance. Same `*`/`**` glob syntax as `exclude.paths`.
+   */
+  exclude_paths: z.array(z.string()).default([]),
 });
 
 // ─── Lighthouse ────────────────────────────────────────────────────────────

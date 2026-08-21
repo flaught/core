@@ -20,6 +20,7 @@ describe("FlaughtConfigSchema", () => {
     expect(config.test_inversion.enabled).toBe(true);
     expect(config.scope_creep.enabled).toBe(true);
     expect(config.scope_creep.intent_source).toBe("pr_description");
+    expect(config.scope_creep.exclude_paths).toEqual([]);
     expect(config.lighthouse.enabled).toBe(false);
     expect(config.noise_budget.critical).toBe(5);
     expect(config.noise_budget.high).toBe(10);
@@ -60,6 +61,7 @@ describe("FlaughtConfigSchema", () => {
       scope_creep: {
         enabled: true,
         intent_source: "both",
+        exclude_paths: ["docs/adr/**"],
       },
       lighthouse: {
         enabled: true,
@@ -91,6 +93,7 @@ describe("FlaughtConfigSchema", () => {
     expect(config.lighthouse.preview_url).toBe("https://deploy-preview.example.com");
     expect(config.severity_gate.fail_on).toBe("critical");
     expect(config.exclude.patterns).toEqual(["\\.spec\\.ts$"]);
+    expect(config.scope_creep.exclude_paths).toEqual(["docs/adr/**"]);
   });
 
   it("rejects invalid provider", () => {

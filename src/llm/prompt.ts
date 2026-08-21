@@ -9,12 +9,57 @@
 
 import type { ReviewContext } from "../context/assembler.js";
 import type { FlaughtConfig } from "../schemas/config.js";
+import type { DismissalEntry } from "../schemas/dismissals.js";
 import {
   assembleSystemPrompt,
   assembleUserAppend,
   type PromptTemplates,
   NO_TEMPLATES,
 } from "../prompt/templates.js";
+
+// Cap on how many dismissed themes get echoed back into the prompt. Dismissal
+// stores grow indefinitely; without a cap this section would eventually crowd
+// out the diff itself. Most-recent-first (see getActiveDismissals) means the
+// cap drops the oldest, presumably least-relevant, entries first.
+const MAX_DISMISSALS_IN_PROMPT = 25;
+
+/**
+ * Format previously-dismissed findings as a "don't re-raise this" digest for
+ * the LLM prompt.
+ *
+ * This is the root-cause fix for dismissal-by-fingerprint's known limitation:
+ * fingerprint matching only catches an LLM finding that comes back with
+ * *identical* wording. A reworded restatement of the same theme gets a new
+ * fingerprint and silently re-triggers the gate. Feeding the dismissal
+ * history back into the prompt stops the LLM from generating the restatement
+ * in the first place, instead of trying to pattern-match its infinite
+ * phrasings after the fact.
+ */
+export function formatDismissalsForPrompt(entries: DismissalEntry[]): string {
+  if (entries.length === 0) return "";
+
+  const shown = entries.slice(0, MAX_DISMISSALS_IN_PROMPT);
+  const lines = [
+    `## Previously Reviewed & Dismissed`,
+    "",
+    "A human has already reviewed and dismissed the findings below as not " +
+    "actionable. Do not re-raise the same underlying issue under new wording " +
+    "unless something materially new and different is present in this diff.",
+    "",
+  ];
+
+  for (const entry of shown) {
+    const file = entry.context?.file ? ` (\`${entry.context.file}\`)` : "";
+    const title = entry.context?.title ?? "(untitled)";
+    lines.push(`- "${title}"${file} — dismissed: ${entry.reason}`);
+  }
+
+  if (entries.length > shown.length) {
+    lines.push(`- …and ${entries.length - shown.length} older dismissal(s), omitted for space.`);
+  }
+
+  return lines.join("\n");
+}
 
 /**
  * Build the system prompt — sets the adversarial posture and output format.
@@ -41,6 +86,7 @@ export function buildUserPrompt(
   _config: FlaughtConfig,
   prDescription?: string,
   templates: PromptTemplates = NO_TEMPLATES,
+  activeDismissals: DismissalEntry[] = [],
 ): string {
   const sections: string[] = [];
   const MAX_PROMPT_CHARS = 100_000; // ~25K tokens, leaves room for the system prompt and output
@@ -120,6 +166,12 @@ export function buildUserPrompt(
   // ── Diff ──
   if (context.diff) {
     sections.push(`## Unified Diff\n\n\`\`\`diff\n${context.diff}\n\`\`\``);
+  }
+
+  // ── Previously dismissed findings (don't re-raise reworded restatements) ──
+  const dismissalsSection = formatDismissalsForPrompt(activeDismissals);
+  if (dismissalsSection) {
+    sections.push(dismissalsSection);
   }
 
   // ── Review instruction ──

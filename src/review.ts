@@ -29,10 +29,17 @@ import { renderMarkdownReport } from "./report/markdown.js";
 import { renderJsonArtifact } from "./report/json.js";
 import { runDeterministicTools, formatToolFindingsForPrompt, type DeterministicFinding } from "./tools/runner.js";
 import { runTestInversion } from "./test-inversion/runner.js";
-import { detectScopeCreepHeuristic, extractScopeCreepFromFindings, formatScopeCreepForPrompt } from "./scope-creep/detector.js";
+import {
+  detectScopeCreepHeuristic,
+  extractScopeCreepFromFindings,
+  formatScopeCreepForPrompt,
+  filterExcludedScopeCreep,
+  formatScopeCreepExclusionsForPrompt,
+} from "./scope-creep/detector.js";
 import { computeFingerprint } from "./dismissals/fingerprint.js";
-import { loadDismissalStore, resolveDismissalsPath } from "./dismissals/store.js";
+import { loadDismissalStore, resolveDismissalsPath, getActiveDismissals } from "./dismissals/store.js";
 import { applyDismissals } from "./dismissals/apply.js";
+import type { DismissalStore } from "./schemas/dismissals.js";
 
 // ─── Progress callback ──────────────────────────────────────────────────────
 
@@ -92,6 +99,13 @@ export async function runReview(options: ReviewOptions = {}): Promise<ReviewResu
     headRef: options.headRef,
     configPath: options.configPath,
   });
+
+  // 2a. Load the dismissal store up front — needed both to inject "known
+  // non-issues" context into the LLM prompt (below) and, later, to apply
+  // dismissals to the finished findings list (step 6c).
+  const dismissalStore: DismissalStore | null = config.dismissals.enabled
+    ? loadDismissalStore(resolveDismissalsPath(context.repoRoot, config.dismissals.path))
+    : null;
 
   // 2b. Load prompt templates
   const templates = loadTemplates(context.repoRoot, config);
@@ -227,7 +241,8 @@ export async function runReview(options: ReviewOptions = {}): Promise<ReviewResu
   } else {
     const provider = createProvider(config);
     const systemPrompt = buildSystemPrompt(config, templates);
-    const userPrompt = buildUserPrompt(context, config, options.prDescription, templates);
+    const activeDismissals = dismissalStore ? getActiveDismissals(dismissalStore) : [];
+    const userPrompt = buildUserPrompt(context, config, options.prDescription, templates, activeDismissals);
 
     // Inject deterministic tool findings into the prompt
     const toolContext = formatToolFindingsForPrompt(deterministicFindings);
@@ -239,12 +254,20 @@ export async function runReview(options: ReviewOptions = {}): Promise<ReviewResu
         : null,
     );
 
+    // Tell the LLM up front which paths are exempt from scope-creep scoring
+    // (e.g. an ADR accompanying the change it documents) — filterExcludedScopeCreep
+    // below is the enforcement backstop if it ignores this.
+    const scopeCreepExclusionsContext = formatScopeCreepExclusionsForPrompt(config.scope_creep.exclude_paths);
+
     let fullUserPrompt = userPrompt;
     if (toolContext) {
       fullUserPrompt = `${fullUserPrompt}\n\n---\n\n${toolContext}`;
     }
     if (scopeCreepContext) {
       fullUserPrompt = `${fullUserPrompt}\n\n---\n\n${scopeCreepContext}`;
+    }
+    if (scopeCreepExclusionsContext) {
+      fullUserPrompt = `${fullUserPrompt}\n\n---\n\n${scopeCreepExclusionsContext}`;
     }
 
     const promptChars = systemPrompt.length + fullUserPrompt.length;
@@ -326,6 +349,17 @@ export async function runReview(options: ReviewOptions = {}): Promise<ReviewResu
 
   if (context.changedFiles.length > 0 && config.scope_creep.enabled) {
     progress("Checking for scope creep...");
+
+    // Enforcement backstop: strip any scope-creep finding on an exempt path,
+    // regardless of whether the LLM honored the prompt-level guidance above.
+    if (config.scope_creep.exclude_paths.length > 0) {
+      const beforeCount = findings.length;
+      findings = filterExcludedScopeCreep(findings, config.scope_creep.exclude_paths);
+      if (findings.length < beforeCount) {
+        progress(`  Filtered ${beforeCount - findings.length} scope-creep finding(s) on exempt path(s)`);
+      }
+    }
+
     // Heuristic results were already computed before the LLM call
     // (they're in scopeCreepHeuristic)
     const llmScopeCreep = extractScopeCreepFromFindings(findings, options.prDescription);
@@ -361,9 +395,7 @@ export async function runReview(options: ReviewOptions = {}): Promise<ReviewResu
 
   // 6c. Apply persisted dismissals (fingerprint-matched, before noise budget so a
   // re-surfaced dismissed finding never crowds out a genuinely new one)
-  if (config.dismissals.enabled) {
-    const dismissalsPath = resolveDismissalsPath(context.repoRoot, config.dismissals.path);
-    const dismissalStore = loadDismissalStore(dismissalsPath);
+  if (dismissalStore) {
     const applied = applyDismissals(findings, dismissalStore);
     findings = applied.findings;
     if (applied.appliedCount > 0) {

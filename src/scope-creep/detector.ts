@@ -18,6 +18,7 @@
 import type { ReviewContext, ChangedFile } from "../context/assembler.js";
 import type { ScopeCreep, FlaggedHunk, Finding } from "../schemas/findings.js";
 import type { FlaughtConfig } from "../schemas/config.js";
+import { matchesAnyGlob } from "../util/glob.js";
 
 // ─── Heuristic scope-creep detection ──────────────────────────────────────────
 
@@ -34,9 +35,16 @@ export function detectScopeCreepHeuristic(
   if (context.changedFiles.length === 0) return [];
 
   const intent = extractIntent(prDescription);
+  const excludePaths = config.scope_creep.exclude_paths;
   const flagged: FlaggedHunk[] = [];
 
   for (const file of context.changedFiles) {
+    // Pre-approved paths (e.g. an ADR accompanying the change it documents)
+    // are never scope creep, regardless of the PR's stated intent.
+    if (excludePaths.length > 0 && matchesAnyGlob(file.path, excludePaths)) {
+      continue;
+    }
+
     // Skip files in common exclusion patterns
     if (isLikelyUnrelated(file, intent)) {
       flagged.push({
@@ -283,6 +291,43 @@ function isUtilityFile(filePath: string): boolean {
     /\/helpers?\//.test(filePath) ||
     /\/shared\//.test(filePath) ||
     /\/common\//.test(filePath);
+}
+
+// ─── Excluded-path enforcement ──────────────────────────────────────────────
+
+/**
+ * Drop any scope-creep finding whose file matches `scope_creep.exclude_paths`.
+ * This is the enforcement backstop for the prompt-level guidance below — it
+ * holds even if the LLM ignores the instruction, the same way noise-budget
+ * and severity-gate enforcement don't just trust the LLM to self-limit.
+ */
+export function filterExcludedScopeCreep(
+  findings: Finding[],
+  excludePaths: string[],
+): Finding[] {
+  if (excludePaths.length === 0) return findings;
+
+  return findings.filter(
+    (f) => !(f.category === "scope-creep" && matchesAnyGlob(f.evidence.file, excludePaths)),
+  );
+}
+
+/**
+ * Tell the LLM up front which paths are pre-approved and exempt from
+ * scope-creep scoring, so it doesn't waste its noise budget generating a
+ * finding that filterExcludedScopeCreep would just strip out anyway.
+ */
+export function formatScopeCreepExclusionsForPrompt(excludePaths: string[]): string {
+  if (excludePaths.length === 0) return "";
+
+  return [
+    `## Scope-Creep Exemptions`,
+    "",
+    "The following path patterns are pre-approved and exempt from scope-creep review " +
+    "— do not flag changes to these paths as scope creep, regardless of the stated PR intent:",
+    "",
+    ...excludePaths.map((p) => `- \`${p}\``),
+  ].join("\n");
 }
 
 // ─── Format scope-creep findings for the LLM prompt ────────────────────────────
