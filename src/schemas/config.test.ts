@@ -10,7 +10,7 @@ describe("FlaughtConfigSchema", () => {
     expect(config.stack.frameworks).toEqual([]);
     expect(config.stack.runtime).toBe("auto");
     expect(config.llm.provider).toBe("groq");
-    expect(config.llm.model).toBe("openai/gpt-oss-120b");
+    expect(config.llm.model).toBe("llama-3.3-70b-versatile");
     expect(config.llm.api_key_env).toBe("GROQ_API_KEY");
     expect(config.llm.temperature).toBe(0.2);
     expect(config.llm.max_tokens).toBe(4096);

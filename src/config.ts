@@ -90,7 +90,7 @@ version: 1
 # ── LLM provider ───────────────────────────────────────────
 llm:
   provider: groq            # openai | groq | gemini | anthropic | ollama
-  model: openai/gpt-oss-120b # strongest coding model on Groq; also try: meta-llama/llama-4-maverick-17b-128e-instruct
+  model: llama-3.3-70b-versatile # strongest coding model on Groq; also try: meta-llama/llama-4-maverick-17b-128e-instruct
   api_key_env: GROQ_API_KEY # e.g. OPENAI_API_KEY for openai, ANTHROPIC_API_KEY for anthropic
   # base_url: null          # override for OpenAI-compatible endpoints, or an
                              # Anthropic Messages-API-compatible proxy/gateway
