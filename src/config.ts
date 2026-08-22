@@ -57,7 +57,7 @@ export async function loadConfig(
   }
 
   const content = fs.readFileSync(filePath, "utf-8");
-  const raw = yaml.load(content) as Record<string, unknown>;
+  const raw = yaml.load(content, { schema: yaml.JSON_SCHEMA }) as Record<string, unknown>;
 
   return mergeWithDefaults(raw);
 }

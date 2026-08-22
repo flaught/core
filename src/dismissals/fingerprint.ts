@@ -117,7 +117,10 @@ export function computeFingerprint(finding: FingerprintInput): string {
       ? ["det", finding.source, finding.evidence.rule_id ?? normalizedTitle, normalizedFile]
       : ["llm", finding.category, normalizedFile, normalizedTitle];
 
-  const digest = createHash("sha256").update(parts.join("|")).digest("hex").slice(0, 16);
+  // 128 bits (32 hex chars) — sufficient collision resistance for content-addressed IDs.
+  // Previously truncated to 64 bits (16 hex chars), which made intentional collision
+  // feasible for an attacker who controls finding titles.
+  const digest = createHash("sha256").update(parts.join("|")).digest("hex").slice(0, 32);
   return `sha256:${digest}`;
 }
 
@@ -149,7 +152,7 @@ export function computeSimilarityKey(finding: Finding): string {
     normalizeSnippet(finding.evidence.snippet),
   ];
 
-  const digest = createHash("sha256").update(parts.join("|")).digest("hex").slice(0, 16);
+  const digest = createHash("sha256").update(parts.join("|")).digest("hex").slice(0, 32);
   return `sim:${digest}`;
 }
 

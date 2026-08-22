@@ -25,9 +25,29 @@ export function loadDismissalStore(filePath: string): DismissalStore {
   return DismissalStoreSchema.parse(raw);
 }
 
+/**
+ * Save the dismissal store to disk atomically.
+ *
+ * SECURITY: Writes to a temporary file first, then renames it to the target
+ * path. This prevents concurrent processes from reading a partially-written
+ * file (TOCTOU / torn-write protection). On most OS/filesystems, rename is
+ * atomic, so a concurrent reader will always see either the old or the new
+ * version, never a partial write.
+ */
 export function saveDismissalStore(filePath: string, store: DismissalStore): void {
-  fs.mkdirSync(path.dirname(filePath), { recursive: true });
-  fs.writeFileSync(filePath, `${JSON.stringify(store, null, 2)}\n`, "utf-8");
+  const dir = path.dirname(filePath);
+  fs.mkdirSync(dir, { recursive: true });
+  const tmpPath = filePath + ".tmp." + process.pid + "." + Date.now();
+  try {
+    fs.writeFileSync(tmpPath, `${JSON.stringify(store, null, 2)}\n`, "utf-8");
+    fs.renameSync(tmpPath, filePath);
+  } catch {
+    // If rename fails (e.g., cross-device link), fall back to direct write.
+    // This is still safer than no atomicity — most failures will be caught
+    // by the writeFileSync above, and the rename is a best-effort atomic swap.
+    try { fs.unlinkSync(tmpPath); } catch { /* ignore */ }
+    fs.writeFileSync(filePath, `${JSON.stringify(store, null, 2)}\n`, "utf-8");
+  }
 }
 
 export function addDismissal(store: DismissalStore, entry: DismissalEntry): DismissalStore {

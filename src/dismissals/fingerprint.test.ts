@@ -139,7 +139,7 @@ describe("computeFingerprint", () => {
       title: "x",
       evidence: { file: "a.ts", rule_id: "r" },
     });
-    expect(fp).toMatch(/^sha256:[0-9a-f]{16}$/);
+    expect(fp).toMatch(/^sha256:[0-9a-f]{32}$/);
   });
 });
 
@@ -216,7 +216,7 @@ describe("computeSimilarityKey", () => {
       refute_result: null,
     };
     const key = computeSimilarityKey(finding);
-    expect(key).toMatch(/^sim:[0-9a-f]{16}$/);
+    expect(key).toMatch(/^sim:[0-9a-f]{32}$/);
   });
 
   it("produces the same key for findings with the same category/file/snippet", () => {
