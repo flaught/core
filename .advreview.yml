@@ -16,6 +16,14 @@ llm:
   max_tokens: 4096
   timeout_seconds: 120
 
+# ── Refute pass (skeptic) ────────────────────────────────────
+# Same-provider anti-correlation: the skeptic runs on a different Groq
+# model (120b, not the 20b that wrote the findings) rather than the exact
+# model that just reviewed the diff grading its own homework. `provider`
+# is left unset so it inherits `llm.provider` (groq) — only `model` differs.
+refute:
+  model: openai/gpt-oss-120b
+
 # ── Deterministic tools ────────────────────────────────────
 tools:
   semgrep:
