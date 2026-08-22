@@ -30,6 +30,7 @@ function makeFinding(overrides: Partial<Finding> = {}): Finding {
     dismissed_by: null,
     dismissed_at: null,
     dismissal_reason: null,
+    refute_result: null,
     ...overrides,
   };
 }
@@ -226,6 +227,18 @@ describe("renderMarkdownReport", () => {
     delete (artifact as { tools_executed?: unknown }).tools_executed;
     expect(() => renderMarkdownReport(artifact)).not.toThrow();
     expect(renderMarkdownReport(artifact)).not.toContain("did not run");
+  });
+
+  it("doesn't throw when tools_executed is a malformed non-array value", () => {
+    // Public-API callers might hand-build an artifact where tools_executed
+    // is a string, object, number, etc. instead of an array.
+    const cases: unknown[] = ["oops", 42, { wrong: true }, null];
+    for (const bad of cases) {
+      const artifact = makeArtifact();
+      (artifact as { tools_executed?: unknown }).tools_executed = bad;
+      expect(() => renderMarkdownReport(artifact)).not.toThrow();
+      expect(renderMarkdownReport(artifact)).not.toContain("did not run");
+    }
   });
 
   it("warns once per failed tool when multiple tools fail to run", () => {

@@ -56,6 +56,7 @@ function makeFinding(overrides: Partial<Finding> = {}): Finding {
     dismissed_by: null,
     dismissed_at: null,
     dismissal_reason: null,
+    refute_result: null,
     ...overrides,
   };
 }

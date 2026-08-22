@@ -8,7 +8,7 @@ export { assembleContext, contextToJSON, type ReviewContext, type ReviewContextJ
 export { buildDependencyGraph, parseImports, type DependencyGraph, type ImportEntry } from "./context/neighborhood.js";
 export { loadConfig, initConfig } from "./config.js";
 export { FlaughtConfigSchema, type FlaughtConfig, mergeWithDefaults } from "./schemas/config.js";
-export type { FindingsArtifact, Finding, FindingEvidence, Severity, Category, SourceType, ToolExecuted, TestInversion, ScopeCreep, FlaggedTest, FlaggedHunk, SeverityBudget, NoiseBudget, FindingsSummary } from "./schemas/findings.js";
+export type { FindingsArtifact, Finding, FindingEvidence, Severity, Category, SourceType, ToolExecuted, TestInversion, ScopeCreep, FlaggedTest, FlaggedHunk, SeverityBudget, NoiseBudget, FindingsSummary, RefuteResult, RefuteVerdict } from "./schemas/findings.js";
 export { SCHEMA_VERSION, FINDINGS_SCHEMA_URL, CAVEAT } from "./schemas/findings.js";
 export { createProvider, type LLMProvider, type LLMReviewResult, parseFindingsFromLLM, LLMError, MissingAPIKeyError } from "./llm/provider.js";
 export { buildSystemPrompt, buildUserPrompt } from "./llm/prompt.js";
@@ -46,3 +46,5 @@ export {
   DEFAULT_DISMISSALS_FILENAME,
 } from "./dismissals/store.js";
 export { applyDismissals, type ApplyDismissalsResult } from "./dismissals/apply.js";
+export { runRefutePass, type RunRefuteResult, type RefuteProgressCallback } from "./refute/runner.js";
+export { REFUTE_SYSTEM_PROMPT, buildRefuteUserPrompt, parseRefuteResponse, type RefuteEvaluation, type RefuteResponse } from "./refute/prompt.js";

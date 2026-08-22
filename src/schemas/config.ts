@@ -29,7 +29,7 @@ const LlmSchema = z.object({
   provider: z
     .enum(["openai", "groq", "gemini", "ollama", "anthropic"])
     .default("groq"),
-  model: z.string().default("groq/compound-mini"),
+  model: z.string().default("openai/gpt-oss-120b"),
   api_key_env: z.string().default("GROQ_API_KEY"),
   base_url: z.string().nullable().default(null),
   temperature: z.number().min(0).max(1).default(0.2),
@@ -140,6 +140,30 @@ const DismissalsSchema = z.object({
   path: z.string().default(".flaught-dismissals.json"),
 });
 
+// ─── Refute pass (skeptic) ──────────────────────────────────────────────────
+
+const RefuteSchema = z.object({
+  /** Enable the skeptic pass that tries to refute each LLM finding */
+  enabled: z.boolean().default(true),
+  /** Use a different provider for the refute pass (null = same as main LLM) */
+  provider: z
+    .enum(["openai", "groq", "gemini", "ollama", "anthropic"])
+    .nullable()
+    .default(null),
+  /** Use a different model for the refute pass (null = same as main LLM) */
+  model: z.string().nullable().default(null),
+  /** API key env var for the refute provider (null = same as main LLM) */
+  api_key_env: z.string().nullable().default(null),
+  /** Base URL override for the refute provider (null = same as main LLM) */
+  base_url: z.string().nullable().default(null),
+  /** Temperature for the skeptic pass — slightly higher encourages creative doubt */
+  temperature: z.number().min(0).max(1).default(0.3),
+  /** Max tokens for the skeptic response */
+  max_tokens: z.number().int().positive().default(2048),
+  /** Maximum number of findings to send to the skeptic in a single batch */
+  max_batch_size: z.number().int().positive().default(20),
+});
+
 // ─── Prompt templates ──────────────────────────────────────────────────────
 
 const PromptSchema = z.object({
@@ -175,6 +199,7 @@ export const FlaughtConfigSchema = z.object({
   noise_budget: NoiseBudgetSchema.default({}),
   severity_gate: SeverityGateSchema.default({}),
   dismissals: DismissalsSchema.default({}),
+  refute: RefuteSchema.default({}),
   prompt: PromptSchema.default({}),
   exclude: ExcludeSchema.default({}),
 });

@@ -10,7 +10,7 @@ describe("FlaughtConfigSchema", () => {
     expect(config.stack.frameworks).toEqual([]);
     expect(config.stack.runtime).toBe("auto");
     expect(config.llm.provider).toBe("groq");
-    expect(config.llm.model).toBe("groq/compound-mini");
+    expect(config.llm.model).toBe("openai/gpt-oss-120b");
     expect(config.llm.api_key_env).toBe("GROQ_API_KEY");
     expect(config.llm.temperature).toBe(0.2);
     expect(config.llm.max_tokens).toBe(4096);
@@ -32,6 +32,11 @@ describe("FlaughtConfigSchema", () => {
     expect(config.severity_gate.fail_on).toBe("high");
     expect(config.dismissals.enabled).toBe(true);
     expect(config.dismissals.path).toBe(".flaught-dismissals.json");
+    expect(config.refute.enabled).toBe(true);
+    expect(config.refute.provider).toBeNull();
+    expect(config.refute.model).toBeNull();
+    expect(config.refute.temperature).toBe(0.3);
+    expect(config.refute.max_batch_size).toBe(20);
     expect(config.exclude.paths).toContain("node_modules/**");
     expect(config.exclude.patterns).toEqual([]);
   });

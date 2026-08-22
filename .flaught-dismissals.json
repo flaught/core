@@ -429,6 +429,94 @@
         "file": "src/report/markdown.ts"
       },
       "expires_at": null
+    },
+    {
+      "fingerprint": "sha256:173e8f456a3c3e24",
+      "dismissed_by": "dgabriel@mac.mynetworksettings.com",
+      "dismissed_at": "2026-08-22T12:35:43.713Z",
+      "reason": "False positive, refuted by skeptic: renderMarkdownReport already checks if (toolsWarning) before pushing to sections, so null never propagates into the final markdown. The guard is a defensive fix for a crash path (undefined.filter throws TypeError), not silent suppression. The adjacent comment explicitly documents the public-API rationale.",
+      "context": {
+        "title": "Potential null return breaks downstream string handling",
+        "file": "src/report/markdown.ts"
+      },
+      "expires_at": null
+    },
+    {
+      "fingerprint": "sha256:85b3dffe300ff362",
+      "dismissed_by": "dgabriel@mac.mynetworksettings.com",
+      "dismissed_at": "2026-08-22T12:35:45.734Z",
+      "reason": "Partially valid (confirmed by skeptic): added a test for non-array tools_executed values (string, number, object, null) in commit [this one]. The test gap is now closed.",
+      "context": {
+        "title": "Missing test for non‑array tools_executed values",
+        "file": "src/report/report.test.ts"
+      },
+      "expires_at": null
+    },
+    {
+      "fingerprint": "sha256:acc801afc347bc2a",
+      "dismissed_by": "dgabriel@mac.mynetworksettings.com",
+      "dismissed_at": "2026-08-22T12:35:47.952Z",
+      "reason": "Valid observation (confirmed by skeptic) but not actionable: this repo has no CHANGELOG.md convention. The version bump from 0.7.1 to 0.7.2 is captured by git history and the GitHub release.",
+      "context": {
+        "title": "Version bump without changelog entry",
+        "file": "package.json"
+      },
+      "expires_at": null
+    },
+    {
+      "fingerprint": "sha256:c8f59c9a1b949b85",
+      "dismissed_by": "dgabriel@mac.mynetworksettings.com",
+      "dismissed_at": "2026-08-22T12:37:59.113Z",
+      "reason": "False positive (skeptic confirmed but missed the null-safe caller): renderMarkdownReport checks if(toolsWarning) before pushing to sections — null never reaches the user. The guard is defensive coding for a crash path (undefined.filter throws TypeError). Not silent suppression; it's intentional null-safety for a public API.",
+      "context": {
+        "title": "Silent suppression of tool failure warnings",
+        "file": "src/report/markdown.ts"
+      },
+      "expires_at": null
+    },
+    {
+      "fingerprint": "sha256:d72f588069c4d57b",
+      "dismissed_by": "dgabriel@mac.mynetworksettings.com",
+      "dismissed_at": "2026-08-22T12:38:02.156Z",
+      "reason": "Already fixed: added test for non-array tools_executed values (string, number, object, null) in src/report/report.test.ts. The skeptic-confirmed gap is now closed.",
+      "context": {
+        "title": "No test for malformed non‑array tools_executed values",
+        "file": "src/report/report.test.ts"
+      },
+      "expires_at": null
+    },
+    {
+      "fingerprint": "sha256:baa1565ba15d2569",
+      "dismissed_by": "dgabriel@mac.mynetworksettings.com",
+      "dismissed_at": "2026-08-22T12:38:05.492Z",
+      "reason": "Style nit, not a defect: the comment is local documentation explaining why the guard exists, directly adjacent to the code it documents. A reader encountering if(!Array.isArray(...)) return null needs to know why — the comment answers that. Not redundant with the JSDoc on the function above.",
+      "context": {
+        "title": "Vague comment about public‑API rationale",
+        "file": "src/report/markdown.ts"
+      },
+      "expires_at": null
+    },
+    {
+      "fingerprint": "sha256:fb3cb48379217016",
+      "dismissed_by": "dgabriel@mac.mynetworksettings.com",
+      "dismissed_at": "2026-08-22T12:38:08.411Z",
+      "reason": "Design opinion, not a defect: defensive null-checking at a public API boundary is standard practice, not scope creep. The guard prevents a crash (undefined.filter) and is the minimum necessary safety check. No other renderer needs the same check because no other renderer has the same crash path.",
+      "context": {
+        "title": "Expanding responsibility of renderMarkdownReport beyond its original scope",
+        "file": "src/report/markdown.ts"
+      },
+      "expires_at": null
+    },
+    {
+      "fingerprint": "sha256:eb355a1229bba0dd",
+      "dismissed_by": "dgabriel@mac.mynetworksettings.com",
+      "dismissed_at": "2026-08-22T12:38:13.030Z",
+      "reason": "Unfair test-quality critique: the test does verify warning uniqueness — it asserts '2 deterministic tool(s) did not run' (exactly once) and asserts each tool name appears exactly once. Testing that a string does NOT appear N+1 times is implicitly testing uniqueness.",
+      "context": {
+        "title": "Test does not verify warning uniqueness per failed tool",
+        "file": "src/report/report.test.ts"
+      },
+      "expires_at": null
     }
   ]
 }

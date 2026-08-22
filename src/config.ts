@@ -90,7 +90,7 @@ version: 1
 # ── LLM provider ───────────────────────────────────────────
 llm:
   provider: groq            # openai | groq | gemini | anthropic | ollama
-  model: groq/compound-mini # e.g. gpt-4o for openai, claude-sonnet-5 for anthropic
+  model: openai/gpt-oss-120b # strongest coding model on Groq; also try: meta-llama/llama-4-maverick-17b-128e-instruct
   api_key_env: GROQ_API_KEY # e.g. OPENAI_API_KEY for openai, ANTHROPIC_API_KEY for anthropic
   # base_url: null          # override for OpenAI-compatible endpoints, or an
                              # Anthropic Messages-API-compatible proxy/gateway
@@ -150,6 +150,25 @@ llm:
 # dismissals:
 #   enabled: true
 #   path: .flaught-dismissals.json
+
+# ── Refute pass (skeptic) ─────────────────────────────────────────────────
+# After the LLM review, a second pass challenges each LLM-asserted finding.
+# This is Flaught's core differentiator: a finding must survive a skeptic to
+# be trusted. Deterministic findings (Semgrep, linters) are ground truth
+# and are never refuted.
+#
+# By default the same model is used for both passes; for anti-correlation,
+# point the skeptic at a different provider/model (e.g. code with Claude,
+# review with GPT-4o). See the README's LLM provider table for all options.
+# refute:
+#   enabled: true
+#   # provider: anthropic    # separate provider for the skeptic (null = same as main LLM)
+#   # model: claude-sonnet-5  # separate model for the skeptic (null = same as main LLM)
+#   # api_key_env: ANTHROPIC_API_KEY  # separate API key (null = same as main LLM)
+#   # base_url: null            # separate base URL (null = same as main LLM)
+#   temperature: 0.3     # slightly higher than the reviewer's 0.2 for creative doubt
+#   max_tokens: 2048     # skeptic needs less output than the initial review
+#   max_batch_size: 20   # max findings per skeptic batch
 
 # ── Prompt templates ────────────────────────────────────────
 # Override or extend the LLM prompts by dropping files into .flaught-prompt/
