@@ -151,7 +151,7 @@ describe("runTestInversion — blast-radius scoping", () => {
     tempDirs.push(repoPath);
 
     const git = simpleGit(repoPath);
-    await git.init();
+    await git.init(["--initial-branch=main"]);
     await git.addConfig("user.email", "test@flaught.dev");
     await git.addConfig("user.name", "Flaught Test");
 
@@ -178,7 +178,7 @@ describe("runTestInversion — blast-radius scoping", () => {
     tempDirs.push(repoPath);
 
     const git = simpleGit(repoPath);
-    await git.init();
+    await git.init(["--initial-branch=main"]);
     await git.addConfig("user.email", "test@flaught.dev");
     await git.addConfig("user.name", "Flaught Test");
 

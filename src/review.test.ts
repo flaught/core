@@ -164,7 +164,12 @@ async function commitFiles(
     fs.writeFileSync(fullPath, content);
   }
   await git.add(".");
-  await git.commit(message);
+
+  // Use environment variables for git author/committer to avoid conflicts
+  // with the host repo's git context during pre-commit hooks.
+  await git.commit(message, undefined, {
+    "--author": "Flaught Test <test@flaught.dev>",
+  });
   return (await git.revparse(["HEAD"])).trim();
 }
 
@@ -178,7 +183,7 @@ describe("runReview (no-llm mode)", () => {
     tempDirs.push(repoPath);
 
     const git = simpleGit(repoPath);
-    await git.init();
+    await git.init(["--initial-branch=main"]);
     await git.addConfig("user.email", "test@flaught.dev");
     await git.addConfig("user.name", "Flaught Test");
 
@@ -217,7 +222,7 @@ describe("runReview (no-llm mode)", () => {
     tempDirs.push(repoPath);
 
     const git = simpleGit(repoPath);
-    await git.init();
+    await git.init(["--initial-branch=main"]);
     await git.addConfig("user.email", "test@flaught.dev");
     await git.addConfig("user.name", "Flaught Test");
 
@@ -250,7 +255,7 @@ describe("runReview (no-llm mode)", () => {
     tempDirs.push(repoPath);
 
     const git = simpleGit(repoPath);
-    await git.init();
+    await git.init(["--initial-branch=main"]);
     await git.addConfig("user.email", "test@flaught.dev");
     await git.addConfig("user.name", "Flaught Test");
 
@@ -281,7 +286,7 @@ describe("runReview (no-llm mode)", () => {
     tempDirs.push(repoPath);
 
     const git = simpleGit(repoPath);
-    await git.init();
+    await git.init(["--initial-branch=main"]);
     await git.addConfig("user.email", "test@flaught.dev");
     await git.addConfig("user.name", "Flaught Test");
 
@@ -318,7 +323,7 @@ describe("runReview (dismissals)", () => {
     tempDirs.push(repoPath);
 
     const git = simpleGit(repoPath);
-    await git.init();
+    await git.init(["--initial-branch=main"]);
     await git.addConfig("user.email", "test@flaught.dev");
     await git.addConfig("user.name", "Flaught Test");
 
@@ -431,7 +436,7 @@ describe("runReview (test inversion — docs-only diffs)", () => {
     tempDirs.push(repoPath);
 
     const git = simpleGit(repoPath);
-    await git.init();
+    await git.init(["--initial-branch=main"]);
     await git.addConfig("user.email", "test@flaught.dev");
     await git.addConfig("user.name", "Flaught Test");
 
@@ -461,7 +466,7 @@ describe("runReview (test inversion — docs-only diffs)", () => {
     tempDirs.push(repoPath);
 
     const git = simpleGit(repoPath);
-    await git.init();
+    await git.init(["--initial-branch=main"]);
     await git.addConfig("user.email", "test@flaught.dev");
     await git.addConfig("user.name", "Flaught Test");
 
