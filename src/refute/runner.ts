@@ -47,41 +47,43 @@ export interface RunRefuteResult {
 // ─── Create the refute provider ─────────────────────────────────────────────
 
 /**
+ * Resolve the provider/model the refute pass should actually run on.
+ *
+ * `refute.provider` and `refute.model` are independent overrides — either
+ * can be set without the other. Setting only `refute.model` is the common
+ * same-provider anti-correlation case (e.g. a different Groq model acting
+ * as skeptic for whatever Groq model wrote the findings) and must not
+ * require also repeating the provider name.
+ */
+function resolveRefuteTarget(config: FlaughtConfig): { provider: FlaughtConfig["llm"]["provider"]; model: string } {
+  return {
+    provider: config.refute.provider ?? config.llm.provider,
+    model: config.refute.model ?? config.llm.model,
+  };
+}
+
+/**
  * Create the LLM provider for the refute pass.
  *
- * If refute.provider/model are set, use those. Otherwise, fall back to
- * the main LLM config. This allows anti-correlation: code reviewed by
- * Claude can be refuted by GPT-4o, or vice versa.
+ * If refute.provider and/or refute.model are set, use those (falling back
+ * to the main LLM config for whichever isn't overridden). Otherwise, fall
+ * back to the main LLM config entirely. This allows anti-correlation: code
+ * reviewed by Claude can be refuted by GPT-4o, or by a different model on
+ * the same provider — e.g. one Groq model refuted by another.
  */
 function createRefuteProvider(config: FlaughtConfig): LLMProvider {
-  // If a separate refute provider is configured, use it
-  if (config.refute.provider && config.refute.model) {
-    const refuteConfig: FlaughtConfig = {
-      ...config,
-      llm: {
-        ...config.llm,
-        provider: config.refute.provider,
-        model: config.refute.model,
-        api_key_env: config.refute.api_key_env ?? config.llm.api_key_env,
-        base_url: config.refute.base_url ?? config.llm.base_url,
-        temperature: config.refute.temperature,
-        max_tokens: config.refute.max_tokens,
-        reasoning_effort: config.refute.reasoning_effort ?? config.llm.reasoning_effort,
-      },
-    };
-    return createProvider(refuteConfig);
-  }
-
-  // Otherwise, use the same provider with the refute temperature
+  const target = resolveRefuteTarget(config);
   const refuteConfig: FlaughtConfig = {
     ...config,
     llm: {
       ...config.llm,
+      provider: target.provider,
+      model: target.model,
+      api_key_env: config.refute.api_key_env ?? config.llm.api_key_env,
+      base_url: config.refute.base_url ?? config.llm.base_url,
       temperature: config.refute.temperature,
       max_tokens: config.refute.max_tokens,
-      // When no separate refute provider is configured, inherit the main
-      // LLM's reasoning_effort (which may be null).
-      reasoning_effort: config.llm.reasoning_effort,
+      reasoning_effort: config.refute.reasoning_effort ?? config.llm.reasoning_effort,
     },
   };
   return createProvider(refuteConfig);
@@ -130,11 +132,8 @@ export async function runRefutePass(
   onProgress(`Running skeptic pass (${llmFindings.length} LLM finding${llmFindings.length === 1 ? "" : "s"}, ${batches.length} batch${batches.length === 1 ? "" : "es"})...`);
 
   const provider = createRefuteProvider(config);
-  const providerLabel = config.refute.provider && config.refute.model
-    ? `${config.refute.provider}/${config.refute.model}`
-    : `${config.llm.provider}/${config.llm.model}`;
-
-  onProgress(`  Skeptic model: ${providerLabel}`);
+  const refuteTarget = resolveRefuteTarget(config);
+  onProgress(`  Skeptic model: ${refuteTarget.provider}/${refuteTarget.model}`);
 
   const allEvaluations: Array<{ findingIndex: number; verdict: RefuteVerdict; reasoning: string; adjustedConfidence: number }> = [];
 
@@ -248,6 +247,6 @@ export async function runRefutePass(
 
   return {
     findings: allFindings,
-    model: `refute:${providerLabel}`,
+    model: `refute:${refuteTarget.provider}/${refuteTarget.model}`,
   };
 }

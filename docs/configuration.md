@@ -194,6 +194,48 @@ llm:
 
 This only works for gateways that speak the OpenAI `/chat/completions` shape. A gateway that speaks Anthropic's Messages API instead — including most enterprise Claude proxies — needs `provider: anthropic` with `base_url` overridden (see above), not `provider: openai`.
 
+## Refute pass (skeptic)
+
+Every LLM finding goes through a second pass where a skeptic model tries to refute it — see [Conventions & Patterns](../CLAUDE.md#conventions--patterns) in the repo root for the design rationale. By default the skeptic runs on the same provider/model as the main review, which means the model that wrote the findings is also grading them. Configure `refute.provider` and/or `refute.model` to break that correlation:
+
+```yaml
+refute:
+  enabled: true        # default: true
+  provider: null        # default: null — inherits llm.provider if unset
+  model: null            # default: null — inherits llm.model if unset
+  api_key_env: null      # default: null — inherits llm.api_key_env if unset
+  base_url: null         # default: null — inherits llm.base_url if unset
+  temperature: 0.3       # default: 0.3 — slightly higher than review, encourages creative doubt
+  max_tokens: 2048       # default: 2048
+  max_batch_size: 20     # default: 20 — findings per skeptic call
+```
+
+`provider` and `model` are independent overrides — set one without the other. Two anti-correlation patterns:
+
+**Same-provider, different model** — set only `refute.model`. Cheaper and simpler than a second provider, and often enough: a larger or differently-tuned model on the same API is a genuinely different reviewer, not a rubber stamp.
+
+```yaml
+llm:
+  provider: groq
+  model: openai/gpt-oss-20b
+refute:
+  model: openai/gpt-oss-120b   # different Groq model reviews the 20b's findings
+```
+
+**Cross-provider** — set both `refute.provider` and `refute.model` (plus `refute.api_key_env`/`refute.base_url` if the second provider needs different credentials or an endpoint):
+
+```yaml
+llm:
+  provider: groq
+  model: openai/gpt-oss-20b
+refute:
+  provider: anthropic
+  model: claude-sonnet-5
+  api_key_env: ANTHROPIC_API_KEY
+```
+
+Set `refute.enabled: false` to skip the skeptic pass entirely (LLM findings are reported with `refute_result: null`), or pass `--no-refute` on the CLI for a one-off run.
+
 ## Severity gate
 
 Controls whether Flaught exits with code 1 (findings exceed threshold) or 0 (clean):

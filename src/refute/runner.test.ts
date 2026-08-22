@@ -1,6 +1,33 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi, afterEach } from "vitest";
 import { REFUTE_SYSTEM_PROMPT, buildRefuteUserPrompt, parseRefuteResponse } from "./prompt.js";
+import { runRefutePass } from "./runner.js";
 import type { Finding } from "../schemas/findings.js";
+import type { ReviewContext } from "../context/assembler.js";
+import { FlaughtConfigSchema } from "../schemas/config.js";
+
+// Captures every config createProvider was called with, so tests can assert
+// which provider/model the refute pass actually resolved to without a real
+// network call.
+const { mockCreateProvider, mockReview, capturedConfigs } = vi.hoisted(() => {
+  const capturedConfigs: unknown[] = [];
+  const mockReview = vi.fn().mockResolvedValue({
+    findings: [],
+    raw: JSON.stringify({
+      evaluations: [{ finding_index: 0, verdict: "confirmed", reasoning: "ok", adjusted_confidence: 0.9 }],
+    }),
+    model: "test",
+  });
+  const mockCreateProvider = vi.fn((config: unknown) => {
+    capturedConfigs.push(config);
+    return { review: mockReview };
+  });
+  return { mockCreateProvider, mockReview, capturedConfigs };
+});
+
+vi.mock("../llm/provider.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../llm/provider.js")>();
+  return { ...actual, createProvider: mockCreateProvider };
+});
 
 function makeFinding(overrides: Partial<Finding> = {}): Finding {
   return {
@@ -231,5 +258,88 @@ describe("parseRefuteResponse", () => {
     const result = parseRefuteResponse(response);
     expect(result).toHaveLength(1);
     expect(result[0]!.verdict).toBe("confirmed");
+  });
+});
+
+// ─── Refute provider/model resolution (createRefuteProvider via runRefutePass) ─
+
+function mockContext(): ReviewContext {
+  return {
+    diff: 'diff --git a/src/app.ts b/src/app.ts\n+export const app = {};\n',
+    changedFiles: [{ path: "src/app.ts", additions: 1, deletions: 0, status: "modified" as const }],
+    neighborhoodFiles: [],
+    changedFileContents: new Map([["src/app.ts", "export const app = {};\n"]]),
+    neighborhoodFileContents: new Map(),
+    dependencyGraph: {
+      getDependentsOf: () => [],
+      getDependenciesOf: () => [],
+      getImportsFor: () => [],
+      getAllFiles: () => ["src/app.ts"],
+    },
+    baseSha: "abc123",
+    headSha: "def456",
+    repoRoot: "/tmp/test-repo",
+  };
+}
+
+describe("runRefutePass — provider/model resolution", () => {
+  afterEach(() => {
+    mockCreateProvider.mockClear();
+    mockReview.mockClear();
+    capturedConfigs.length = 0;
+  });
+
+  it("uses the main LLM's provider/model when no refute override is set", async () => {
+    const config = FlaughtConfigSchema.parse({
+      llm: { provider: "groq", model: "openai/gpt-oss-20b" },
+    });
+    const findings = [makeFinding()];
+
+    await runRefutePass(findings, mockContext(), config);
+
+    expect(mockCreateProvider).toHaveBeenCalledTimes(1);
+    const passed = capturedConfigs[0] as { llm: { provider: string; model: string } };
+    expect(passed.llm.provider).toBe("groq");
+    expect(passed.llm.model).toBe("openai/gpt-oss-20b");
+  });
+
+  it("uses refute.model with the main provider when only refute.model is set (same-provider anti-correlation)", async () => {
+    const config = FlaughtConfigSchema.parse({
+      llm: { provider: "groq", model: "openai/gpt-oss-20b" },
+      refute: { model: "openai/gpt-oss-120b" },
+    });
+    const findings = [makeFinding()];
+
+    await runRefutePass(findings, mockContext(), config);
+
+    const passed = capturedConfigs[0] as { llm: { provider: string; model: string } };
+    expect(passed.llm.provider).toBe("groq");
+    expect(passed.llm.model).toBe("openai/gpt-oss-120b");
+  });
+
+  it("uses both refute.provider and refute.model when both are set (cross-provider anti-correlation)", async () => {
+    const config = FlaughtConfigSchema.parse({
+      llm: { provider: "groq", model: "openai/gpt-oss-20b" },
+      refute: { provider: "openai", model: "gpt-4o" },
+    });
+    const findings = [makeFinding()];
+
+    await runRefutePass(findings, mockContext(), config);
+
+    const passed = capturedConfigs[0] as { llm: { provider: string; model: string } };
+    expect(passed.llm.provider).toBe("openai");
+    expect(passed.llm.model).toBe("gpt-4o");
+  });
+
+  it("reports the resolved skeptic model on the result even with a same-provider override", async () => {
+    const config = FlaughtConfigSchema.parse({
+      llm: { provider: "groq", model: "openai/gpt-oss-20b" },
+      refute: { model: "openai/gpt-oss-120b" },
+    });
+    const findings = [makeFinding()];
+
+    const result = await runRefutePass(findings, mockContext(), config);
+
+    expect(result.model).toBe("refute:groq/openai/gpt-oss-120b");
   });
 });
