@@ -5,13 +5,13 @@ version: 1
 
 # ── LLM provider ───────────────────────────────────────────
 # Groq: fast, cheap, OpenAI-compatible API. Requires GROQ_API_KEY secret.
-# Available models (as of Aug 2026): llama-3.3-70b-versatile, openai/gpt-oss-120b,
-# openai/gpt-oss-20b, meta-llama/llama-4-maverick-17b-128e-instruct,
-# moonshotai/kimi-k2-instruct-0905, qwen/qwen3-32b
+# Available models (as of Aug 2026): meta-llama/llama-4-maverick-17b-128e-instruct,
+# openai/gpt-oss-120b, openai/gpt-oss-20b, moonshotai/kimi-k2-instruct-0905,
+# qwen/qwen3-32b
 # GPT-OSS models support JSON mode but may require reasoning_effort on Groq.
 llm:
   provider: groq
-  model: llama-3.3-70b-versatile # strongest coding model on Groq; also try: meta-llama/llama-4-maverick-17b-128e-instruct
+  model: meta-llama/llama-4-maverick-17b-128e-instruct # good balance of speed and quality; also try: openai/gpt-oss-120b
   api_key_env: GROQ_API_KEY
   temperature: 0.2
   max_tokens: 4096

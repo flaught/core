@@ -589,7 +589,7 @@ async function classifyHttpError(
         `Bad request from ${providerName} for model "${model}" (${status}).${detail ? `\n\n${detail}` : ""}\n\n` +
         `This usually means the model doesn't support a feature Flaught uses (e.g. JSON mode), or the request parameters are invalid.\n\n` +
         `Options:\n` +
-        `  • Switch to a different model in .advreview.yml (llama-3.3-70b-versatile and openai/gpt-oss-20b are known to work on Groq)\n` +
+        `  • Switch to a different model in .advreview.yml (meta-llama/llama-4-maverick-17b-128e-instruct and openai/gpt-oss-20b are known to work on Groq)\n` +
         `  • Switch to a different provider (openai, anthropic, ollama)\n` +
         `  • Run with --no-llm to skip the LLM review entirely`,
         providerName,
