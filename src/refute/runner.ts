@@ -66,6 +66,7 @@ function createRefuteProvider(config: FlaughtConfig): LLMProvider {
         base_url: config.refute.base_url ?? config.llm.base_url,
         temperature: config.refute.temperature,
         max_tokens: config.refute.max_tokens,
+        reasoning_effort: config.refute.reasoning_effort ?? config.llm.reasoning_effort,
       },
     };
     return createProvider(refuteConfig);
@@ -78,6 +79,9 @@ function createRefuteProvider(config: FlaughtConfig): LLMProvider {
       ...config.llm,
       temperature: config.refute.temperature,
       max_tokens: config.refute.max_tokens,
+      // When no separate refute provider is configured, inherit the main
+      // LLM's reasoning_effort (which may be null).
+      reasoning_effort: config.llm.reasoning_effort,
     },
   };
   return createProvider(refuteConfig);

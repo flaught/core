@@ -35,6 +35,22 @@ const LlmSchema = z.object({
   temperature: z.number().min(0).max(1).default(0.2),
   max_tokens: z.number().int().positive().default(4096),
   timeout_seconds: z.number().int().positive().default(120),
+  /**
+   * Reasoning effort for models that support it (GPT-OSS on Groq, OpenAI o-series).
+   * Controls how much compute the model spends on reasoning. Higher values produce
+   * more thorough analysis but take longer and cost more.
+   * - "low": Fast, cheap, less thorough
+   * - "medium": Balanced
+   * - "high": Most thorough, slower, more expensive
+   * null = omit the parameter (use the provider's default)
+   *
+   * For GPT-OSS models on Groq, setting reasoning_effort is recommended for
+   * reliable JSON mode output with long prompts.
+   */
+  reasoning_effort: z
+    .enum(["low", "medium", "high"])
+    .nullable()
+    .default(null),
 });
 
 // ─── Deterministic tools ───────────────────────────────────────────────────
@@ -162,6 +178,14 @@ const RefuteSchema = z.object({
   max_tokens: z.number().int().positive().default(2048),
   /** Maximum number of findings to send to the skeptic in a single batch */
   max_batch_size: z.number().int().positive().default(20),
+  /**
+   * Reasoning effort for the skeptic pass (null = same as main LLM).
+   * See llm.reasoning_effort for details.
+   */
+  reasoning_effort: z
+    .enum(["low", "medium", "high"])
+    .nullable()
+    .default(null),
 });
 
 // ─── Prompt templates ──────────────────────────────────────────────────────
