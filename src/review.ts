@@ -4,6 +4,7 @@
  */
 
 // Read version from package.json — the compiled output is CJS, so require() works directly
+// eslint-disable-next-line @typescript-eslint/no-require-imports
 const pkgVersion: string = require("../package.json").version;
 
 import { assembleContext, type ReviewContext, type ChangedFile } from "./context/assembler.js";

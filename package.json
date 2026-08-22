@@ -19,12 +19,19 @@
     "build": "tsc",
     "dev": "tsc --watch",
     "lint": "eslint src/",
+    "lint:fix": "eslint src/ --fix",
+    "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:unit": "vitest run --exclude '**/review.test.ts' --exclude '**/test-inversion/runner.test.ts'",
     "test:watch": "vitest",
     "review": "node dist/cli.js review",
     "prepublishOnly": "npm run build && npm test",
     "prepare": "husky"
+  },
+  "lint-staged": {
+    "src/**/*.ts": [
+      "eslint --fix"
+    ]
   },
   "keywords": [
     "code-review",
@@ -58,8 +65,11 @@
   "devDependencies": {
     "@types/js-yaml": "^4.0.9",
     "@types/node": "^22.0.0",
+    "eslint": "^10.9.0",
     "husky": "^9.1.7",
+    "lint-staged": "^17.3.0",
     "typescript": "^5.5.0",
+    "typescript-eslint": "^8.67.0",
     "vitest": "^3.2.7"
   },
   "engines": {

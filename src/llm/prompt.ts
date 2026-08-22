@@ -191,7 +191,7 @@ export function buildUserPrompt(
     sections.push(userAppend);
   }
 
-  let prompt = sections.join("\n\n---\n\n");
+  const prompt = sections.join("\n\n---\n\n");
 
   // ── Truncate if the prompt is too long ──
   if (prompt.length > MAX_PROMPT_CHARS) {

@@ -16,6 +16,7 @@ import * as path from "node:path";
 import { simpleGit } from "simple-git";
 
 // Read version from package.json — the compiled output is CJS, so require() works directly
+// eslint-disable-next-line @typescript-eslint/no-require-imports
 const pkgVersion: string = require("../package.json").version;
 
 import { contextToJSON } from "./context/assembler.js";
