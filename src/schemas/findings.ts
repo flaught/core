@@ -176,6 +176,8 @@ export interface FindingsArtifact {
     id: string;
     ci_url: string | null;
     duration_seconds: number;
+    /** Error message if the LLM call failed (review still completed with deterministic findings) */
+    llm_error: string | null;
   };
 
   tools_executed: ToolExecuted[];

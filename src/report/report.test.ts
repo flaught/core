@@ -63,7 +63,7 @@ function makeArtifact(overrides: Partial<FindingsArtifact> = {}): FindingsArtifa
     flaught_version: "0.4.1",
     repository: { name: "flaught/core", url: "https://github.com/flaught/core", branch: "main" },
     pull_request: { number: 42, url: "https://github.com/flaught/core/pull/42", title: "Add auth", description: "Adds JWT auth", base_sha: "abc123", head_sha: "def456" },
-    run: { id: "flaught-1234567890-abc123", ci_url: null, duration_seconds: 47 },
+    run: { id: "flaught-1234567890-abc123", ci_url: null, duration_seconds: 47, llm_error: null },
     tools_executed: [],
     findings,
     test_inversion: null,
@@ -189,6 +189,31 @@ describe("renderMarkdownReport", () => {
     const md = renderMarkdownReport(artifact);
     expect(md).toContain("Flaught v0.4.1");
     expect(md).toContain("Schema v2");
+  });
+
+  it("warns when the LLM review failed", () => {
+    const artifact = makeArtifact({
+      run: { id: "flaught-1", ci_url: null, duration_seconds: 5, llm_error: "Groq API error: 400 Bad Request" },
+    });
+    const md = renderMarkdownReport(artifact);
+    expect(md).toContain("LLM adversarial review failed");
+    expect(md).toContain("Groq API error: 400 Bad Request");
+    expect(md).toContain("not evidence the PR is clean");
+  });
+
+  it("does not warn about the LLM when llm_error is null", () => {
+    const artifact = makeArtifact({
+      run: { id: "flaught-1", ci_url: null, duration_seconds: 5, llm_error: null },
+    });
+    const md = renderMarkdownReport(artifact);
+    expect(md).not.toContain("LLM adversarial review failed");
+  });
+
+  it("doesn't throw when run is missing llm_error (public-API callers may pass an unvalidated artifact)", () => {
+    const artifact = makeArtifact();
+    delete (artifact.run as { llm_error?: unknown }).llm_error;
+    expect(() => renderMarkdownReport(artifact)).not.toThrow();
+    expect(renderMarkdownReport(artifact)).not.toContain("LLM adversarial review failed");
   });
 
   it("warns when a deterministic tool failed to run", () => {

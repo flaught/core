@@ -1,4 +1,4 @@
-import { describe, it, expect, afterEach } from "vitest";
+import { describe, it, expect, afterEach, vi } from "vitest";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import * as os from "node:os";
@@ -6,6 +6,28 @@ import { simpleGit, type SimpleGit } from "simple-git";
 import { runReview, isDocFile, isDocsOnlyDiff } from "./review.js";
 import type { Finding } from "./schemas/findings.js";
 import { resolveDismissalsPath, loadDismissalStore, addDismissal, saveDismissalStore } from "./dismissals/store.js";
+
+// Skip the real liveness network check — graceful-degradation tests below
+// only care about the provider.review() call failing, not liveness.
+vi.mock("./llm/liveness.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("./llm/liveness.js")>();
+  return {
+    ...actual,
+    validateModelLiveness: vi.fn().mockResolvedValue({ alive: true, model: "test-model", provider: "test" }),
+  };
+});
+
+// Stub the LLM provider so graceful-degradation tests can force review()
+// (and/or the skeptic pass, which shares the same provider factory) to
+// fail without a real network call.
+const { mockReview } = vi.hoisted(() => ({ mockReview: vi.fn() }));
+vi.mock("./llm/provider.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("./llm/provider.js")>();
+  return {
+    ...actual,
+    createProvider: vi.fn().mockReturnValue({ review: mockReview }),
+  };
+});
 
 // ─── Noise budget tests (unit) ─────────────────────────────────────────────
 
@@ -490,5 +512,121 @@ describe("runReview (test inversion — docs-only diffs)", () => {
     });
 
     expect(result.artifact.test_inversion).not.toBeNull();
+  }, 30_000);
+});
+
+// ─── LLM graceful degradation ──────────────────────────────────────────────
+
+describe("runReview (LLM graceful degradation)", () => {
+  const noLlmSideEffectsYml = [
+    "version: 1",
+    "test_inversion:",
+    "  enabled: false",
+    "scope_creep:",
+    "  enabled: false",
+    "tools:",
+    "  semgrep:",
+    "    enabled: false",
+    "  linter:",
+    "    enabled: false",
+    "  vuln_scanner:",
+    "    enabled: false",
+    "",
+  ].join("\n");
+
+  afterEach(() => {
+    cleanup();
+    mockReview.mockReset();
+  });
+
+  it("still writes an artifact with deterministic findings + error details when the LLM call fails", async () => {
+    const repoPath = fs.mkdtempSync(path.join(os.tmpdir(), "flaught-llmfail-"));
+    tempDirs.push(repoPath);
+
+    const git = simpleGit(repoPath);
+    await git.init(["--initial-branch=main"]);
+    await git.addConfig("user.email", "test@flaught.dev");
+    await git.addConfig("user.name", "Flaught Test");
+
+    await commitFiles(git, {
+      ".advreview.yml": noLlmSideEffectsYml,
+      "src/index.ts": "console.log('hello');",
+    }, "initial");
+
+    await commitFiles(git, {
+      "src/index.ts": "console.log('hello world');",
+    }, "change");
+
+    mockReview.mockRejectedValue(new Error("Groq API error: 400 Bad Request"));
+
+    const result = await runReview({
+      repoPath,
+      baseRef: "HEAD~1",
+      headRef: "HEAD",
+      configPath: path.join(repoPath, ".advreview.yml"),
+    });
+
+    expect(result.llmResult).toBeNull();
+    expect(result.llmError).toContain("Groq API error");
+    expect(result.artifact.run.llm_error).toContain("Groq API error");
+    expect(result.json).toBeTruthy();
+    expect(JSON.parse(result.json).run.llm_error).toContain("Groq API error");
+    expect(result.markdown).toContain("LLM adversarial review failed");
+  }, 30_000);
+
+  it("keeps un-refuted LLM findings when only the skeptic (refute) pass fails", async () => {
+    const repoPath = fs.mkdtempSync(path.join(os.tmpdir(), "flaught-refutefail-"));
+    tempDirs.push(repoPath);
+
+    const git = simpleGit(repoPath);
+    await git.init(["--initial-branch=main"]);
+    await git.addConfig("user.email", "test@flaught.dev");
+    await git.addConfig("user.name", "Flaught Test");
+
+    await commitFiles(git, {
+      ".advreview.yml": noLlmSideEffectsYml,
+      "src/index.ts": "console.log('hello');",
+    }, "initial");
+
+    await commitFiles(git, {
+      "src/index.ts": "console.log('hello world');",
+    }, "change");
+
+    const llmFinding = {
+      id: "L-0001",
+      severity: "medium",
+      category: "maintainability",
+      title: "Something worth flagging",
+      description: "Because reasons.",
+      evidence: { file: "src/index.ts", line_start: 1, line_end: 1, snippet: "", blast_radius: [], rule_id: null },
+      source: "llm-review",
+      source_type: "llm",
+      confidence: 0.8,
+      references: [],
+      fingerprint: "fp-1",
+      dismissed: false,
+      dismissed_by: null,
+      dismissed_at: null,
+      dismissal_reason: null,
+      refute_result: null,
+    };
+
+    // First call is the main review pass (succeeds); second call is the
+    // skeptic/refute pass (fails).
+    mockReview
+      .mockResolvedValueOnce({ findings: [llmFinding], raw: "{}" })
+      .mockRejectedValueOnce(new Error("Groq API error: 503 Service Unavailable"));
+
+    const result = await runReview({
+      repoPath,
+      baseRef: "HEAD~1",
+      headRef: "HEAD",
+      configPath: path.join(repoPath, ".advreview.yml"),
+    });
+
+    expect(result.llmError).toContain("Refute (skeptic) pass failed");
+    const kept = result.artifact.findings.find((f) => f.id === "L-0001");
+    expect(kept).toBeTruthy();
+    expect(kept!.refute_result).toBeNull();
   }, 30_000);
 });

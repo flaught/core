@@ -46,7 +46,7 @@ const minimalArtifact: FindingsArtifact = {
   flaught_version: "0.8.0",
   repository: { name: "flaught/core", url: "", branch: "main" },
   pull_request: { number: 42, url: null, title: null, description: null, base_sha: "abc123", head_sha: "def456" },
-  run: { id: "flaught-001", ci_url: null, duration_seconds: 10 },
+  run: { id: "flaught-001", ci_url: null, duration_seconds: 10, llm_error: null },
   tools_executed: [],
   findings: [],
   test_inversion: null,
