@@ -105,6 +105,14 @@ You can also override the reviewer's posture, categories, severity definitions, 
 | `1`  | Gated: findings exceed threshold        |
 | `2`  | Error: config/API/LLM problem — a tool fault, not a code problem. Recommended CI handling: warn, don't block merge. See [exit code handling](https://github.com/flaught/core/blob/main/docs/github-actions.md#exit-code-handling). |
 
+## Trends dashboard
+
+Each CI run's `findings.json` artifact is a snapshot. To see trends across runs, point `flaught dashboard` at a directory of downloaded artifacts (e.g. via `gh run download`) and it renders a self-contained static HTML page — findings-over-time chart by severity, plus a per-run table (LLM/deterministic split, skeptic confirm/refute/uncertain counts, dismissals, LLM failures):
+
+```bash
+flaught dashboard --input ./ci-artifacts --output dashboard.html
+```
+
 ## LLM providers: review with a different model than the one that wrote the code
 
 Self-review is the weak spot in AI-assisted development. The model that wrote your PR is primed to defend it. Flaught breaks that correlation. Swap reviewers with zero code changes, just update `.advreview.yml`:
