@@ -128,7 +128,16 @@ function renderSummary(artifact: FindingsArtifact): string {
     sourceLines.push(`🔧 Deterministic: ${s.by_source_type.deterministic}`);
   }
 
-  return `### Summary\n\n${lines.join("\n")}\n\n${sourceLines.join(" · ")}`;
+  // Refute pass breakdown
+  const refuteLines: string[] = [];
+  const confirmed = artifact.findings.filter((f) => f.refute_result?.verdict === "confirmed").length;
+  const refuted = artifact.findings.filter((f) => f.refute_result?.verdict === "refuted").length;
+  const uncertain = artifact.findings.filter((f) => f.refute_result?.verdict === "uncertain").length;
+  if (confirmed + refuted + uncertain > 0) {
+    refuteLines.push(`🔍 Skeptic: ${confirmed} confirmed, ${refuted} refuted, ${uncertain} uncertain`);
+  }
+
+  return `### Summary\n\n${lines.join("\n")}\n\n${sourceLines.join(" · ")}${refuteLines.length > 0 ? "\n" + refuteLines.join(" · ") : ""}`;
 }
 
 function renderSeveritySection(
@@ -185,6 +194,18 @@ function renderFinding(f: Finding): string {
 
   // Confidence
   lines.push(`Confidence: ${Math.round(f.confidence * 100)}%`);
+
+  // Refute result
+  if (f.refute_result) {
+    const verdictEmoji: Record<string, string> = {
+      confirmed: "✅",
+      refuted: "❌",
+      uncertain: "❓",
+    };
+    const emoji = verdictEmoji[f.refute_result.verdict] ?? "";
+    const verdictLabel = f.refute_result.verdict.charAt(0).toUpperCase() + f.refute_result.verdict.slice(1);
+    lines.push(`${emoji} Skeptic: ${verdictLabel}${f.refute_result.reasoning ? ` — ${f.refute_result.reasoning}` : ""}`);
+  }
 
   // Dismissal
   if (f.dismissed) {

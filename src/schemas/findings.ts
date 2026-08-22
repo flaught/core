@@ -25,6 +25,21 @@ export type SourceType = "deterministic" | "llm";
 
 // ─── Core structures ──────────────────────────────────────────────────────
 
+// ─── Refute result ──────────────────────────────────────────────────────────
+
+export type RefuteVerdict = "confirmed" | "refuted" | "uncertain";
+
+export interface RefuteResult {
+  /** Whether the skeptic confirmed, refuted, or was uncertain about this finding */
+  verdict: RefuteVerdict;
+  /** The skeptic's reasoning for the verdict */
+  reasoning: string;
+  /** Confidence after the refute pass. Same as original if confirmed; reduced if refuted/uncertain. */
+  adjusted_confidence: number;
+}
+
+// ─── Finding evidence ──────────────────────────────────────────────────────────
+
 export interface FindingEvidence {
   file: string;
   line_start: number;
@@ -63,6 +78,9 @@ export interface Finding {
   dismissed_by: string | null;
   dismissed_at: string | null; // ISO 8601
   dismissal_reason: string | null;
+
+  // ── Refute pass result (null if refute pass not run or finding is deterministic) ──
+  refute_result: RefuteResult | null;
 }
 
 // ─── Test inversion ────────────────────────────────────────────────────────

@@ -40,6 +40,7 @@ import { computeFingerprint } from "./dismissals/fingerprint.js";
 import { loadDismissalStore, resolveDismissalsPath, getActiveDismissals } from "./dismissals/store.js";
 import { applyDismissals } from "./dismissals/apply.js";
 import type { DismissalStore } from "./schemas/dismissals.js";
+import { runRefutePass } from "./refute/runner.js";
 
 // ─── Progress callback ──────────────────────────────────────────────────────
 
@@ -78,6 +79,8 @@ export interface ReviewOptions {
   prDescription?: string;
   /** Skip LLM review (context assembly only) */
   skipLlm?: boolean;
+  /** Skip the skeptic/refute pass even if LLM review is enabled */
+  skipRefute?: boolean;
   /** Progress callback for logging */
   onProgress?: ProgressCallback;
 }
@@ -231,6 +234,7 @@ export async function runReview(options: ReviewOptions = {}): Promise<ReviewResu
       dismissed_by: null,
       dismissed_at: null,
       dismissal_reason: null,
+      refute_result: null, // deterministic findings are ground truth — not refuted
     });
   }
 
@@ -286,6 +290,34 @@ export async function runReview(options: ReviewOptions = {}): Promise<ReviewResu
     }
 
     progress(`  LLM found ${llmResult.findings.length} findings`);
+
+    // ── Refute pass: the skeptic challenges each LLM finding ──
+    // Deterministic findings are ground truth — they don't get refuted.
+    const llmFindingsForRefute = findings.filter((f) => f.source_type === "llm");
+    if (options.skipRefute) {
+      progress("Refute pass skipped (--no-refute).");
+      // Set refute_result to null for all LLM findings (no skeptic evaluation)
+      findings = findings.map((f) =>
+        f.source_type === "llm" ? { ...f, refute_result: null } : f,
+      );
+    } else if (config.refute.enabled && llmFindingsForRefute.length > 0) {
+      const refuteResult = await runRefutePass(
+        findings,
+        context,
+        config,
+        templates,
+        progress,
+      );
+      findings = refuteResult.findings;
+      progress(`  Refute model: ${refuteResult.model}`);
+      if (refuteResult.usage) {
+        progress(`  Refute tokens: ${refuteResult.usage.prompt_tokens.toLocaleString()} prompt + ${refuteResult.usage.completion_tokens.toLocaleString()} completion = ${refuteResult.usage.total_tokens.toLocaleString()} total`);
+      }
+    } else if (!config.refute.enabled) {
+      progress("Refute pass disabled in config — skipping skeptic.");
+    } else {
+      progress("No LLM findings to refute — skipping skeptic pass.");
+    }
   }
 
   // 5. Test inversion
@@ -345,6 +377,7 @@ export async function runReview(options: ReviewOptions = {}): Promise<ReviewResu
           dismissed_by: null,
           dismissed_at: null,
           dismissal_reason: null,
+          refute_result: null, // test-inversion findings are deterministic — not refuted
         });
       }
       progress(`  ⚠ ${testInversion.flagged.length} test(s) pass on both base and head`);

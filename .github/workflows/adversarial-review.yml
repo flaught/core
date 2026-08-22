@@ -1,20 +1,14 @@
 # Flaught — Adversarial Review
 #
 # Dogfooding: runs Flaught against every PR to this repo.
-# Uses Groq (groq/compound-mini) for the LLM adversarial pass.
+# Builds from the branch source (npm link) so that PRs which change
+# Flaught's own review/dismissal/test-inversion/refute logic are
+# reflected in their own CI run.
+#
 # The review comment is posted to the PR; the JSON artifact is uploaded
 # for trend tracking. Exit code 1 (findings exceed severity gate) blocks merge.
 # Exit code 2 (config/API/LLM error) does NOT block merge — it's a tool
 # fault, not evidence of a real code problem; it only warns.
-#
-# CAVEAT — this dogfoods the PUBLISHED package (`npm install -g @flaught/core`
-# below, unpinned = latest), not this branch's own source. A PR that changes
-# Flaught's own review/dismissal/test-inversion logic will NOT see that logic
-# reflected in its own CI comment — the comment reflects whatever's already on
-# npm at merge time. Don't treat this run's findings as evidence of an
-# in-flight code change's behavior; verify locally instead
-# (`npm run build && node dist/cli.js review --base <ref>`), and only expect
-# the new behavior to show up in a *later* PR's CI run, after publishing.
 
 name: Adversarial Review
 
@@ -39,14 +33,14 @@ jobs:
         with:
           node-version: 22
 
-      - name: Install Flaught
-        run: npm install -g @flaught/core
+      - name: Build Flaught from source
+        run: |
+          npm ci
+          npm run build
+          npm link
 
       - name: Install Semgrep
         run: pip install semgrep
-
-      - name: Install project dependencies
-        run: npm ci
 
       - name: Run adversarial review
         id: review

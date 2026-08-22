@@ -65,6 +65,7 @@ program
   .option("--json", "Output full context as JSON (for debugging/integration)")
   .option("--output <path>", "Write JSON artifact to file")
   .option("--no-llm", "Skip LLM review (context assembly only)")
+  .option("--no-refute", "Skip the skeptic/refute pass even if LLM review is enabled")
   .option("--pr-description <text>", "PR description for scope-creep detection")
   .option("--quiet", "Only output the final report, no progress messages")
   .action(async (opts) => {
@@ -174,6 +175,7 @@ async function runCliReview(opts: {
     configPath: opts.config,
     prDescription: opts.prDescription,
     skipLlm: !opts.llm,
+    skipRefute: (opts as Record<string, unknown>).refute === false, // --no-refute sets refute to false
     onProgress: progress,
   });
 
