@@ -41,6 +41,11 @@ export function renderMarkdownReport(artifact: FindingsArtifact): string {
   // Summary
   sections.push(renderSummary(artifact));
 
+  // LLM review failure warning (deterministic findings below are real,
+  // but no adversarial/skeptic pass ran — this is not evidence of a clean PR)
+  const llmErrorWarning = renderLlmErrorWarning(artifact);
+  if (llmErrorWarning) sections.push(llmErrorWarning);
+
   // Tool execution warnings (a tool that didn't run is not the same as a
   // tool that ran clean — both report 0 findings for that tool otherwise)
   const toolsWarning = renderToolsWarning(artifact);
@@ -85,6 +90,16 @@ function renderCaveat(): string {
  * instead, in the same place a reader already checks for the review's
  * findings.
  */
+function renderLlmErrorWarning(artifact: FindingsArtifact): string | null {
+  const llmError = artifact.run?.llm_error;
+  if (!llmError) return null;
+
+  return [
+    `> ⚠️ **LLM adversarial review failed — findings below are deterministic-only.**`,
+    `> The LLM call errored (\`${llmError}\`), so no LLM findings or skeptic/refute pass ran this time. This is not evidence the PR is clean — it means adversarial review didn't happen.`,
+  ].join("\n");
+}
+
 function renderToolsWarning(artifact: FindingsArtifact): string | null {
   // renderMarkdownReport is re-exported as public API (src/index.ts) -- an
   // external caller can hand it a hand-built or pre-this-feature JSON

@@ -54,7 +54,7 @@ function noopProgress(_message: string) {}
 export interface ReviewResult {
   /** The assembled context */
   context: ReviewContext;
-  /** The LLM review result (null if LLM was skipped) */
+  /** The LLM review result (null if LLM was skipped or failed) */
   llmResult: LLMReviewResult | null;
   /** Deterministic tool results */
   toolResults: ToolExecuted[];
@@ -68,6 +68,8 @@ export interface ReviewResult {
   exitCode: number;
   /** Duration of the review in seconds */
   durationSeconds: number;
+  /** LLM error if the LLM call failed (review still completes with deterministic findings) */
+  llmError: string | null;
 }
 
 // ─── Run the full review ────────────────────────────────────────────────────
@@ -167,6 +169,7 @@ export async function runReview(options: ReviewOptions = {}): Promise<ReviewResu
 
   // 4. Run LLM review
   let llmResult: LLMReviewResult | null = null;
+  let llmError: string | null = null;
   let findings: Finding[] = [];
 
   // Convert deterministic findings to Finding format
@@ -299,41 +302,68 @@ export async function runReview(options: ReviewOptions = {}): Promise<ReviewResu
       progress(`  Grounding with ${deterministicFindings.length} deterministic tool findings`);
     }
 
-    llmResult = await provider.review(systemPrompt, fullUserPrompt);
-    findings.push(...llmResult.findings);
+    // ── LLM review + refute pass ──
+    // If the LLM call fails, we gracefully degrade: still write the artifact
+    // with deterministic findings and error details, but no LLM findings.
+    try {
+      llmResult = await provider.review(systemPrompt, fullUserPrompt);
+      findings.push(...llmResult.findings);
 
-    if (llmResult.usage) {
-      progress(`  Token usage: ${llmResult.usage.prompt_tokens.toLocaleString()} prompt + ${llmResult.usage.completion_tokens.toLocaleString()} completion = ${llmResult.usage.total_tokens.toLocaleString()} total`);
+      if (llmResult.usage) {
+        progress(`  Token usage: ${llmResult.usage.prompt_tokens.toLocaleString()} prompt + ${llmResult.usage.completion_tokens.toLocaleString()} completion = ${llmResult.usage.total_tokens.toLocaleString()} total`);
+      }
+
+      progress(`  LLM found ${llmResult.findings.length} findings`);
+    } catch (err) {
+      llmError = err instanceof Error ? err.message : String(err);
+      progress(`  ⚠ LLM review failed: ${llmError}`);
+      progress(`  Continuing with deterministic findings only.`);
+      llmResult = null;
     }
 
-    progress(`  LLM found ${llmResult.findings.length} findings`);
-
     // ── Refute pass: the skeptic challenges each LLM finding ──
+    // Only run if the LLM succeeded and produced findings.
     // Deterministic findings are ground truth — they don't get refuted.
-    const llmFindingsForRefute = findings.filter((f) => f.source_type === "llm");
-    if (options.skipRefute) {
-      progress("Refute pass skipped (--no-refute).");
-      // Set refute_result to null for all LLM findings (no skeptic evaluation)
-      findings = findings.map((f) =>
-        f.source_type === "llm" ? { ...f, refute_result: null } : f,
-      );
-    } else if (config.refute.enabled && llmFindingsForRefute.length > 0) {
-      const refuteResult = await runRefutePass(
-        findings,
-        context,
-        config,
-        templates,
-        progress,
-      );
-      findings = refuteResult.findings;
-      progress(`  Refute model: ${refuteResult.model}`);
-      if (refuteResult.usage) {
-        progress(`  Refute tokens: ${refuteResult.usage.prompt_tokens.toLocaleString()} prompt + ${refuteResult.usage.completion_tokens.toLocaleString()} completion = ${refuteResult.usage.total_tokens.toLocaleString()} total`);
-      }
-    } else if (!config.refute.enabled) {
-      progress("Refute pass disabled in config — skipping skeptic.");
+    if (llmError) {
+      progress("Skipping refute pass — LLM review failed.");
     } else {
-      progress("No LLM findings to refute — skipping skeptic pass.");
+      const llmFindingsForRefute = findings.filter((f) => f.source_type === "llm");
+      if (options.skipRefute) {
+        progress("Refute pass skipped (--no-refute).");
+        // Set refute_result to null for all LLM findings (no skeptic evaluation)
+        findings = findings.map((f) =>
+          f.source_type === "llm" ? { ...f, refute_result: null } : f,
+        );
+      } else if (config.refute.enabled && llmFindingsForRefute.length > 0) {
+        // If the skeptic call itself fails (400, timeout, etc.), keep the
+        // findings from the LLM pass that already succeeded rather than
+        // losing the whole review — just leave them un-refuted.
+        try {
+          const refuteResult = await runRefutePass(
+            findings,
+            context,
+            config,
+            templates,
+            progress,
+          );
+          findings = refuteResult.findings;
+          progress(`  Refute model: ${refuteResult.model}`);
+          if (refuteResult.usage) {
+            progress(`  Refute tokens: ${refuteResult.usage.prompt_tokens.toLocaleString()} prompt + ${refuteResult.usage.completion_tokens.toLocaleString()} completion = ${refuteResult.usage.total_tokens.toLocaleString()} total`);
+          }
+        } catch (err) {
+          llmError = `Refute (skeptic) pass failed: ${err instanceof Error ? err.message : String(err)}`;
+          progress(`  ⚠ ${llmError}`);
+          progress(`  Continuing with un-refuted LLM findings.`);
+          findings = findings.map((f) =>
+            f.source_type === "llm" ? { ...f, refute_result: null } : f,
+          );
+        }
+      } else if (!config.refute.enabled) {
+        progress("Refute pass disabled in config — skipping skeptic.");
+      } else {
+        progress("No LLM findings to refute — skipping skeptic pass.");
+      }
     }
   }
 
@@ -485,6 +515,11 @@ export async function runReview(options: ReviewOptions = {}): Promise<ReviewResu
   artifact.test_inversion = testInversion;
   artifact.scope_creep = scopeCreepResult;
 
+  // Record LLM error in the artifact if the LLM call failed
+  if (llmError) {
+    artifact.run.llm_error = llmError;
+  }
+
   // 9. Render reports
   progress("Rendering reports...");
   const markdown = renderMarkdownReport(artifact);
@@ -506,6 +541,7 @@ export async function runReview(options: ReviewOptions = {}): Promise<ReviewResu
     json,
     exitCode,
     durationSeconds,
+    llmError: llmError,
   };
 }
 
@@ -601,6 +637,7 @@ function buildArtifact(
       id: generateRunId(),
       ci_url: null,
       duration_seconds: 0,
+      llm_error: null,
     },
     tools_executed: [],
     findings,

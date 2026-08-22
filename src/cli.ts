@@ -186,6 +186,12 @@ async function runCliReview(opts: {
   // Output markdown report to stdout
   console.log(result.markdown);
 
+  // Warn if LLM review failed but deterministic findings are still available
+  if (result.llmError) {
+    console.error(`\n⚠️ LLM review failed: ${result.llmError}`);
+    console.error(`  Review completed with deterministic findings only. LLM findings are not included.`);
+  }
+
   // Write JSON artifact to file if requested
   if (opts.output) {
     const outputPath = path.resolve(opts.output);
