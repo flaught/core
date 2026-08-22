@@ -36,6 +36,9 @@ import {
   isExpired,
 } from "./dismissals/store.js";
 import { initPromptTemplates } from "./prompt/templates.js";
+import { findJsonFiles, loadJsonFiles } from "./dashboard/loader.js";
+import { computeTrends } from "./dashboard/trends.js";
+import { renderDashboardHtml } from "./dashboard/render.js";
 
 const program = new Command();
 
@@ -142,6 +145,32 @@ dismissals
       handleError(err);
     }
   });
+
+program
+  .command("dashboard")
+  .description("Render a static HTML dashboard of findings trends across historical findings.json artifacts")
+  .requiredOption("--input <dir>", "Directory to search (recursively) for findings.json artifacts")
+  .option("--output <path>", "Output HTML file path", "flaught-dashboard.html")
+  .action((opts) => {
+    try {
+      runDashboard(opts);
+    } catch (err) {
+      handleError(err);
+    }
+  });
+
+function runDashboard(opts: { input: string; output: string }): void {
+  const files = findJsonFiles(path.resolve(opts.input));
+  const parsed = loadJsonFiles(files);
+  const points = computeTrends(parsed);
+  const html = renderDashboardHtml(points);
+
+  const outputPath = path.resolve(opts.output);
+  fs.writeFileSync(outputPath, html);
+
+  console.log(`Scanned ${files.length} JSON file(s) under ${opts.input}, found ${points.length} findings artifact(s).`);
+  console.log(`Wrote ${outputPath}`);
+}
 
 async function runCliReview(opts: {
   repo?: string;
