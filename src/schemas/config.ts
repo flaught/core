@@ -29,7 +29,7 @@ const LlmSchema = z.object({
   provider: z
     .enum(["openai", "groq", "gemini", "ollama", "anthropic"])
     .default("groq"),
-  model: z.string().default("meta-llama/llama-4-maverick-17b-128e-instruct"),
+  model: z.string().default("openai/gpt-oss-20b"),
   api_key_env: z.string().default("GROQ_API_KEY"),
   base_url: z.string().nullable().default(null),
   temperature: z.number().min(0).max(1).default(0.2),
