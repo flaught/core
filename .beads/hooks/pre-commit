@@ -1,4 +1,7 @@
 #!/usr/bin/env sh
+set -e
+npm run typecheck
+npx lint-staged
 npm run test:unit
 
 # --- BEGIN BEADS INTEGRATION v1.1.0 ---
