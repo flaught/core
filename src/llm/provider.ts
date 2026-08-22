@@ -105,6 +105,7 @@ export function createProvider(config: FlaughtConfig): LLMProvider {
         temperature: config.llm.temperature,
         maxTokens: config.llm.max_tokens,
         timeoutSeconds: config.llm.timeout_seconds,
+        reasoningEffort: config.llm.reasoning_effort,
       });
 
     case "groq":
@@ -119,6 +120,7 @@ export function createProvider(config: FlaughtConfig): LLMProvider {
         temperature: config.llm.temperature,
         maxTokens: config.llm.max_tokens,
         timeoutSeconds: config.llm.timeout_seconds,
+        reasoningEffort: config.llm.reasoning_effort,
       });
 
     case "gemini":
@@ -133,6 +135,7 @@ export function createProvider(config: FlaughtConfig): LLMProvider {
         temperature: config.llm.temperature,
         maxTokens: config.llm.max_tokens,
         timeoutSeconds: config.llm.timeout_seconds,
+        reasoningEffort: config.llm.reasoning_effort,
       });
 
     case "anthropic":
@@ -198,6 +201,8 @@ export interface OpenAICompatibleConfig {
   temperature: number;
   maxTokens: number;
   timeoutSeconds: number;
+  /** Reasoning effort for models that support it (null = omit) */
+  reasoningEffort: string | null;
 }
 
 export class OpenAICompatibleProvider implements LLMProvider {
@@ -217,7 +222,7 @@ export class OpenAICompatibleProvider implements LLMProvider {
   ): Promise<LLMReviewResult> {
     const url = `${this.config.baseUrl.replace(/\/+$/, "")}/chat/completions`;
 
-    const body = {
+    const body: Record<string, unknown> = {
       model: this.config.model,
       messages: [
         { role: "system", content: systemPrompt },
@@ -227,6 +232,12 @@ export class OpenAICompatibleProvider implements LLMProvider {
       max_tokens: this.config.maxTokens,
       response_format: { type: "json_object" },
     };
+
+    // Only include reasoning_effort when explicitly configured — some models
+    // don't support it and will error if the parameter is present.
+    if (this.config.reasoningEffort) {
+      body.reasoning_effort = this.config.reasoningEffort;
+    }
 
     let response: Response;
     const controller = new AbortController();

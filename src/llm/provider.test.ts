@@ -338,6 +338,80 @@ describe("createProvider", () => {
   });
 });
 
+describe("reasoning_effort", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    delete process.env.GROQ_API_KEY;
+  });
+
+  function mockFetchOnce(responseBody: unknown, ok = true): ReturnType<typeof vi.fn> {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok,
+      status: ok ? 200 : 400,
+      json: async () => responseBody,
+    } as Response);
+    vi.stubGlobal("fetch", fetchMock);
+    return fetchMock;
+  }
+
+  it("includes reasoning_effort in request body when configured", async () => {
+    process.env.GROQ_API_KEY = "gsk-test";
+    const config = FlaughtConfigSchema.parse({
+      llm: { provider: "groq", model: "openai/gpt-oss-20b", reasoning_effort: "high" },
+    });
+    const provider = createProvider(config);
+
+    const fetchMock = mockFetchOnce({
+      choices: [{ message: { content: '{"findings":[]}' } }],
+      usage: { prompt_tokens: 10, completion_tokens: 5, total_tokens: 15 },
+    });
+
+    await provider.review("system", "user");
+
+    const [, init] = fetchMock.mock.calls[0]! as [string, RequestInit];
+    const body = JSON.parse(init.body as string);
+    expect(body.reasoning_effort).toBe("high");
+  });
+
+  it("omits reasoning_effort from request body when null (default)", async () => {
+    process.env.GROQ_API_KEY = "gsk-test";
+    const config = FlaughtConfigSchema.parse({
+      llm: { provider: "groq", model: "openai/gpt-oss-20b" },
+    });
+    const provider = createProvider(config);
+
+    const fetchMock = mockFetchOnce({
+      choices: [{ message: { content: '{"findings":[]}' } }],
+      usage: { prompt_tokens: 10, completion_tokens: 5, total_tokens: 15 },
+    });
+
+    await provider.review("system", "user");
+
+    const [, init] = fetchMock.mock.calls[0]! as [string, RequestInit];
+    const body = JSON.parse(init.body as string);
+    expect(body).not.toHaveProperty("reasoning_effort");
+  });
+
+  it("passes reasoning_effort=medium through config defaults", async () => {
+    process.env.GROQ_API_KEY = "gsk-test";
+    const config = FlaughtConfigSchema.parse({
+      llm: { provider: "groq", model: "openai/gpt-oss-20b", reasoning_effort: "medium" },
+    });
+    const provider = createProvider(config);
+
+    const fetchMock = mockFetchOnce({
+      choices: [{ message: { content: '{"findings":[]}' } }],
+      usage: { prompt_tokens: 10, completion_tokens: 5, total_tokens: 15 },
+    });
+
+    await provider.review("system", "user");
+
+    const [, init] = fetchMock.mock.calls[0]! as [string, RequestInit];
+    const body = JSON.parse(init.body as string);
+    expect(body.reasoning_effort).toBe("medium");
+  });
+});
+
 describe("AnthropicProvider", () => {
   afterEach(() => {
     vi.unstubAllGlobals();
