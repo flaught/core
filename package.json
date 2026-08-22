@@ -15,14 +15,17 @@
     "LICENSE",
     "docs"
   ],
+    "lint-staged": {},
   "scripts": {
     "build": "tsc",
     "dev": "tsc --watch",
     "lint": "eslint src/",
     "test": "vitest run",
+    "test:unit": "vitest run --exclude '**/review.test.ts' --exclude '**/test-inversion/runner.test.ts'",
     "test:watch": "vitest",
     "review": "node dist/cli.js review",
-    "prepublishOnly": "npm run build && npm test"
+    "prepublishOnly": "npm run build && npm test",
+    "prepare": "husky"
   },
   "keywords": [
     "code-review",
@@ -56,10 +59,13 @@
   "devDependencies": {
     "@types/js-yaml": "^4.0.9",
     "@types/node": "^22.0.0",
+    "husky": "^9.1.7",
+    "lint-staged": "^17.3.0",
     "typescript": "^5.5.0",
     "vitest": "^3.2.7"
   },
   "engines": {
     "node": ">=18.0.0"
-  }
+  },
+  "lint-staged": {}
 }
