@@ -428,27 +428,51 @@ async function detectVulnCommand(repoPath: string): Promise<string | null> {
 
 // ── Parse vulnerability scanner JSON output ───────────────────────────────────
 
+// ── npm audit advisory type ──────────────────────────────────────────────────
+// npm audit `via` entries can be advisory objects or string package names.
+// We only need the object form for rich data; strings are filtered out.
+
+interface NpmAuditAdvisory {
+  title?: string;
+  name?: string;
+  url?: string;
+  severity?: string;
+  cwe?: string | string[];
+  cvss?: { score?: number };
+}
+
+interface NpmAuditVulnerability {
+  name?: string;
+  severity?: string;
+  via?: Array<string | NpmAuditAdvisory>;
+  range?: string;
+  isDirect?: boolean;
+  effects?: string[];
+  fixAvailable?: { name: string; version: string; isSemVerMajor?: boolean };
+  findings?: Array<{ paths?: string[] }>;
+  nodes?: string[];
+}
+
 export function parseVulnJsonOutput(stdout: string, command: string): DeterministicFinding[] {
   try {
-    const data = JSON.parse(stdout);
+    const data: Record<string, unknown> = JSON.parse(stdout);
     const findings: DeterministicFinding[] = [];
 
     // npm audit format
-    if (data.vulnerabilities) {
-      for (const [, vuln] of Object.entries(data.vulnerabilities as Record<string, any>)) {
+    if (data.vulnerabilities && typeof data.vulnerabilities === "object" && data.vulnerabilities !== null) {
+      for (const [, rawVuln] of Object.entries(data.vulnerabilities as Record<string, unknown>)) {
+        const vuln = rawVuln as NpmAuditVulnerability;
         // npm audit `via` can be a string array (package names) or an array of
         // advisory objects with title, url, severity, cwe, cvss, etc.
         // We want the richest data available.
-        const viaAdvisories: any[] = Array.isArray(vuln.via)
-          ? vuln.via.filter((v: any) => typeof v === "object" && v !== null)
+        const viaAdvisories: NpmAuditAdvisory[] = Array.isArray(vuln.via)
+          ? vuln.via.filter((v): v is NpmAuditAdvisory => typeof v === "object" && v !== null)
           : [];
 
         // Use the highest-severity advisory for the canonical title/description
+        const order: Record<string, number> = { critical: 0, high: 1, moderate: 2, low: 3, info: 4 };
         const primaryAdvisory = viaAdvisories.length > 0
-          ? viaAdvisories.sort((a: any, b: any) => {
-              const order: Record<string, number> = { critical: 0, high: 1, moderate: 2, low: 3, info: 4 };
-              return (order[a.severity] ?? 2) - (order[b.severity] ?? 2);
-            })[0]
+          ? [...viaAdvisories].sort((a, b) => (order[a.severity ?? "moderate"] ?? 2) - (order[b.severity ?? "moderate"] ?? 2))[0]
           : null;
 
         // Build a descriptive title: "<package>: <advisory title>" or "<package>: <vulnerability>"
@@ -467,7 +491,7 @@ export function parseVulnJsonOutput(stdout: string, command: string): Determinis
           }
         } else if (viaAdvisories.length === 1) {
           const adv = viaAdvisories[0];
-          descriptionParts.push(adv.title ?? "Vulnerability found by npm audit.");
+          descriptionParts.push(adv?.title ?? "Vulnerability found by npm audit.");
         }
 
         if (vuln.isDirect) {
@@ -476,7 +500,7 @@ export function parseVulnJsonOutput(stdout: string, command: string): Determinis
           descriptionParts.push("Transitive dependency.");
         }
 
-        if (vuln.effects?.length > 0) {
+        if (vuln.effects && vuln.effects.length > 0) {
           descriptionParts.push(`Affected via: ${vuln.effects.join(" → ")}.`);
         }
 
@@ -490,16 +514,16 @@ export function parseVulnJsonOutput(stdout: string, command: string): Determinis
 
         // Collect all advisory URLs for references
         const advisoryUrls = viaAdvisories
-          .map((v: any) => v.url)
-          .filter((u: any): u is string => typeof u === "string" && u.length > 0);
+          .map((v) => v.url)
+          .filter((u): u is string => typeof u === "string" && u.length > 0);
 
         // Collect all CWEs
-        const cwes = viaAdvisories.flatMap((v: any) =>
+        const cwes = viaAdvisories.flatMap((v) =>
           Array.isArray(v.cwe) ? v.cwe : (v.cwe ? [v.cwe] : [])
         );
 
         // Use the highest CVSS score across advisories
-        const cvssScore = viaAdvisories.reduce((max: number, v: any) => {
+        const cvssScore = viaAdvisories.reduce((max: number, v) => {
           const score = v.cvss?.score;
           return typeof score === "number" && score > max ? score : max;
         }, 0);
@@ -510,7 +534,7 @@ export function parseVulnJsonOutput(stdout: string, command: string): Determinis
         if (vuln.range) snippetParts.push(`Affected: ${pkgName} ${vuln.range}`);
         if (vuln.isDirect) {
           snippetParts.push("Direct dependency.");
-        } else if (vuln.effects?.length > 0) {
+        } else if (vuln.effects && vuln.effects.length > 0) {
           snippetParts.push(`Via: ${vuln.effects.join(" → ")}`);
         }
         if (vuln.fixAvailable) {
@@ -523,7 +547,7 @@ export function parseVulnJsonOutput(stdout: string, command: string): Determinis
 
         findings.push({
           title,
-          severity: mapNpmAuditSeverity(vuln.severity),
+          severity: mapNpmAuditSeverity(vuln.severity ?? ""),
           category: "security",
           file: vuln.findings?.[0]?.paths?.[0] ?? pkgName,
           line: 0,
@@ -722,14 +746,15 @@ async function execCommandSafe(args: string[], cwd: string, timeoutMs: number = 
       stderr: stderr ?? "",
       exitCode: 0,
     };
-  } catch (err: any) {
+  } catch (err: unknown) {
     // Many linters/vuln scanners exit non-zero when they find issues
     // This is not necessarily an error — the output may still be valid
+    const e = err as Record<string, unknown>;
     return {
       success: true,
-      stdout: err.stdout ?? "",
-      stderr: err.stderr ?? "",
-      exitCode: err.code ?? 1,
+      stdout: (e.stdout as string) ?? "",
+      stderr: (e.stderr as string) ?? "",
+      exitCode: (e.code as number) ?? 1,
     };
   }
 }
@@ -759,14 +784,15 @@ async function execCommandShell(command: string, cwd: string, timeoutMs: number 
       stderr: stderr ?? "",
       exitCode: 0,
     };
-  } catch (err: any) {
+  } catch (err: unknown) {
     // Many linters/vuln scanners exit non-zero when they find issues
     // This is not necessarily an error — the output may still be valid
+    const e = err as Record<string, unknown>;
     return {
       success: true,
-      stdout: err.stdout ?? "",
-      stderr: err.stderr ?? "",
-      exitCode: err.code ?? 1,
+      stdout: (e.stdout as string) ?? "",
+      stderr: (e.stderr as string) ?? "",
+      exitCode: (e.code as number) ?? 1,
     };
   }
 }
