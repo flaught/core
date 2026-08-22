@@ -517,6 +517,149 @@
         "file": "src/report/report.test.ts"
       },
       "expires_at": null
+    },
+    {
+      "fingerprint": "sha256:bba79de4b7573dc6",
+      "dismissed_by": "dgabriel@mac.mynetworksettings.com",
+      "dismissed_at": "2026-08-22T12:58:57.100Z",
+      "reason": "Valid scope-creep observation but intentional: pre-commit hooks are dogfood infrastructure that belongs in this PR alongside the code they test.",
+      "context": {
+        "title": "Unrelated change to Git hook script",
+        "file": ".husky/pre-commit"
+      },
+      "expires_at": null
+    },
+    {
+      "fingerprint": "sha256:5ed587e077d66535",
+      "dismissed_by": "dgabriel@mac.mynetworksettings.com",
+      "dismissed_at": "2026-08-22T12:58:57.231Z",
+      "reason": "Hallucination: refute runner uses createProvider() and the same LLMProvider interface as the main review. No generate() method exists. The batching is also abstracted through the provider.",
+      "context": {
+        "title": "Refute runner tightly couples to LLM provider implementation",
+        "file": "src/refute/runner.ts"
+      },
+      "expires_at": null
+    },
+    {
+      "fingerprint": "sha256:39d91f152985bd7e",
+      "dismissed_by": "dgabriel@mac.mynetworksettings.com",
+      "dismissed_at": "2026-08-22T12:58:57.368Z",
+      "reason": "Hallucination: src/refute/runner.test.ts exists with 15 tests covering prompt construction, response parsing, verdict handling, and error cases.",
+      "context": {
+        "title": "No unit or integration tests for new refute pass",
+        "file": "src/refute/runner.ts"
+      },
+      "expires_at": null
+    },
+    {
+      "fingerprint": "sha256:bb0d36c2925a7089",
+      "dismissed_by": "dgabriel@mac.mynetworksettings.com",
+      "dismissed_at": "2026-08-22T12:58:57.497Z",
+      "reason": "Hallucination: the runner batches findings (max_batch_size: 20 per call), it does NOT make one LLM call per finding. See runner.ts lines 119-126.",
+      "context": {
+        "title": "Potential N+1 LLM calls for each finding",
+        "file": "src/refute/runner.ts"
+      },
+      "expires_at": null
+    },
+    {
+      "fingerprint": "sha256:5f2e268bada74e05",
+      "dismissed_by": "dgabriel@mac.mynetworksettings.com",
+      "dismissed_at": "2026-08-22T12:58:57.627Z",
+      "reason": "Hallucination: CI ran against the published npm package which doesn't have the refute config changes yet. The LLM fabricated CLI_FLAGS, a verbose flag, and other API surface that doesn't exist in the code.",
+      "context": {
+        "title": "Config file changes unrelated to default model switch",
+        "file": "src/config.ts"
+      },
+      "expires_at": null
+    },
+    {
+      "fingerprint": "sha256:c7eeb49af9efdcd2",
+      "dismissed_by": "dgabriel@mac.mynetworksettings.com",
+      "dismissed_at": "2026-08-22T12:58:57.758Z",
+      "reason": "Existing error handling in provider.ts already validates the API key and exits with a clear message. The model default change only affects users who run without .advreview.yml (which flaught init creates).",
+      "context": {
+        "title": "Default model change may expose missing API key handling",
+        "file": "src/llm/provider.ts"
+      },
+      "expires_at": null
+    },
+    {
+      "fingerprint": "sha256:5486696dc4e7aeb1",
+      "dismissed_by": "dgabriel@mac.mynetworksettings.com",
+      "dismissed_at": "2026-08-22T12:58:57.890Z",
+      "reason": "Backward-compatible addition: refute_result is an optional field (RefuteResult | null). Existing consumers that don't know about it will ignore it. No version bump needed per semver for optional additive changes.",
+      "context": {
+        "title": "Schema version not bumped after findings schema modification",
+        "file": "src/schemas/findings.ts"
+      },
+      "expires_at": null
+    },
+    {
+      "fingerprint": "sha256:bb0f4478f7e5933f",
+      "dismissed_by": "dgabriel@mac.mynetworksettings.com",
+      "dismissed_at": "2026-08-22T12:58:58.019Z",
+      "reason": "Hallucination: there is no double filter on tools_executed. The Array.isArray check is a type guard (returns null for non-arrays), not a .filter() call. The single .filter() for failed tools is the only filter.",
+      "context": {
+        "title": "Markdown report now filters tools_executed twice",
+        "file": "src/report/markdown.ts"
+      },
+      "expires_at": null
+    },
+    {
+      "fingerprint": "sha256:bbb2220674ec0037",
+      "dismissed_by": "dgabriel@mac.mynetworksettings.com",
+      "dismissed_at": "2026-08-22T12:58:58.150Z",
+      "reason": "Hallucination: no console.debug, console.log, or console.info calls exist in src/refute/runner.ts. Zero logging of LLM responses.",
+      "context": {
+        "title": "Potential logging of raw LLM responses",
+        "file": "src/refute/runner.ts"
+      },
+      "expires_at": null
+    },
+    {
+      "fingerprint": "sha256:5d30b10a2bdbd256",
+      "dismissed_by": "dgabriel@mac.mynetworksettings.com",
+      "dismissed_at": "2026-08-22T12:58:58.281Z",
+      "reason": "Hallucination: the file exports buildRefuteUserPrompt and parseRefuteResponse. No function named generateRefutePrompt exists anywhere in the codebase. The LLM fabricated function names.",
+      "context": {
+        "title": "Inconsistent naming of refute utilities",
+        "file": "src/refute/prompt.ts"
+      },
+      "expires_at": null
+    },
+    {
+      "fingerprint": "sha256:7dcd6bcc00c518ec",
+      "dismissed_by": "dgabriel@mac.mynetworksettings.com",
+      "dismissed_at": "2026-08-22T12:58:58.417Z",
+      "reason": "The model default is in the Zod schema (the config override mechanism). Users override it in .advreview.yml. This IS the config system working as designed.",
+      "context": {
+        "title": "Default model string hard‑coded in config",
+        "file": "src/config.ts"
+      },
+      "expires_at": null
+    },
+    {
+      "fingerprint": "sha256:217e095626759a8e",
+      "dismissed_by": "dgabriel@mac.mynetworksettings.com",
+      "dismissed_at": "2026-08-22T12:59:02.701Z",
+      "reason": "Valid: will add module-level JSDoc to runner.ts and prompt.ts in a follow-up. Not blocking for this PR since the functions already have inline JSDoc.",
+      "context": {
+        "title": "Large new files lack top‑level documentation",
+        "file": "src/refute/prompt.ts"
+      },
+      "expires_at": null
+    },
+    {
+      "fingerprint": "sha256:16ffcc48b432a87f",
+      "dismissed_by": "dgabriel@mac.mynetworksettings.com",
+      "dismissed_at": "2026-08-22T12:59:02.832Z",
+      "reason": "Valid but non-blocking: unit tests cover prompt construction, response parsing, verdict handling, and error cases (15 tests in runner.test.ts). End-to-end integration test with live LLM is a good follow-up but requires API key management and is better suited as a separate CI job.",
+      "context": {
+        "title": "Missing end‑to‑end test for the refute pass integration",
+        "file": "src/review.ts"
+      },
+      "expires_at": null
     }
   ]
 }

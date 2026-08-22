@@ -186,30 +186,6 @@ const ExcludeSchema = z.object({
   patterns: z.array(z.string()).default([]),
 });
 
-// ─── Refute (skeptic pass) ─────────────────────────────────────────────────
-
-const RefuteSchema = z.object({
-  /** Whether to run the skeptic pass after the LLM review. Default: true. */
-  enabled: z.boolean().default(true),
-  /** Separate LLM provider for anti-correlation (null = same as llm.provider). */
-  provider: z
-    .enum(["openai", "groq", "gemini", "ollama", "anthropic"])
-    .nullable()
-    .default(null),
-  /** Separate model for anti-correlation (null = same as llm.model). */
-  model: z.string().nullable().default(null),
-  /** Separate API key env var (null = same as llm.api_key_env). */
-  api_key_env: z.string().nullable().default(null),
-  /** Separate base URL (null = same as llm.base_url). */
-  base_url: z.string().nullable().default(null),
-  /** Slightly higher temperature for creative doubt (default 0.3). */
-  temperature: z.number().min(0).max(1).default(0.3),
-  /** Fewer tokens needed for verdict responses (default 2048). */
-  max_tokens: z.number().int().positive().default(2048),
-  /** How many findings to batch into one skeptic call (default 20). */
-  max_batch_size: z.number().int().positive().default(20),
-});
-
 // ─── Full config ────────────────────────────────────────────────────────────
 
 export const FlaughtConfigSchema = z.object({
@@ -225,7 +201,6 @@ export const FlaughtConfigSchema = z.object({
   dismissals: DismissalsSchema.default({}),
   refute: RefuteSchema.default({}),
   prompt: PromptSchema.default({}),
-  refute: RefuteSchema.default({}),
   exclude: ExcludeSchema.default({}),
 });
 
