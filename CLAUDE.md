@@ -60,18 +60,57 @@ This protocol applies when ending a Beads implementation workflow. It is subordi
 
 ## Build & Test
 
-_Add your build and test commands here_
-
 ```bash
-# Example:
-# npm install
-# npm test
+npm install          # Install dependencies
+npm run build        # Compile TypeScript (tsc)
+npm test             # Full test suite (251 tests, ~20s)
+npm run test:unit   # Unit tests only (220 tests, ~3s) — what pre-commit runs
+npm run dev          # Watch mode for development
+npm run review       # Run Flaught against local changes
 ```
+
+Pre-commit hook runs `npm run test:unit` (skips integration tests that create temp git repos).
+CI runs the full suite + Flaught review (builds from source).
 
 ## Architecture Overview
 
-_Add a brief overview of your project architecture_
+Flaught is an adversarial PR/code review tool with a deterministic-first pipeline:
+
+```
+Config → Context Assembly → Deterministic Tools (semgrep/linter/npm audit)
+  → LLM Adversarial Review → Refute/Skeptic Pass
+  → Test Inversion → Scope-Creep Detection → Noise Budget → Severity Gate
+```
+
+Key modules:
+- `src/llm/` — LLM provider abstraction (OpenAI-compatible, Anthropic, Groq, Gemini, Ollama)
+- `src/refute/` — Skeptic pass that tries to refute LLM findings (confirmed/refuted/uncertain)
+- `src/tools/` — Deterministic tool runner (semgrep, linter, vuln scanner)
+- `src/test-inversion/` — Runs tests on pre-change code to detect missing coverage
+- `src/scope-creep/` — Flags PR changes outside stated intent
+- `src/report/` — Markdown and JSON report renderers
+- `src/dismissals/` — Persistent finding dismissals with fingerprinting
+- `src/schemas/` — Zod schemas for config, findings, dismissals
+- `src/review.ts` — Main orchestrator that wires the pipeline together
+- `src/cli.ts` — Commander CLI entry point
+
+Key config files:
+- `.advreview.yml` — Project config (model, tools, noise budget, severity gate)
+- `.flaught-dismissals.json` — Persisted dismissals with reasons and expiry
+- `.flaught-prompt/` — User prompt overrides (system.md, userAppend.md)
+
+The default LLM is `openai/gpt-oss-20b` on Groq. The refute pass uses the same
+provider by default but supports a separate provider/model for anti-correlation.
 
 ## Conventions & Patterns
 
-_Add your project-specific conventions here_
+- **Adversarial stance**: Flaught's job is to find problems, not confirm solutions. LLM findings are marked `source_type: "llm"` to distinguish from deterministic findings.
+- **Honest caveat**: Every report includes `_caveat` warning that findings may be hallucinations.
+- **Deterministic-first**: Semgrep/linter/vuln-scanner run BEFORE the LLM, grounding the review in facts.
+- **Test inversion**: Running tests on pre-change code detects tests that pass on both sides (insufficient coverage).
+- **Refute pass**: Every LLM finding goes through a skeptic that tries to knock it down. Deterministic and test-inversion findings are exempt.
+- **Dismissals**: Finding fingerprints survive rephrasing. Dismissals persist in `.flaught-dismissals.json` with who/when/why.
+- **TypeScript strict**: `strict: true`, `noUncheckedIndexedAccess`, `noUnusedLocals`, `noUnusedParameters`.
+- **Zod schemas**: All config and artifact shapes are validated with Zod. If adding a new config field, add it to `src/schemas/config.ts` with a default.
+- **Integration tests**: Tests that create temp git repos (`review.test.ts`, `test-inversion/runner.test.ts`) are excluded from pre-commit hooks but run in CI.
+- **Model volatility**: Groq's model catalog changes frequently. Always validate model availability. Default is `openai/gpt-oss-20b` (confirmed available).
