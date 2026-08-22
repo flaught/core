@@ -39,6 +39,9 @@ jobs:
           npm run build
           npm link
 
+      - name: Run tests
+        run: npm test
+
       - name: Install Semgrep
         run: pip install semgrep
 
