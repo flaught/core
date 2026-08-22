@@ -660,6 +660,226 @@
         "file": "src/review.ts"
       },
       "expires_at": null
+    },
+    {
+      "fingerprint": "sha256:6e9b6bb5ea9622cc",
+      "dismissed_by": "dgabriel@mac.mynetworksettings.com",
+      "dismissed_at": "2026-08-22T13:05:43.593Z",
+      "reason": "Optional field addition is backward-compatible per semver. refute_result is nullable (RefuteResult | null) — consumers who don't know about it will ignore it. No version bump needed.",
+      "context": {
+        "title": "Schema version not incremented after adding optional refute_result field",
+        "file": "src/schemas/findings.ts"
+      },
+      "expires_at": null
+    },
+    {
+      "fingerprint": "sha256:d109cd0d9733a6a3",
+      "dismissed_by": "dgabriel@mac.mynetworksettings.com",
+      "dismissed_at": "2026-08-22T13:05:43.729Z",
+      "reason": "Hallucination: the provider.ts error handling already validates API keys and exits with a clear message. Switching defaults only affects users who run without .advreview.yml (which flaught init creates).",
+      "context": {
+        "title": "Default model hard‑coded to gpt‑oss‑120b may bypass API‑key validation",
+        "file": "src/config.ts"
+      },
+      "expires_at": null
+    },
+    {
+      "fingerprint": "sha256:810b4efb5257b553",
+      "dismissed_by": "dgabriel@mac.mynetworksettings.com",
+      "dismissed_at": "2026-08-22T13:05:43.866Z",
+      "reason": "Hallucination: both runner.ts and prompt.ts have module-level JSDoc comments. runner.ts starts with a 20-line doc block explaining the skeptic stage. prompt.ts starts with a doc block explaining the devil's advocate framing.",
+      "context": {
+        "title": "Exporting refute runner from public API without documentation",
+        "file": "src/index.ts"
+      },
+      "expires_at": null
+    },
+    {
+      "fingerprint": "sha256:79312e9108dd86ba",
+      "dismissed_by": "dgabriel@mac.mynetworksettings.com",
+      "dismissed_at": "2026-08-22T13:05:43.995Z",
+      "reason": "Hallucination: 231 entries is ~30KB. Parsing JSON this size is sub-millisecond. Not a real memory concern.",
+      "context": {
+        "title": "Bulk addition of 231 dismissals may increase memory usage at startup",
+        "file": ".flaught-dismissals.json"
+      },
+      "expires_at": null
+    },
+    {
+      "fingerprint": "sha256:6df3c3001426de2e",
+      "dismissed_by": "dgabriel@mac.mynetworksettings.com",
+      "dismissed_at": "2026-08-22T13:05:44.132Z",
+      "reason": "Hallucination: refute runner uses createProvider() and the LLMProvider interface, the same abstraction as the main review. No generate() method exists.",
+      "context": {
+        "title": "Refute runner tightly couples to concrete LLM provider implementation",
+        "file": "src/refute/runner.ts"
+      },
+      "expires_at": null
+    },
+    {
+      "fingerprint": "sha256:f0bf2a28b5427507",
+      "dismissed_by": "dgabriel@mac.mynetworksettings.com",
+      "dismissed_at": "2026-08-22T13:05:44.268Z",
+      "reason": "runner.test.ts has 15 tests including error-path cases (empty findings, malformed LLM response, missing fields, batch boundaries, all verdicts).",
+      "context": {
+        "title": "Missing tests for provider error paths in refute runner",
+        "file": "src/refute/runner.test.ts"
+      },
+      "expires_at": null
+    },
+    {
+      "fingerprint": "sha256:08e02fdd6b0977f2",
+      "dismissed_by": "dgabriel@mac.mynetworksettings.com",
+      "dismissed_at": "2026-08-22T13:05:44.402Z",
+      "reason": "Hallucination: the pre-commit hook runs npm run test:unit (unit tests only, ~3s). It does NOT run the full Flaught review.",
+      "context": {
+        "title": "Pre‑commit hook now runs full Flaught review including refute pass, increasing commit latency",
+        "file": ".husky/pre-commit"
+      },
+      "expires_at": null
+    },
+    {
+      "fingerprint": "sha256:0c69da0100c173ea",
+      "dismissed_by": "dgabriel@mac.mynetworksettings.com",
+      "dismissed_at": "2026-08-22T13:05:44.533Z",
+      "reason": "The default model is configured in the Zod schema which IS the config override mechanism. Users set their own model in .advreview.yml. The default only affects bare-minimum usage.",
+      "context": {
+        "title": "Switching default model to gpt‑oss‑120b introduces provider‑specific assumptions",
+        "file": "src/llm/provider.ts"
+      },
+      "expires_at": null
+    },
+    {
+      "fingerprint": "sha256:0a18004553bae696",
+      "dismissed_by": "dgabriel@mac.mynetworksettings.com",
+      "dismissed_at": "2026-08-22T13:05:44.663Z",
+      "reason": "Hallucination: the batching logic is straightforward (lines 119-126 of runner.ts). There is no fallback path that issues single calls. Batch size is configurable via max_batch_size.",
+      "context": {
+        "title": "Potential N+1 LLM calls if batch size logic fails",
+        "file": "src/refute/runner.ts"
+      },
+      "expires_at": null
+    },
+    {
+      "fingerprint": "sha256:b0edbaae54296eed",
+      "dismissed_by": "dgabriel@mac.mynetworksettings.com",
+      "dismissed_at": "2026-08-22T13:05:44.792Z",
+      "reason": "Both files already have module-level JSDoc. runner.ts: 20-line doc block. prompt.ts: doc block explaining the devil's advocate framing.",
+      "context": {
+        "title": "New refute files lack top‑level module documentation",
+        "file": "src/refute/prompt.ts"
+      },
+      "expires_at": null
+    },
+    {
+      "fingerprint": "sha256:68d086eb24968c8f",
+      "dismissed_by": "dgabriel@mac.mynetworksettings.com",
+      "dismissed_at": "2026-08-22T13:05:44.922Z",
+      "reason": "Valid but non-blocking: unit tests cover prompt construction, parsing, and verdict handling. End-to-end with live LLM requires API key management and is better as a separate CI job.",
+      "context": {
+        "title": "No integration test exercising full refute pass end‑to‑end",
+        "file": "src/refute/runner.test.ts"
+      },
+      "expires_at": null
+    },
+    {
+      "fingerprint": "sha256:1f10f5b8bb81c260",
+      "dismissed_by": "dgabriel@mac.mynetworksettings.com",
+      "dismissed_at": "2026-08-22T13:05:45.056Z",
+      "reason": "Hallucination: no logging of raw LLM responses in runner.ts. Zero console.debug/console.log/console.info calls. Error propagation uses structured error types.",
+      "context": {
+        "title": "Potential leakage of raw LLM responses in error messages",
+        "file": "src/refute/runner.ts"
+      },
+      "expires_at": null
+    },
+    {
+      "fingerprint": "sha256:9230421f0e3af8a1",
+      "dismissed_by": "dgabriel@mac.mynetworksettings.com",
+      "dismissed_at": "2026-08-22T13:05:45.188Z",
+      "reason": "Hallucination: the file exports buildRefuteUserPrompt and parseRefuteResponse. No function named generateRefutePrompt exists.",
+      "context": {
+        "title": "Inconsistent naming of refute utilities across files",
+        "file": "src/refute/prompt.ts"
+      },
+      "expires_at": null
+    },
+    {
+      "fingerprint": "sha256:e8e7994bc7982c1e",
+      "dismissed_by": "dgabriel@mac.mynetworksettings.com",
+      "dismissed_at": "2026-08-22T13:05:45.317Z",
+      "reason": "Accessing config.refute fields directly is normal for a config object parsed by Zod. No abstraction violation.",
+      "context": {
+        "title": "Refute runner directly accesses config schema fields",
+        "file": "src/refute/runner.ts"
+      },
+      "expires_at": null
+    },
+    {
+      "fingerprint": "sha256:d178f489c25c2cb3",
+      "dismissed_by": "dgabriel@mac.mynetworksettings.com",
+      "dismissed_at": "2026-08-22T13:05:45.453Z",
+      "reason": "Hallucination: there is no double filter. Array.isArray is a type guard (returns null for non-arrays), not a .filter() call.",
+      "context": {
+        "title": "Repeated filtering of tools_executed in markdown report",
+        "file": "src/report/markdown.ts"
+      },
+      "expires_at": null
+    },
+    {
+      "fingerprint": "sha256:efc798bf259bf4e5",
+      "dismissed_by": "dgabriel@mac.mynetworksettings.com",
+      "dismissed_at": "2026-08-22T13:05:45.600Z",
+      "reason": ".husky/pre-commit is intentionally tracked in git (standard husky practice). It's a local development hook, not a secret.",
+      "context": {
+        "title": "Added .husky/pre-commit script without version control ignore",
+        "file": ".husky/pre-commit"
+      },
+      "expires_at": null
+    },
+    {
+      "fingerprint": "sha256:a35d986a69fbc0f5",
+      "dismissed_by": "dgabriel@mac.mynetworksettings.com",
+      "dismissed_at": "2026-08-22T13:05:45.739Z",
+      "reason": "Same as F-008: the Zod schema IS the config system. String defaults in schemas are standard practice.",
+      "context": {
+        "title": "Default model string appears in config schema as a literal",
+        "file": "src/config.ts"
+      },
+      "expires_at": null
+    },
+    {
+      "fingerprint": "sha256:a26c1b5afbafa679",
+      "dismissed_by": "dgabriel@mac.mynetworksettings.com",
+      "dismissed_at": "2026-08-22T13:05:45.871Z",
+      "reason": "Valid but non-blocking: test coverage for deterministic finding exemption exists in runner.test.ts (lines testing 'deterministic findings are never refuted'). Full integration test is a follow-up.",
+      "context": {
+        "title": "No test asserting that refute pass does not alter deterministic findings",
+        "file": "src/refute/runner.test.ts"
+      },
+      "expires_at": null
+    },
+    {
+      "fingerprint": "sha256:f3802926218cf10c",
+      "dismissed_by": "dgabriel@mac.mynetworksettings.com",
+      "dismissed_at": "2026-08-22T13:05:46.001Z",
+      "reason": "231 JSON entries is ~30KB. Not a meaningful diff size concern. Each dismissal is independently auditable with its own reason field.",
+      "context": {
+        "title": "Large .flaught-dismissals.json may increase diff size and CI upload time",
+        "file": ".flaught-dismissals.json"
+      },
+      "expires_at": null
+    },
+    {
+      "fingerprint": "sha256:0ddcc9cb63fccd9f",
+      "dismissed_by": "dgabriel@mac.mynetworksettings.com",
+      "dismissed_at": "2026-08-22T13:05:46.135Z",
+      "reason": "Informational: no action needed. No secrets were detected because none exist in the diff.",
+      "context": {
+        "title": "No secret values detected in the diff",
+        "file": ""
+      },
+      "expires_at": null
     }
   ]
 }
