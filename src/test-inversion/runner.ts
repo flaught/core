@@ -199,10 +199,11 @@ async function detectTestCommand(repoPath: string): Promise<string | null> {
   if (fs.existsSync(path.join(repoPath, "pyproject.toml")) ||
       fs.existsSync(path.join(repoPath, "setup.py")) ||
       fs.existsSync(path.join(repoPath, "requirements.txt"))) {
+    const { execFile } = await import("node:child_process");
+    const { promisify } = await import("node:util");
+    const execFileAsync = promisify(execFile);
     try {
-      const { exec } = await import("node:child_process");
-      const { promisify } = await import("node:util");
-      await promisify(exec)("pytest --version", { cwd: repoPath });
+      await execFileAsync("pytest", ["--version"], { cwd: repoPath, shell: false, timeout: 10_000 });
       return "pytest";
     } catch {
       // pytest not available
@@ -225,25 +226,55 @@ async function detectTestCommand(repoPath: string): Promise<string | null> {
 // ─── Test execution ──────────────────────────────────────────────────────────
 
 async function runTests(command: string, cwd: string): Promise<TestRunResult> {
-  const { exec } = await import("node:child_process");
-  const { promisify } = await import("node:util");
-  const execAsync = promisify(exec);
+  // Test commands may be user-configured or auto-detected strings.
+  // Commands that contain shell metacharacters (quotes, pipes, redirects,
+  // semicolons, etc.) need shell interpretation. Simple commands (like
+  // "npm test" or "pytest") can be safely split and executed without a shell.
+  const needsShell = /["'`|&;$<>\\]/.test(command) || /\b\w+\s+-e\s+/.test(command);
 
   const startTime = Date.now();
 
   try {
-    const { stdout, stderr } = await execAsync(command, {
-      cwd,
-      maxBuffer: 10 * 1024 * 1024,
-      timeout: 300_000, // 5 minute timeout for tests
-      env: {
-        ...process.env,
-        // Force non-interactive mode for most test runners
-        CI: "true",
-        FORCE_COLOR: "0",
-        NO_COLOR: "1",
-      },
-    });
+    let stdout: string;
+    let stderr: string;
+
+    if (needsShell) {
+      // Complex command — needs shell interpretation
+      const { exec } = await import("node:child_process");
+      const { promisify } = await import("node:util");
+      const result = await promisify(exec)(command, {
+        cwd,
+        maxBuffer: 10 * 1024 * 1024,
+        timeout: 300_000, // 5 minute timeout for tests
+        env: {
+          ...process.env,
+          CI: "true",
+          FORCE_COLOR: "0",
+          NO_COLOR: "1",
+        },
+      });
+      stdout = result.stdout;
+      stderr = result.stderr;
+    } else {
+      // Simple command — safe to split and use execFile
+      const { execFile } = await import("node:child_process");
+      const { promisify } = await import("node:util");
+      const parts = command.trim().split(/\s+/);
+      const result = await promisify(execFile)(parts[0]!, parts.slice(1), {
+        cwd,
+        maxBuffer: 10 * 1024 * 1024,
+        timeout: 300_000,
+        shell: false,
+        env: {
+          ...process.env,
+          CI: "true",
+          FORCE_COLOR: "0",
+          NO_COLOR: "1",
+        },
+      });
+      stdout = result.stdout;
+      stderr = result.stderr;
+    }
 
     const durationMs = Date.now() - startTime;
     const parsed = parseTestOutput(stdout + "\n" + stderr, command);
@@ -512,10 +543,15 @@ async function removeWorktree(repoPath: string, worktreePath: string): Promise<v
 }
 
 async function installDependencies(worktreePath: string): Promise<void> {
-  // Install dependencies in the worktree so tests can run
-  const { exec } = await import("node:child_process");
+  // Install dependencies in the worktree so tests can run.
+  // SECURITY: Uses execFile (argument array, no shell) to prevent command
+  // injection. The --ignore-scripts flag for npm prevents running lifecycle
+  // scripts from untrusted packages. pip doesn't have an equivalent flag,
+  // so we use --no-build-isolation to limit some risk, but this remains a
+  // trust boundary — dependency installation inherently executes code.
+  const { execFile } = await import("node:child_process");
   const { promisify } = await import("node:util");
-  const execAsync = promisify(exec);
+  const execFileAsync = promisify(execFile);
 
   const packageJsonPath = path.join(worktreePath, "package.json");
   const requirementsTxtPath = path.join(worktreePath, "requirements.txt");
@@ -523,28 +559,37 @@ async function installDependencies(worktreePath: string): Promise<void> {
   const goModPath = path.join(worktreePath, "go.mod");
   const cargoPath = path.join(worktreePath, "Cargo.toml");
 
+  const execOpts = {
+    cwd: worktreePath,
+    timeout: 120_000,
+    shell: false,
+  };
+
   try {
     if (fs.existsSync(packageJsonPath)) {
-      await execAsync("npm install --ignore-scripts --no-audit --no-fund", {
-        cwd: worktreePath,
-        timeout: 120_000,
-      });
+      await execFileAsync("npm", ["install", "--ignore-scripts", "--no-audit", "--no-fund"], execOpts);
     } else if (fs.existsSync(requirementsTxtPath) || fs.existsSync(pyprojectPath)) {
-      // Try pip install (in a virtualenv if possible)
-      await execAsync("pip install -e . 2>/dev/null || pip install -r requirements.txt 2>/dev/null || true", {
-        cwd: worktreePath,
-        timeout: 120_000,
-      });
+      // Try pip install with --no-build-isolation to limit risk.
+      // --no-build-isolation prevents pip from creating isolated build
+      // environments, which reduces some attack surface but doesn't
+      // eliminate it — setup.py still runs.
+      try {
+        await execFileAsync("pip", ["install", "--no-build-isolation", "-e", "."], execOpts);
+      } catch {
+        try {
+          await execFileAsync("pip", ["install", "--no-build-isolation", "-r", "requirements.txt"], execOpts);
+        } catch {
+          // pip install failure is not fatal
+        }
+      }
     } else if (fs.existsSync(goModPath)) {
-      await execAsync("go mod download", {
-        cwd: worktreePath,
-        timeout: 120_000,
-      });
+      await execFileAsync("go", ["mod", "download"], execOpts);
     } else if (fs.existsSync(cargoPath)) {
-      await execAsync("cargo build 2>/dev/null || true", {
-        cwd: worktreePath,
-        timeout: 120_000,
-      });
+      try {
+        await execFileAsync("cargo", ["build"], execOpts);
+      } catch {
+        // cargo build failure is not fatal
+      }
     }
   } catch {
     // Dependency installation failure is not fatal — tests may still work

@@ -100,7 +100,7 @@ export async function runDeterministicTools(
       version: result.success ? await getToolVersion("semgrep") : "unknown",
       exit_code: result.exitCode,
       raw_findings_count: result.findings.length,
-      command: result.success ? getSemgrepCommand(config) : "(failed)",
+      command: result.success ? getSemgrepArgs(config).join(" ") : "(failed)",
     });
     allFindings.push(...result.findings);
     progress(`    semgrep: ${result.findings.length} findings (${result.durationMs}ms)`);
@@ -143,19 +143,21 @@ export async function runDeterministicTools(
 
 // ── Semgrep ──────────────────────────────────────────────────────────────────
 
-function getSemgrepCommand(config: FlaughtConfig): string {
+function getSemgrepArgs(config: FlaughtConfig): string[] {
+  // SECURITY: Uses argument array (not shell interpolation) to prevent
+  // command injection through config.tools.semgrep.config.
   if (config.tools.semgrep.config) {
-    return `semgrep --config ${config.tools.semgrep.config} --json .`;
+    return ["semgrep", "--config", config.tools.semgrep.config, "--json", "."];
   }
-  return "semgrep --config auto --json .";
+  return ["semgrep", "--config", "auto", "--json", "."];
 }
 
 async function runSemgrep(config: FlaughtConfig, repoPath: string): Promise<ToolResult> {
-  const command = getSemgrepCommand(config);
+  const args = getSemgrepArgs(config);
   const startTime = Date.now();
 
   try {
-    const result = await execCommand(command, repoPath);
+    const result = await execCommandSafe(args, repoPath);
     const durationMs = Date.now() - startTime;
 
     // Semgrep exits 0 even with findings; non-zero means error
@@ -239,7 +241,9 @@ function mapSemgrepCategory(ruleId: string): string {
 // ── Linter ───────────────────────────────────────────────────────────────────
 
 async function runLinter(config: FlaughtConfig, repoPath: string): Promise<ToolResult> {
-  const command = config.tools.linter.command ?? await detectLinterCommand(repoPath);
+  const userCommand = config.tools.linter.command;
+  const autoCommand = !userCommand ? await detectLinterCommand(repoPath) : null;
+  const command = userCommand ?? autoCommand;
   if (!command) {
     return {
       tool: "linter",
@@ -254,8 +258,13 @@ async function runLinter(config: FlaughtConfig, repoPath: string): Promise<ToolR
 
   const startTime = Date.now();
   try {
-    // Linters typically exit non-zero when they find issues
-    const result = await execCommand(command, repoPath);
+    // SECURITY: User-configured commands run through a shell (the user explicitly
+    // controls the entire command string). Auto-detected commands use safe argument
+    // arrays to prevent injection.
+    const isUserCommand = Boolean(userCommand);
+    const result = isUserCommand
+      ? await execCommandShell(command, repoPath)
+      : await execCommandSafe(shellToArgs(command), repoPath);
     const durationMs = Date.now() - startTime;
 
     // Try JSON parsing first (eslint, ruff, etc. can output JSON)
@@ -306,14 +315,14 @@ async function detectLinterCommand(repoPath: string): Promise<string | null> {
       fs.existsSync(path.join(repoPath, "setup.py"))) {
     // Try ruff first (faster)
     try {
-      await execCommand("ruff check --version", repoPath);
+      await execCommandSafe(["ruff", "check", "--version"], repoPath);
       return "ruff check --output-format json .";
     } catch {
       // ruff not available
     }
     // Try flake8
     try {
-      await execCommand("flake8 --version", repoPath);
+      await execCommandSafe(["flake8", "--version"], repoPath);
       return "flake8 --format=json .";
     } catch {
       // flake8 not available
@@ -331,7 +340,9 @@ async function detectLinterCommand(repoPath: string): Promise<string | null> {
 // ── Vulnerability scanner ────────────────────────────────────────────────────
 
 async function runVulnScanner(config: FlaughtConfig, repoPath: string): Promise<ToolResult> {
-  const command = config.tools.vuln_scanner.command ?? await detectVulnCommand(repoPath);
+  const userCommand = config.tools.vuln_scanner.command;
+  const autoCommand = !userCommand ? await detectVulnCommand(repoPath) : null;
+  const command = userCommand ?? autoCommand;
   if (!command) {
     return {
       tool: "vuln_scanner",
@@ -346,7 +357,13 @@ async function runVulnScanner(config: FlaughtConfig, repoPath: string): Promise<
 
   const startTime = Date.now();
   try {
-    const result = await execCommand(command, repoPath);
+    // SECURITY: User-configured commands run through a shell (the user explicitly
+    // controls the entire command string). Auto-detected commands use safe argument
+    // arrays to prevent injection.
+    const isUserCommand = Boolean(userCommand);
+    const result = isUserCommand
+      ? await execCommandShell(command, repoPath)
+      : await execCommandSafe(shellToArgs(command), repoPath);
     const durationMs = Date.now() - startTime;
 
     // Try JSON parsing (npm audit, pip-audit, etc.)
@@ -389,7 +406,7 @@ async function detectVulnCommand(repoPath: string): Promise<string | null> {
   if (fs.existsSync(path.join(repoPath, "requirements.txt")) ||
       fs.existsSync(path.join(repoPath, "pyproject.toml"))) {
     try {
-      await execCommand("pip-audit --version", repoPath);
+      await execCommandSafe(["pip-audit", "--version"], repoPath);
       return "pip-audit --format json";
     } catch {
       // pip-audit not available
@@ -399,7 +416,7 @@ async function detectVulnCommand(repoPath: string): Promise<string | null> {
   // Go: go vuln
   if (fs.existsSync(path.join(repoPath, "go.mod"))) {
     try {
-      await execCommand("govulncheck -version", repoPath);
+      await execCommandSafe(["govulncheck", "-version"], repoPath);
       return "govulncheck ./...";
     } catch {
       // govulncheck not available
@@ -684,7 +701,47 @@ interface ExecResult {
   exitCode: number;
 }
 
-async function execCommand(command: string, cwd: string): Promise<ExecResult> {
+// ── Safe command execution (argument array, no shell) ──────────────────────────
+
+async function execCommandSafe(args: string[], cwd: string, timeoutMs: number = 120_000): Promise<ExecResult> {
+  const { execFile } = await import("node:child_process");
+  const { promisify } = await import("node:util");
+  const execFileAsync = promisify(execFile);
+
+  try {
+    const { stdout, stderr } = await execFileAsync(args[0]!, args.slice(1), {
+      cwd,
+      maxBuffer: 10 * 1024 * 1024, // 10MB buffer for large outputs
+      timeout: timeoutMs,
+      shell: false,
+    });
+
+    return {
+      success: true,
+      stdout: stdout ?? "",
+      stderr: stderr ?? "",
+      exitCode: 0,
+    };
+  } catch (err: any) {
+    // Many linters/vuln scanners exit non-zero when they find issues
+    // This is not necessarily an error — the output may still be valid
+    return {
+      success: true,
+      stdout: err.stdout ?? "",
+      stderr: err.stderr ?? "",
+      exitCode: err.code ?? 1,
+    };
+  }
+}
+
+// ── Shell-based command execution (for user-configured commands) ──────────────
+//
+// SECURITY: This function runs a command string through a shell. It is ONLY
+// used for user-configured command strings (linter.command, vuln_scanner.command)
+// where the user explicitly controls the entire command. Auto-detected commands
+// and semgrep use execCommandSafe (argument array, no shell) instead.
+
+async function execCommandShell(command: string, cwd: string, timeoutMs: number = 120_000): Promise<ExecResult> {
   const { exec } = await import("node:child_process");
   const { promisify } = await import("node:util");
   const execAsync = promisify(exec);
@@ -693,7 +750,7 @@ async function execCommand(command: string, cwd: string): Promise<ExecResult> {
     const { stdout, stderr } = await execAsync(command, {
       cwd,
       maxBuffer: 10 * 1024 * 1024, // 10MB buffer for large outputs
-      timeout: 120_000, // 2 minute timeout
+      timeout: timeoutMs,
     });
 
     return {
@@ -716,13 +773,48 @@ async function execCommand(command: string, cwd: string): Promise<ExecResult> {
 
 async function getToolVersion(tool: string): Promise<string> {
   try {
-    const result = await execCommand(`${tool} --version`, process.cwd());
+    const result = await execCommandSafe([tool, "--version"], process.cwd());
     // Extract version number from output like "semgrep 1.50.0"
     const match = (result.stdout + result.stderr).match(/(\d+\.\d+\.\d+)/);
     return match?.[1] ?? "unknown";
   } catch {
     return "unknown";
   }
+}
+
+// ── Shell command to argument array ─────────────────────────────────────────
+//
+// Split a simple shell command string into an argument array for safe execution.
+// This is a minimal parser that handles the auto-detected command strings —
+// which are all well-known, simple commands. It is NOT a general-purpose shell
+// parser. User-configured commands go through execCommandShell (the user
+// explicitly controls the entire command string).
+
+function shellToArgs(command: string): string[] {
+  // Split on whitespace, respecting basic double-quoted strings.
+  // This handles the known auto-detected commands correctly but is NOT
+  // suitable for arbitrary user input — that path uses execCommandShell.
+  const args: string[] = [];
+  let current = "";
+  let inQuotes = false;
+
+  for (const char of command) {
+    if (char === '"') {
+      inQuotes = !inQuotes;
+    } else if (char === ' ' && !inQuotes) {
+      if (current.length > 0) {
+        args.push(current);
+        current = "";
+      }
+    } else {
+      current += char;
+    }
+  }
+  if (current.length > 0) {
+    args.push(current);
+  }
+
+  return args;
 }
 
 // ── Format tool findings for the LLM prompt ────────────────────────────────────

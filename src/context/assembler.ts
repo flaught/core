@@ -16,6 +16,7 @@ import * as path from "node:path";
 import { simpleGit, type SimpleGit } from "simple-git";
 import { buildDependencyGraph, type DependencyGraph } from "./neighborhood.js";
 import { loadConfig } from "../config.js";
+import { matchesAnyGlob } from "../util/glob.js";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -190,6 +191,10 @@ export async function readFileContents(
 
 // ─── Exclusion filtering ────────────────────────────────────────────────────
 
+// SECURITY: Caps on pattern length and complexity to prevent ReDoS.
+const MAX_EXCLUDE_PATTERN_LENGTH = 256;
+const MAX_EXCLUDE_PATTERN_COMPLEXITY = 50; // max number of regex metacharacters
+
 function isExcluded(
   filePath: string,
   excludePaths: string[],
@@ -197,21 +202,17 @@ function isExcluded(
 ): boolean {
   // Check glob-style path exclusions
   for (const pattern of excludePaths) {
-    // Simple glob matching: * matches anything, ** matches any path segment
-    const globRegex = pattern
-      .replace(/\*\*/g, "§§") // temp placeholder for **
-      .replace(/\*/g, "[^/]*") // * matches anything except /
-      .replace(/§§/g, ".*") // ** matches anything including /
-      .replace(/\?/g, "[^/]");
-
-    const regex = new RegExp(`^${globRegex}$`); // nosemgrep
-    if (regex.test(filePath)) return true;
+    if (matchesAnyGlob(filePath, [pattern])) return true;
   }
 
-  // Check regex patterns
+  // Check regex patterns — with complexity cap to prevent ReDoS
   for (const pattern of excludePatterns) {
+    if (pattern.length > MAX_EXCLUDE_PATTERN_LENGTH) continue;
+    // Count regex metacharacters as a rough complexity proxy
+    const metacharCount = (pattern.match(/[\\.*+?{}()\[\]^$|]/g) ?? []).length;
+    if (metacharCount > MAX_EXCLUDE_PATTERN_COMPLEXITY) continue;
     try {
-      const regex = new RegExp(pattern); // nosemgrep
+      const regex = new RegExp(pattern); // nosemgrep — user-supplied regex pattern from config
       if (regex.test(filePath)) return true;
     } catch {
       // Invalid regex pattern — skip it

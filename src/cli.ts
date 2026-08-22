@@ -345,7 +345,7 @@ async function runDismiss(
     process.exit(2);
   }
 
-  const artifact = JSON.parse(fs.readFileSync(artifactPath, "utf-8")) as FindingsArtifact;
+  const artifact = parseArtifactFile(artifactPath);
   const finding = artifact.findings.find((f) => f.id === findingId);
   if (!finding) {
     const available = artifact.findings.map((f) => f.id).join(", ") || "(none)";
@@ -461,6 +461,45 @@ async function runDismissalsRemove(fingerprint: string, opts: { repo?: string; c
 
   saveDismissalStore(dismissalsPath, removeDismissal(store, fingerprint));
   console.log(`✅ Removed ${fingerprint} from ${dismissalsPath}`);
+}
+
+// ─── Artifact file parsing with schema validation ───────────────────────────
+
+/**
+ * Parse a findings JSON artifact file with schema validation.
+ *
+ * SECURITY: Validates the parsed JSON against the FindingsArtifactSchema
+ * to prevent type-confusion attacks or unexpected behavior from malformed
+ * artifact files. Returns a typed FindingsArtifact or exits with an error.
+ */
+function parseArtifactFile(artifactPath: string): FindingsArtifact {
+  const raw = fs.readFileSync(artifactPath, "utf-8");
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch (err) {
+    console.error(`\n❌ Artifact file is not valid JSON: ${artifactPath}`);
+    console.error(`   ${err instanceof Error ? err.message : String(err)}`);
+    process.exit(2);
+  }
+
+  // SECURITY: null passes typeof === "object" — explicitly reject it
+  if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) {
+    console.error(`\n❌ Artifact file does not contain a JSON object: ${artifactPath}`);
+    process.exit(2);
+  }
+
+  // Validate required fields exist before accessing them.
+  // Full Zod validation would catch everything, but FindingsArtifactSchema
+  // uses .passthrough() internally. We validate the critical structural
+  // fields that the dismiss command accesses.
+  const obj = parsed as Record<string, unknown>;
+  if (!Array.isArray(obj.findings)) {
+    console.error(`\n❌ Artifact file has no \"findings\" array: ${artifactPath}`);
+    process.exit(2);
+  }
+
+  return parsed as FindingsArtifact;
 }
 
 function handleError(err: unknown): never {

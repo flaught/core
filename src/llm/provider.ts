@@ -720,7 +720,9 @@ export function parseFindingsFromLLM(
     }
   }
 
-  if (!parsed || typeof parsed !== "object") return [];
+  // SECURITY: null is typeof "object" in JS — explicitly reject it to prevent
+  // prototype pollution or unexpected property access on null.
+  if (parsed === null || typeof parsed !== "object") return [];
 
   // The LLM may return { findings: [...] } or just [...]
   const maybeFindings = (parsed as Record<string, unknown>).findings;
@@ -747,13 +749,18 @@ export function parseFindingsFromLLM(
       : "architecture";
 
     const title = typeof f.title === "string" ? f.title : "Untitled finding";
+    // SECURITY: f.evidence may be null, undefined, a string, or an object.
+    // Only access nested properties if it's a non-null object.
+    const ev = (f.evidence !== null && f.evidence !== undefined && typeof f.evidence === "object" && !Array.isArray(f.evidence))
+      ? (f.evidence as Record<string, unknown>)
+      : ({} as Record<string, unknown>);
     const evidence = {
-      file: typeof f.file === "string" ? f.file : (f.evidence as Record<string, unknown>)?.file as string ?? "",
-      line_start: typeof f.line_start === "number" ? f.line_start : ((f.evidence as Record<string, unknown>)?.line_start as number ?? 0),
-      line_end: typeof f.line_end === "number" ? f.line_end : ((f.evidence as Record<string, unknown>)?.line_end as number ?? 0),
-      snippet: typeof f.snippet === "string" ? f.snippet : ((f.evidence as Record<string, unknown>)?.snippet as string ?? ""),
-      blast_radius: Array.isArray((f.evidence as Record<string, unknown>)?.blast_radius)
-        ? ((f.evidence as Record<string, unknown>)?.blast_radius as string[])
+      file: typeof f.file === "string" ? f.file : (typeof ev.file === "string" ? ev.file : ""),
+      line_start: typeof f.line_start === "number" ? f.line_start : (typeof ev.line_start === "number" ? ev.line_start : 0),
+      line_end: typeof f.line_end === "number" ? f.line_end : (typeof ev.line_end === "number" ? ev.line_end : 0),
+      snippet: typeof f.snippet === "string" ? f.snippet : (typeof ev.snippet === "string" ? ev.snippet : ""),
+      blast_radius: Array.isArray(ev.blast_radius) && ev.blast_radius.every((item): item is string => typeof item === "string")
+        ? (ev.blast_radius as string[])
         : [],
       rule_id: null,
     };
@@ -768,7 +775,7 @@ export function parseFindingsFromLLM(
       source: `llm:${model}`,
       source_type: "llm",
       confidence: typeof f.confidence === "number" ? Math.min(1, Math.max(0, f.confidence)) : 0.7,
-      references: Array.isArray(f.references) ? (f.references as string[]) : [],
+      references: Array.isArray(f.references) ? (f.references as unknown[]).filter((r): r is string => typeof r === "string") : [],
       fingerprint: computeFingerprint({
         source_type: "llm",
         source: `llm:${model}`,
