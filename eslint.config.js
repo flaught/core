@@ -5,9 +5,14 @@ module.exports = tseslint.config(
   {
     ignores: ["dist/**", "node_modules/**", "coverage/**"],
   },
-  ...tseslint.configs.recommended,
   {
+    // Scoped to src/**/*.ts to match `npm run lint` (eslint src/) and to
+    // avoid linting root-level CommonJS config files (this file included)
+    // as TypeScript — Flaught's own deterministic eslint tool runs
+    // `eslint .` against the whole repo, not just src/, once this config
+    // exists at all.
     files: ["src/**/*.ts"],
+    extends: [...tseslint.configs.recommended],
     rules: {
       // tsc (strict + noUnusedLocals/noUnusedParameters) already enforces
       // this at compile time — avoid duplicate/looser reporting from eslint.
