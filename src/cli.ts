@@ -22,6 +22,7 @@ import { contextToJSON } from "./context/assembler.js";
 import { runReview, type ProgressCallback } from "./review.js";
 import { initConfig, loadConfig } from "./config.js";
 import { LLMError, MissingAPIKeyError } from "./llm/provider.js";
+import { ModelNotFoundError } from "./llm/liveness.js";
 import type { FindingsArtifact } from "./schemas/findings.js";
 import type { DismissalEntry } from "./schemas/dismissals.js";
 import {
@@ -370,6 +371,11 @@ async function runDismissalsRemove(fingerprint: string, opts: { repo?: string; c
 
 function handleError(err: unknown): never {
   if (err instanceof MissingAPIKeyError) {
+    console.error(`\n❌ ${err.message}`);
+    process.exit(2);
+  }
+
+  if (err instanceof ModelNotFoundError) {
     console.error(`\n❌ ${err.message}`);
     process.exit(2);
   }
