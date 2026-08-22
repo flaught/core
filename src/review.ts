@@ -41,6 +41,7 @@ import { loadDismissalStore, resolveDismissalsPath, getActiveDismissals } from "
 import { applyDismissals } from "./dismissals/apply.js";
 import type { DismissalStore } from "./schemas/dismissals.js";
 import { runRefutePass } from "./refute/runner.js";
+import { validateModelLiveness, ModelNotFoundError } from "./llm/liveness.js";
 
 // ─── Progress callback ──────────────────────────────────────────────────────
 
@@ -243,6 +244,22 @@ export async function runReview(options: ReviewOptions = {}): Promise<ReviewResu
   } else if (context.changedFiles.length === 0) {
     progress("No changes to review — skipping LLM call.");
   } else {
+    // Pre-flight: validate that the configured model exists on the provider
+    progress("Validating model liveness...");
+    try {
+      const liveness = await validateModelLiveness(config);
+      progress(`  Model ${liveness.provider}/${liveness.model} is available`);
+    } catch (err) {
+      if (err instanceof ModelNotFoundError) {
+        progress(`  ⚠ Model not found: ${err.model}`);
+        // Re-throw with the clear message — this is a hard stop, not a warning
+        throw err;
+      }
+      // Liveness check failures (network, etc.) are warnings, not hard stops
+      progress(`  ⚠ Could not validate model liveness: ${err instanceof Error ? err.message : String(err)}`);
+      progress(`  Continuing — if the model is also unavailable, the review call will fail with a clear error.`);
+    }
+
     const provider = createProvider(config);
     const systemPrompt = buildSystemPrompt(config, templates);
     const activeDismissals = dismissalStore ? getActiveDismissals(dismissalStore) : [];
