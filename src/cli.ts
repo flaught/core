@@ -23,6 +23,7 @@ import { runReview, type ProgressCallback } from "./review.js";
 import { initConfig, loadConfig } from "./config.js";
 import { LLMError, MissingAPIKeyError } from "./llm/provider.js";
 import { ModelNotFoundError } from "./llm/liveness.js";
+import { postInlineReview, buildInlineSummaryHeader, detectGitHubConfig, type GitHubConfig } from "./github/inline-comments.js";
 import type { FindingsArtifact } from "./schemas/findings.js";
 import type { DismissalEntry } from "./schemas/dismissals.js";
 import {
@@ -69,6 +70,7 @@ program
   .option("--no-refute", "Skip the skeptic/refute pass even if LLM review is enabled")
   .option("--pr-description <text>", "PR description for scope-creep detection")
   .option("--quiet", "Only output the final report, no progress messages")
+  .option("--github-inline", "Post findings as inline PR comments on diff lines (requires GITHUB_TOKEN)")
   .action(async (opts) => {
     try {
       await runCliReview(opts);
@@ -150,6 +152,7 @@ async function runCliReview(opts: {
   llm?: boolean;
   prDescription?: string;
   quiet?: boolean;
+  githubInline?: boolean;
 }): Promise<void> {
   const progress: ProgressCallback = opts.quiet
     ? () => {}
@@ -188,6 +191,61 @@ async function runCliReview(opts: {
     const outputPath = path.resolve(opts.output);
     fs.writeFileSync(outputPath, result.json, "utf-8");
     console.error(`\n📄 JSON artifact written to ${outputPath}`);
+  }
+
+  // Post inline comments on PR diff lines if --github-inline
+  if (opts.githubInline) {
+    try {
+      let githubConfig: GitHubConfig | null = null;
+
+      // Try to auto-detect from GitHub Actions environment
+      githubConfig = await detectGitHubConfig();
+
+      // Fall back to explicit env vars
+      if (!githubConfig) {
+        const token = process.env.GITHUB_TOKEN ?? process.env.GH_TOKEN;
+        const repo = process.env.GITHUB_REPOSITORY;
+        const prNum = process.env.PR_NUMBER
+          ? parseInt(process.env.PR_NUMBER, 10)
+          : undefined;
+
+        if (token && repo && prNum && !isNaN(prNum)) {
+          githubConfig = {
+            token,
+            repository: repo,
+            pullNumber: prNum,
+            baseSha: result.context.baseSha,
+            headSha: result.context.headSha,
+          };
+        }
+      }
+
+      if (githubConfig) {
+        progress("Posting inline comments on PR...");
+        const summaryHeader = buildInlineSummaryHeader(result.artifact);
+        const reviewResult = await postInlineReview(githubConfig, result.artifact, summaryHeader);
+
+        if (reviewResult.posted) {
+          if (reviewResult.inlineCommentsCount > 0) {
+            progress(`  ✅ Posted ${reviewResult.inlineCommentsCount} inline comment(s) on PR #${githubConfig.pullNumber}`);
+          } else {
+            progress("  No inline-eligible findings (all findings lack file/line info)");
+          }
+          if (reviewResult.reviewUrl) {
+            progress(`  Review: ${reviewResult.reviewUrl}`);
+          }
+        } else {
+          progress(`  ⚠ Failed to post inline comments: ${reviewResult.error}`);
+          progress("  Falling back to summary comment only.");
+        }
+      } else {
+        progress("⚠ --github-inline specified but no GitHub environment detected.");
+        progress("  Set GITHUB_TOKEN and GITHUB_REPOSITORY (or run in GitHub Actions).");
+      }
+    } catch (err) {
+      progress(`⚠ Error posting inline comments: ${err instanceof Error ? err.message : String(err)}`);
+      // Don't fail the review — inline comments are a best-effort enhancement
+    }
   }
 
   // Exit code based on severity gate
