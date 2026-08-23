@@ -1,6 +1,6 @@
 {
   "name": "@flaught/core",
-  "version": "0.8.0",
+  "version": "0.8.1",
   "description": "Adversarial PR/code review tool — structured, skeptical scrutiny for CI",
   "main": "dist/index.js",
   "bin": {
@@ -52,7 +52,7 @@
     "type": "git",
     "url": "https://github.com/flaught/core.git"
   },
-  "homepage": "https://github.com/flaught/core#readme",
+  "homepage": "https://flaught.github.io",
   "bugs": {
     "url": "https://github.com/flaught/core/issues"
   },
