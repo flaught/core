@@ -4,6 +4,10 @@
 
 > Your PR's designated skeptic.
 
+![Flaught review demo](assets/flaught-demo.gif)
+
+*A deliberately flawed PR reviewed against `main`: a string-interpolated SQL query (critical, LLM-asserted), a scope-creep hunk in an unrelated file, and a vacuous test that passes on both sides of the change (caught by test inversion).*
+
 **The reviewer should not be the author.** A model reviewing code it wrote itself tends to agree with its own choices: same blind spots, same rationalizations. Flaught decouples the two. Point it at any LLM provider, independent of whatever wrote the code, and you get a genuinely adversarial second opinion instead of an echo.
 
 **Flaught** runs adversarial code review in CI: structured, skeptical scrutiny that produces a timestamped JSON artifact on every PR. Named after Monsignor Flaught, the devil's advocate in *A Canticle for Leibowitz*.
