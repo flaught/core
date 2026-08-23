@@ -665,6 +665,93 @@ export interface ReviewBundleJSON {
   deterministicFindings: DeterministicFinding[];
 }
 
+// ─── Untrusted-artifact guards (the privileged half treats the bundle as data
+//     from a potentially-malicious fork; bound CPU/memory against DoS) ───────
+
+const MAX_DIFF_BYTES = 16 * 1024 * 1024; // 16 MiB
+const MAX_FILE_CONTENT_BYTES = 16 * 1024 * 1024; // 16 MiB per file
+const MAX_TOTAL_CONTENT_BYTES = 64 * 1024 * 1024; // 64 MiB across all files
+const MAX_FILES = 5000;
+
+/**
+ * Load + validate a context bundle from disk. The bundle is untrusted data in
+ * the fork-PR split (a malicious fork controls the file contents that become
+ * changedFileContents), so this enforces shape + size caps before the
+ * privileged half spends CPU rebuilding the dependency graph or handing the
+ * contents to the LLM. Throws a clear error on any violation.
+ */
+function loadReviewBundle(contextPath: string): ReviewBundleJSON {
+  let raw: string;
+  try {
+    raw = fs.readFileSync(contextPath, "utf-8");
+  } catch (err) {
+    throw new Error(`Could not read context artifact at ${contextPath}: ${err instanceof Error ? err.message : String(err)}`);
+  }
+  let json: unknown;
+  try {
+    json = JSON.parse(raw);
+  } catch (err) {
+    throw new Error(`Context artifact at ${contextPath} is not valid JSON: ${err instanceof Error ? err.message : String(err)}`);
+  }
+  return validateReviewBundle(json, contextPath);
+}
+
+function validateReviewBundle(json: unknown, source: string): ReviewBundleJSON {
+  if (typeof json !== "object" || json === null) {
+    throw new Error(`Context artifact at ${source} is not an object.`);
+  }
+  const b = json as Record<string, unknown>;
+  if (typeof b.context !== "object" || b.context === null) {
+    throw new Error(`Context artifact at ${source} is missing the 'context' object.`);
+  }
+  if (!Array.isArray(b.deterministicFindings)) {
+    throw new Error(`Context artifact at ${source}: 'deterministicFindings' is not an array.`);
+  }
+
+  const c = b.context as Record<string, unknown>;
+  if (typeof c.diff !== "string") {
+    throw new Error(`Context artifact at ${source}: 'context.diff' is not a string.`);
+  }
+  if (Buffer.byteLength(c.diff) > MAX_DIFF_BYTES) {
+    throw new Error(`Context artifact at ${source}: diff exceeds ${MAX_DIFF_BYTES} bytes (possible DoS); rejected.`);
+  }
+  if (!Array.isArray(c.changedFiles) || !Array.isArray(c.neighborhoodFiles)) {
+    throw new Error(`Context artifact at ${source}: 'context.changedFiles'/'neighborhoodFiles' must be arrays.`);
+  }
+  if (typeof c.changedFileContents !== "object" || c.changedFileContents === null ||
+      typeof c.neighborhoodFileContents !== "object" || c.neighborhoodFileContents === null) {
+    throw new Error(`Context artifact at ${source}: 'context.*FileContents' must be objects.`);
+  }
+  if (typeof c.baseSha !== "string" || typeof c.headSha !== "string" || typeof c.repoRoot !== "string") {
+    throw new Error(`Context artifact at ${source}: 'context.baseSha'/'headSha'/'repoRoot' must be strings.`);
+  }
+  if (typeof c.dependencyGraph !== "object" || c.dependencyGraph === null) {
+    throw new Error(`Context artifact at ${source}: 'context.dependencyGraph' must be an object.`);
+  }
+
+  const changedEntries = Object.entries(c.changedFileContents);
+  const neighEntries = Object.entries(c.neighborhoodFileContents);
+  if (changedEntries.length + neighEntries.length > MAX_FILES) {
+    throw new Error(`Context artifact at ${source}: exceeds ${MAX_FILES} files (possible DoS); rejected.`);
+  }
+  let total = 0;
+  for (const [k, v] of [...changedEntries, ...neighEntries]) {
+    if (typeof v !== "string") {
+      throw new Error(`Context artifact at ${source}: file content for '${String(k)}' is not a string.`);
+    }
+    const size = Buffer.byteLength(v);
+    if (size > MAX_FILE_CONTENT_BYTES) {
+      throw new Error(`Context artifact at ${source}: file '${String(k)}' exceeds ${MAX_FILE_CONTENT_BYTES} bytes; rejected.`);
+    }
+    total += size;
+  }
+  if (total > MAX_TOTAL_CONTENT_BYTES) {
+    throw new Error(`Context artifact at ${source}: total file contents exceed ${MAX_TOTAL_CONTENT_BYTES} bytes (possible DoS); rejected.`);
+  }
+
+  return { context: c as unknown as ReviewContextJSON, deterministicFindings: b.deterministicFindings as DeterministicFinding[] };
+}
+
 // ─── --only-llm: the privileged half of the fork-PR split ─────────────────────
 
 export interface OnlyLlmOptions {
@@ -697,13 +784,11 @@ export async function runReviewOnlyLlm(options: OnlyLlmOptions): Promise<ReviewR
   const startTime = Date.now();
 
   // 1. Load the context bundle (context + raw deterministic findings) as data.
+  //    Validated + size-capped by loadReviewBundle: the bundle is untrusted in
+  //    the fork-PR model (a malicious fork controls the file contents), so we
+  //    bound CPU/memory before rebuilding the dependency graph or calling the LLM.
   progress("Loading review context artifact...");
-  let bundle: ReviewBundleJSON;
-  try {
-    bundle = JSON.parse(fs.readFileSync(options.contextPath, "utf-8")) as ReviewBundleJSON;
-  } catch (err) {
-    throw new Error(`Could not read context artifact at ${options.contextPath}: ${err instanceof Error ? err.message : String(err)}`);
-  }
+  const bundle = loadReviewBundle(options.contextPath);
   const context = contextFromJSON(bundle.context);
 
   // 2. Load the partial findings artifact (deterministic + test-inversion, un-budgeted).

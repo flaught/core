@@ -362,6 +362,27 @@ export function contextToJSON(ctx: ReviewContext): ReviewContextJSON {
  * (the file contents) and avoids drift if the serialized edges were stale.
  */
 export function contextFromJSON(json: ReviewContextJSON): ReviewContext {
+  // Light shape guard so malformed artifacts fail with a clear message instead
+  // of a cryptic Object.entries(undefined). The privileged half of the
+  // fork-PR split must treat the artifact as untrusted data; runReviewOnlyLlm
+  // enforces size caps before calling this.
+  if (typeof json !== "object" || json === null) {
+    throw new Error("contextFromJSON: input is not an object");
+  }
+  const j = json as unknown as Record<string, unknown>;
+  if (
+    typeof j.diff !== "string" ||
+    !Array.isArray(j.changedFiles) ||
+    !Array.isArray(j.neighborhoodFiles) ||
+    typeof j.changedFileContents !== "object" || j.changedFileContents === null ||
+    typeof j.neighborhoodFileContents !== "object" || j.neighborhoodFileContents === null ||
+    typeof j.baseSha !== "string" ||
+    typeof j.headSha !== "string" ||
+    typeof j.repoRoot !== "string"
+  ) {
+    throw new Error("contextFromJSON: artifact is missing required ReviewContext fields");
+  }
+
   const changedFileContents = new Map(Object.entries(json.changedFileContents));
   const neighborhoodFileContents = new Map(Object.entries(json.neighborhoodFileContents));
 

@@ -744,3 +744,45 @@ describe("runReviewOnlyLlm (context-artifact split)", () => {
     expect(result.markdown).toContain("LLM adversarial review failed");
   }, 30_000);
 });
+
+// ─── runReviewOnlyLlm: untrusted-artifact validation (core-8fz hardening) ────
+
+describe("runReviewOnlyLlm (untrusted-artifact guards)", () => {
+  afterEach(() => {
+    cleanup();
+    mockReview.mockReset();
+  });
+
+  it("rejects a bundle missing the context object", async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "flaught-bundle-"));
+    tempDirs.push(dir);
+    const bundlePath = path.join(dir, "context.json");
+    const findingsPath = path.join(dir, "findings.json");
+    fs.writeFileSync(bundlePath, JSON.stringify({ deterministicFindings: [] }), "utf-8");
+    fs.writeFileSync(findingsPath, JSON.stringify({ findings: [], summary: { total_findings: 0, by_severity: {}, by_source_type: { deterministic: 0, llm: 0 }, by_category: {}, dismissed_count: 0 }, run: { id: "x", ci_url: null, duration_seconds: 0, llm_error: null } }), "utf-8");
+
+    await expect(runReviewOnlyLlm({ contextPath: bundlePath, findingsPath, skipRefute: true }))
+      .rejects.toThrow(/missing the 'context' object/);
+  }, 10_000);
+
+  it("rejects an oversized diff (DoS bound)", async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "flaught-bigdiff-"));
+    tempDirs.push(dir);
+    const bundlePath = path.join(dir, "context.json");
+    const findingsPath = path.join(dir, "findings.json");
+    const hugeDiff = "x".repeat(17 * 1024 * 1024); // > 16 MiB cap
+    fs.writeFileSync(bundlePath, JSON.stringify({
+      context: {
+        diff: hugeDiff, changedFiles: [], neighborhoodFiles: [],
+        changedFileContents: {}, neighborhoodFileContents: {},
+        dependencyGraph: { forwardDeps: {}, reverseDeps: {} },
+        baseSha: "a", headSha: "b", repoRoot: "/tmp",
+      },
+      deterministicFindings: [],
+    }), "utf-8");
+    fs.writeFileSync(findingsPath, JSON.stringify({ findings: [], summary: { total_findings: 0, by_severity: {}, by_source_type: { deterministic: 0, llm: 0 }, by_category: {}, dismissed_count: 0 }, run: { id: "x", ci_url: null, duration_seconds: 0, llm_error: null } }), "utf-8");
+
+    await expect(runReviewOnlyLlm({ contextPath: bundlePath, findingsPath, skipRefute: true }))
+      .rejects.toThrow(/diff exceeds/);
+  }, 10_000);
+});

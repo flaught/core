@@ -339,3 +339,23 @@ describe("contextToJSON", () => {
     );
   });
 });
+describe("contextFromJSON (malformed input)", () => {
+  const valid = {
+    diff: "", changedFiles: [], neighborhoodFiles: [],
+    changedFileContents: {}, neighborhoodFileContents: {},
+    dependencyGraph: { forwardDeps: {}, reverseDeps: {} },
+    baseSha: "a", headSha: "b", repoRoot: "/tmp",
+  };
+
+  it("throws on a non-object", () => {
+    expect(() => contextFromJSON(null as unknown as typeof valid)).toThrow("not an object");
+    expect(() => contextFromJSON("x" as unknown as typeof valid)).toThrow("not an object");
+  });
+
+  it("throws when required fields are missing or wrong-typed", () => {
+    expect(() => contextFromJSON({ ...valid, diff: 123 } as unknown as typeof valid)).toThrow("missing required ReviewContext fields");
+    expect(() => contextFromJSON({ ...valid, changedFiles: "nope" } as unknown as typeof valid)).toThrow("missing required ReviewContext fields");
+    expect(() => contextFromJSON({ ...valid, baseSha: null } as unknown as typeof valid)).toThrow("missing required ReviewContext fields");
+    expect(() => contextFromJSON({ ...valid, changedFileContents: null } as unknown as typeof valid)).toThrow("missing required ReviewContext fields");
+  });
+});
