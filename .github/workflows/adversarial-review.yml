@@ -1,14 +1,30 @@
-# Flaught — Adversarial Review
+# Flaught — Adversarial Review (unprivileged, runs the fork's code)
 #
 # Dogfooding: runs Flaught against every PR to this repo.
 # Builds from the branch source (npm link) so that PRs which change
 # Flaught's own review/dismissal/test-inversion/refute logic are
 # reflected in their own CI run.
 #
-# The review comment is posted to the PR; the JSON artifact is uploaded
-# for trend tracking. Exit code 1 (findings exceed severity gate) blocks merge.
-# Exit code 2 (config/API/LLM error) does NOT block merge — it's a tool
-# fault, not evidence of a real code problem; it only warns.
+# This workflow runs the untrusted PR code in a sandbox with a read-only
+# token and NO access to repository secrets (the GitHub default for
+# pull_request events from forks). It produces three artifacts and
+# exits: findings.json (the JSON artifact, uploaded as flaught-findings
+# for trend tracking), and review-body.md + pr-number.txt (uploaded as
+# flaught-review-comment for the comment job to post).
+#
+# Posting the comment is deliberately NOT done here. For a fork PR the
+# GITHUB_TOKEN is read-only and repository secrets are withheld, so
+# `gh pr comment` fails with "Resource not accessible by integration
+# (addComment)". The comment is posted by the privileged companion
+# workflow adversarial-review-comment.yml, triggered on this workflow's
+# completion via `workflow_run` — which runs in the base-repo context
+# with a write-capable token, and crucially never checks out or
+# executes the fork's code (pwn-request prevention).
+#
+# Exit code 1 (findings exceed severity gate) blocks merge (handled by
+# the Check severity gate step below). Exit code 2 (config/API/LLM
+# error) does NOT block merge — it's a tool fault, not evidence of a
+# real code problem; it only warns.
 
 name: Adversarial Review
 
@@ -19,17 +35,17 @@ jobs:
   review:
     runs-on: ubuntu-latest
     permissions:
-      pull-requests: write
+      pull-requests: write   # for --github-inline on same-repo PRs (fork PRs get read-only regardless)
       contents: read
 
     steps:
-      # actions/checkout@v4.2.2 — pinned to commit SHA for supply-chain integrity
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      # actions/checkout@v7.0.1 — pinned to commit SHA for supply-chain integrity
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
 
-      # actions/setup-node@v4.4.0 — pinned to commit SHA for supply-chain integrity
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+      # actions/setup-node@v6.5.0 — pinned to commit SHA for supply-chain integrity
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6.5.0
         with:
           node-version: 24
 
@@ -61,6 +77,9 @@ jobs:
           PR_BASE_REF: ${{ github.base_ref }}
           PR_TITLE: ${{ github.event.pull_request.title }}
         # Shell-injection-safe: all GitHub expressions passed via env vars, not interpolated inline
+        # set +e / explicit exit 0: this step's own pass/fail no longer gates the job — the two
+        # Check steps below branch on exit_code so exit 1 (findings) and exit 2 (tool/LLM error)
+        # are handled differently instead of alike.
         run: |
           set +e
           flaught review \
@@ -75,38 +94,59 @@ jobs:
           # Always exit 0 — we check the exit code in later steps
           exit 0
 
-      # actions/upload-artifact@v4.6.2 — pinned to commit SHA for supply-chain integrity
+      - name: Render review comment body
+        id: render
+        if: always()
+        env:
+          PR_BASE_REF: ${{ github.base_ref }}
+          PR_TITLE: ${{ github.event.pull_request.title }}
+        # Re-runs with --no-llm deliberately: the full run above already spent the LLM budget
+        # writing findings.json; this second pass only renders the markdown comment body from
+        # the deterministic/test-inversion/scope-creep findings (the uploaded findings.json is
+        # the source of truth for LLM findings). Redirected to a file for the comment job to post.
+        run: |
+          if [ -f findings.json ]; then
+            set +e
+            if ! flaught review \
+              --base "origin/${PR_BASE_REF}" \
+              --head HEAD \
+              --no-llm \
+              --pr-description "${PR_TITLE}" \
+              --quiet > review-body.md 2>/dev/null \
+              || [ ! -s review-body.md ]; then
+              echo "Review could not be rendered." > review-body.md
+            fi
+          else
+            echo "⚠️ Flaught review failed to produce findings. Check the workflow logs for details." > review-body.md
+          fi
+
+      - name: Save PR metadata
+        if: always()
+        env:
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        # Written to the workspace root (not a subdir) so the comment workflow's
+        # download-artifact lands it at comment/pr-number.txt with no nesting.
+        run: |
+          printf '%s\n' "$PR_NUMBER" > pr-number.txt
+
+      # actions/upload-artifact@v7.0.1 — pinned to commit SHA for supply-chain integrity
       - name: Upload findings artifact
         if: always()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: flaught-findings
           path: findings.json
           retention-days: 90
 
-      - name: Comment on PR
+      - name: Upload review comment artifact
         if: always()
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          GITHUB_REPOSITORY: ${{ github.repository }}
-          PR_BASE_REF: ${{ github.base_ref }}
-          PR_NUMBER: ${{ github.event.pull_request.number }}
-          PR_TITLE: ${{ github.event.pull_request.title }}
-        # Shell-injection-safe: all GitHub expressions passed via env vars
-        run: |
-          if [ -f findings.json ]; then
-            BODY=$(flaught review \
-              --base "origin/${PR_BASE_REF}" \
-              --head HEAD \
-              --no-llm \
-              --pr-description "${PR_TITLE}" \
-              --quiet 2>/dev/null || echo "Review could not be rendered.")
-            echo "$BODY" | gh pr comment "${PR_NUMBER}" --body-file -
-          else
-            echo "⚠️ Flaught review failed to produce findings. Check the workflow logs for details." | \
-              gh pr comment "${PR_NUMBER}" --body-file -
-          fi
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: flaught-review-comment
+          path: |
+            review-body.md
+            pr-number.txt
+          retention-days: 14
 
       - name: Check severity gate
         if: steps.review.outputs.exit_code == '1'
