@@ -14,7 +14,7 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import * as os from "node:os";
 import { simpleGit, type SimpleGit } from "simple-git";
-import { assembleContext, contextToJSON } from "./assembler.js";
+import { assembleContext, contextToJSON, contextFromJSON } from "./assembler.js";
 
 // ─── Temp repo fixture ──────────────────────────────────────────────────────
 
@@ -290,5 +290,52 @@ describe("contextToJSON", () => {
     expect(json.dependencyGraph.forwardDeps["src/index.ts"]).toContain("src/util.ts");
     // reverseDeps: util.ts is depended on by index.ts
     expect(json.dependencyGraph.reverseDeps["src/util.ts"]).toContain("src/index.ts");
+  });
+
+  it("contextFromJSON round-trips a context artifact without a git checkout", async () => {
+    const { repoPath } = await createTempRepo();
+    const git = simpleGit(repoPath);
+
+    await commitFiles(git, {
+      "src/index.ts": "import { x } from './util';",
+      "src/util.ts": "export const x = 1;",
+    }, "initial");
+
+    await commitFiles(git, {
+      "src/util.ts": "export const x = 2;",
+    }, "modify util");
+
+    const context = await assembleContext({
+      repoPath,
+      baseRef: "HEAD~1",
+      headRef: "HEAD",
+    });
+
+    // Serialize -> JSON string -> deserialize (simulating artifact write + read)
+    const json = contextToJSON(context);
+    const wire = JSON.stringify(json);
+    const restored = contextFromJSON(JSON.parse(wire));
+
+    // Scalars
+    expect(restored.diff).toBe(context.diff);
+    expect(restored.baseSha).toBe(context.baseSha);
+    expect(restored.headSha).toBe(context.headSha);
+    expect(restored.repoRoot).toBe(context.repoRoot);
+    expect(restored.changedFiles).toEqual(context.changedFiles);
+    expect(restored.neighborhoodFiles).toEqual(context.neighborhoodFiles);
+
+    // Maps
+    expect(restored.changedFileContents).toEqual(context.changedFileContents);
+    expect(restored.neighborhoodFileContents).toEqual(context.neighborhoodFileContents);
+    expect(restored.changedFileContents instanceof Map).toBe(true);
+
+    // Rebuilt dependency graph is equivalent (re-derived from contents)
+    expect(restored.dependencyGraph.getAllFiles()).toEqual(context.dependencyGraph.getAllFiles());
+    expect(restored.dependencyGraph.getDependenciesOf("src/index.ts")).toEqual(
+      context.dependencyGraph.getDependenciesOf("src/index.ts"),
+    );
+    expect(restored.dependencyGraph.getDependentsOf(new Set(["src/util.ts"]))).toEqual(
+      context.dependencyGraph.getDependentsOf(new Set(["src/util.ts"])),
+    );
   });
 });

@@ -69,6 +69,7 @@ program
   .option("--json", "Output full context as JSON (for debugging/integration)")
   .option("--output <path>", "Write JSON artifact to file")
   .option("--no-llm", "Skip LLM review (context assembly only)")
+  .option("--emit-context <path>", "Write the serialized review context to a file (for `flaught review --only-llm`)")
   .option("--no-refute", "Skip the skeptic/refute pass even if LLM review is enabled")
   .option("--pr-description <text>", "PR description for scope-creep detection")
   .option("--quiet", "Only output the final report, no progress messages")
@@ -168,6 +169,7 @@ async function runCliReview(opts: {
   prDescription?: string;
   quiet?: boolean;
   githubInline?: boolean;
+  emitContext?: string;
 }): Promise<void> {
   const progress: ProgressCallback = opts.quiet
     ? () => {}
@@ -212,6 +214,16 @@ async function runCliReview(opts: {
     const outputPath = path.resolve(opts.output);
     fs.writeFileSync(outputPath, result.json, "utf-8");
     console.error(`\n📄 JSON artifact written to ${outputPath}`);
+  }
+
+  // Write the serialized review context to a file if requested. This is the
+  // artifact the privileged half of the fork-PR review split consumes via
+  // `flaught review --only-llm --context <path>` — it carries the diff and file
+  // contents as data, so the LLM pass can run later without a git checkout.
+  if (opts.emitContext) {
+    const contextPath = path.resolve(opts.emitContext);
+    fs.writeFileSync(contextPath, JSON.stringify(contextToJSON(result.context), null, 2), "utf-8");
+    console.error(`\n📦 Review context written to ${contextPath}`);
   }
 
   // Post inline comments on PR diff lines if --github-inline
