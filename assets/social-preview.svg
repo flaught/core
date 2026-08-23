@@ -1,0 +1,64 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="640" viewBox="0 0 1280 640" font-family="Georgia, 'Times New Roman', serif">
+  <defs>
+    <radialGradient id="bg" cx="50%" cy="38%" r="75%">
+      <stop offset="0%" stop-color="#161b22"/>
+      <stop offset="100%" stop-color="#0a0c0f"/>
+    </radialGradient>
+    <linearGradient id="flow" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0%" stop-color="#3b4047" stop-opacity="0.0"/>
+      <stop offset="12%" stop-color="#d29922" stop-opacity="0.9"/>
+      <stop offset="88%" stop-color="#d29922" stop-opacity="0.9"/>
+      <stop offset="100%" stop-color="#3b4047" stop-opacity="0.0"/>
+    </linearGradient>
+  </defs>
+
+  <rect width="1280" height="640" fill="url(#bg)"/>
+
+  <!-- subtle baseline rule -->
+  <rect x="0" y="638" width="1280" height="2" fill="#1c2230"/>
+
+  <!-- title -->
+  <text x="120" y="252" font-size="148" font-weight="bold" fill="#e6edf3" letter-spacing="2">Flaught</text>
+
+  <!-- accent under title -->
+  <rect x="124" y="282" width="120" height="3" fill="#d29922"/>
+
+  <!-- tagline -->
+  <text x="124" y="336" font-size="40" fill="#9aa4b2" letter-spacing="0.5">Your PR&#8217;s designated skeptic.</text>
+
+  <!-- honest caveat -->
+  <text x="124" y="384" font-size="22" fill="#6b7280" font-style="italic">Evidence that scrutiny occurred &#8212; not that findings are correct.</text>
+
+  <!-- pipeline nod -->
+  <g font-family="Georgia, serif" font-size="20" fill="#8b949e">
+    <line x1="120" y1="498" x2="1160" y2="498" stroke="url(#flow)" stroke-width="2"/>
+    <!-- nodes -->
+    <g>
+      <circle cx="180" cy="498" r="7" fill="#d29922"/>
+      <text x="180" y="536" text-anchor="middle">Config</text>
+    </g>
+    <g>
+      <circle cx="360" cy="498" r="7" fill="#7d8590"/>
+      <text x="360" y="536" text-anchor="middle">Context</text>
+    </g>
+    <g>
+      <circle cx="540" cy="498" r="7" fill="#7d8590"/>
+      <text x="540" y="536" text-anchor="middle">Deterministic</text>
+    </g>
+    <g>
+      <circle cx="740" cy="498" r="7" fill="#7d8590"/>
+      <text x="740" y="536" text-anchor="middle">LLM pass</text>
+    </g>
+    <g>
+      <circle cx="930" cy="498" r="7" fill="#7d8590"/>
+      <text x="930" y="536" text-anchor="middle">Test inversion</text>
+    </g>
+    <g>
+      <circle cx="1110" cy="498" r="7" fill="#7d8590"/>
+      <text x="1110" y="536" text-anchor="middle">Scope-creep</text>
+    </g>
+  </g>
+
+  <!-- corner mark: devil's advocate -->
+  <text x="1160" y="120" font-size="22" fill="#3b4047" text-anchor="end" font-style="italic">advocatus diaboli</text>
+</svg>
