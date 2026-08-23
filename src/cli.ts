@@ -7,6 +7,8 @@
  *   flaught review --json                   # output context as JSON (stage 1 only)
  *   flaught review --base main --head feat  # specify refs
  *   flaught review --no-llm                 # skip LLM, context assembly only
+ *   flaught review --no-llm --emit-context ctx.json --output f.json  # unprivileged half (fork-PR split)
+ *   flaught review --only-llm --context ctx.json --findings f.json   # privileged half (fork-PR split)
  *   flaught init                            # scaffold .advreview.yml
  */
 

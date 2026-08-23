@@ -7,24 +7,29 @@
 #
 # This workflow runs the untrusted PR code in a sandbox with a read-only
 # token and NO access to repository secrets (the GitHub default for
-# pull_request events from forks). It produces three artifacts and
-# exits: findings.json (the JSON artifact, uploaded as flaught-findings
-# for trend tracking), and review-body.md + pr-number.txt (uploaded as
-# flaught-review-comment for the comment job to post).
+# pull_request events from forks).
 #
-# Posting the comment is deliberately NOT done here. For a fork PR the
-# GITHUB_TOKEN is read-only and repository secrets are withheld, so
-# `gh pr comment` fails with "Resource not accessible by integration
-# (addComment)". The comment is posted by the privileged companion
-# workflow adversarial-review-comment.yml, triggered on this workflow's
-# completion via `workflow_run` — which runs in the base-repo context
-# with a write-capable token, and crucially never checks out or
-# executes the fork's code (pwn-request prevention).
+# Two paths, selected by whether GROQ_API_KEY is available (same-repo PRs
+# have it; fork PRs do not):
 #
-# Exit code 1 (findings exceed severity gate) blocks merge (handled by
-# the Check severity gate step below). Exit code 2 (config/API/LLM
-# error) does NOT block merge — it's a tool fault, not evidence of a
-# real code problem; it only warns.
+#   same-repo PR (key present):
+#     Run the FULL review here — LLM + refute + --github-inline — and
+#     render the comment body. The privileged workflow_run just posts it.
+#     (The fork's code runs only in this sandboxed, no-secret job, and
+#     only for same-repo PRs is the token write-capable for inline comments.)
+#
+#   fork PR (key absent):
+#     Run --no-llm and EMIT a context bundle (context.json) alongside the
+#     deterministic findings.json. The LLM pass can't run here (no secret),
+#     so it runs in the privileged adversarial-review-comment.yml via
+#     `flaught review --only-llm --context context.json` — which loads the
+#     diff as DATA (never checking out the fork's code) and calls the LLM
+#     with the secret key. See core-8fz.
+#
+# Exit code 1 (findings exceed severity gate) blocks merge here (the
+# Check severity gate step). For fork PRs this gates on deterministic
+# findings; LLM findings are posted as an advisory comment by the
+# privileged half (not a blocking check — a known v1 limitation).
 
 name: Adversarial Review
 
@@ -76,34 +81,48 @@ jobs:
           PR_NUMBER: ${{ github.event.pull_request.number }}
           PR_BASE_REF: ${{ github.base_ref }}
           PR_TITLE: ${{ github.event.pull_request.title }}
-        # Shell-injection-safe: all GitHub expressions passed via env vars, not interpolated inline
-        # set +e / explicit exit 0: this step's own pass/fail no longer gates the job — the two
-        # Check steps below branch on exit_code so exit 1 (findings) and exit 2 (tool/LLM error)
-        # are handled differently instead of alike.
+        # Shell-injection-safe: all GitHub expressions passed via env vars, not interpolated inline.
+        # set +e / explicit exit 0: the step's own pass/fail no longer gates the job — the two Check
+        # steps below branch on exit_code so exit 1 (findings) and exit 2 (tool/LLM error) differ.
+        #
+        # Two paths: if the GROQ key is present (same-repo PR) run the full LLM review inline;
+        # if absent (fork PR) run --no-llm and EMIT a context bundle for the privileged half to
+        # run the LLM pass against (core-8fz fork-PR split).
         run: |
           set +e
-          flaught review \
-            --base "origin/${PR_BASE_REF}" \
-            --head HEAD \
-            --output findings.json \
-            --pr-description "${PR_TITLE}" \
-            --github-inline \
-            --quiet
+          if [ -n "$GROQ_API_KEY" ]; then
+            flaught review \
+              --base "origin/${PR_BASE_REF}" \
+              --head HEAD \
+              --output findings.json \
+              --pr-description "${PR_TITLE}" \
+              --github-inline \
+              --quiet
+          else
+            echo "No GROQ_API_KEY (fork PR) — running deterministic-only and emitting a context bundle for the privileged LLM half."
+            flaught review \
+              --no-llm \
+              --emit-context context.json \
+              --base "origin/${PR_BASE_REF}" \
+              --head HEAD \
+              --output findings.json \
+              --pr-description "${PR_TITLE}" \
+              --quiet
+          fi
           EXIT_CODE=$?
           echo "exit_code=$EXIT_CODE" >> "$GITHUB_OUTPUT"
+          if [ -f context.json ]; then echo "split=true" >> "$GITHUB_OUTPUT"; else echo "split=false" >> "$GITHUB_OUTPUT"; fi
           # Always exit 0 — we check the exit code in later steps
           exit 0
 
-      - name: Render review comment body
-        id: render
-        if: always()
+      - name: Render review comment body (same-repo path only)
+        if: always() && steps.review.outputs.split != 'true'
         env:
           PR_BASE_REF: ${{ github.base_ref }}
           PR_TITLE: ${{ github.event.pull_request.title }}
-        # Re-runs with --no-llm deliberately: the full run above already spent the LLM budget
-        # writing findings.json; this second pass only renders the markdown comment body from
-        # the deterministic/test-inversion/scope-creep findings (the uploaded findings.json is
-        # the source of truth for LLM findings). Redirected to a file for the comment job to post.
+        # Only for same-repo PRs: the full review above already wrote findings.json (with LLM
+        # findings). This re-runs --no-llm to render the markdown comment body. For fork PRs the
+        # comment body is rendered by the privileged half (which has the LLM findings).
         run: |
           if [ -f findings.json ]; then
             set +e
@@ -124,8 +143,6 @@ jobs:
         if: always()
         env:
           PR_NUMBER: ${{ github.event.pull_request.number }}
-        # Written to the workspace root (not a subdir) so the comment workflow's
-        # download-artifact lands it at comment/pr-number.txt with no nesting.
         run: |
           printf '%s\n' "$PR_NUMBER" > pr-number.txt
 
@@ -137,16 +154,33 @@ jobs:
           name: flaught-findings
           path: findings.json
           retention-days: 90
+          if-no-files-found: warn
 
-      - name: Upload review comment artifact
+      - name: Upload PR metadata
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: flaught-review-comment
-          path: |
-            review-body.md
-            pr-number.txt
+          name: flaught-pr-meta
+          path: pr-number.txt
           retention-days: 14
+          if-no-files-found: warn
+
+      - name: Upload context bundle (fork-PR split)
+        if: always() && steps.review.outputs.split == 'true'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: flaught-context
+          path: context.json
+          retention-days: 14
+
+      - name: Upload rendered comment (same-repo path)
+        if: always() && steps.review.outputs.split != 'true'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: flaught-review-comment
+          path: review-body.md
+          retention-days: 14
+          if-no-files-found: warn
 
       - name: Check severity gate
         if: steps.review.outputs.exit_code == '1'

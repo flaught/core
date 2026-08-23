@@ -190,12 +190,21 @@ This is by design, not a Flaught bug. For `pull_request` events from forks, GitH
 
 The fix is the canonical **two-workflow (pwn-request prevention) pattern**: an unprivileged `pull_request` workflow runs the review on the fork's code (read-only token, no secrets) and uploads the rendered comment body + PR number as artifacts, then a privileged `workflow_run` workflow — which runs in the base-repo context with a write-capable token and access to secrets — downloads those artifacts and posts the comment. The privileged workflow **never checks out or executes the fork's code**; it only forwards data.
 
-This repo dogfoods exactly that split:
+This repo dogfoods exactly that split, **extended so fork PRs also get the LLM adversarial pass** (not just the comment):
 
-- [`.github/workflows/adversarial-review.yml`](https://github.com/flaught/core/blob/main/.github/workflows/adversarial-review.yml) — unprivileged `pull_request`: runs the review, renders `review-body.md`, uploads `flaught-findings` + `flaught-review-comment` artifacts, and enforces the severity gate (exit 1 blocks merge).
-- [`.github/workflows/adversarial-review-comment.yml`](https://github.com/flaught/core/blob/main/.github/workflows/adversarial-review-comment.yml) — privileged `workflow_run`: downloads `flaught-review-comment` from the triggering run and posts it with `gh pr comment` using the write-capable `GITHUB_TOKEN`.
+- [`.github/workflows/adversarial-review.yml`](https://github.com/flaught/core/blob/main/.github/workflows/adversarial-review.yml) — unprivileged `pull_request`. Two paths selected by whether `GROQ_API_KEY` is present: **same-repo PR** runs the full LLM review inline + renders the comment; **fork PR** (no secret) runs `flaught review --no-llm --emit-context context.json --output findings.json` — deterministic only, plus a **context bundle** (the diff + file contents as data). Enforces the severity gate (exit 1 blocks merge) on the findings it has.
+- [`.github/workflows/adversarial-review-comment.yml`](https://github.com/flaught/core/blob/main/.github/workflows/adversarial-review-comment.yml) — privileged `workflow_run` (write token + secrets, base-repo context). For a fork PR it **checks out the trusted `main` branch** (never the fork), builds Flaught, and runs `flaught review --only-llm --context context.json --findings findings.json` — the LLM + refute pass runs against the diff carried as **data** on the bundle, with `GROQ_API_KEY` used only as the `Authorization:` header (never shown to the LLM). The rendered markdown becomes the comment. For a same-repo PR it just posts the pre-rendered comment body.
 
-If your repo accepts fork PRs and you want the review comment to land on them, copy both files. The single-workflow examples above remain correct for repos that only take same-repo PRs.
+**Security invariant:** the secret is used to *call* the LLM, never *shown* to it. The only untrusted input the LLM sees is the diff text, so a malicious fork can't exfiltrate the key via prompt injection — worst case is comment-content social-engineering (text on a PR). The privileged workflow never checks out or executes the fork's code.
+
+**v1 limitation:** for fork PRs the severity gate blocks only on *deterministic* findings (the LLM findings land after the gate, as an advisory comment). Tightening this to a blocking check is future work.
+
+#### The CLI flags behind the split
+
+- `flaught review --no-llm --emit-context <path> --output <path>` — the unprivileged half: assemble context + run deterministic tools, then write the context bundle (`context.json` = diff + file contents + raw deterministic findings) and the partial findings artifact. Pairs `--no-llm` with `--emit-context`.
+- `flaught review --only-llm --context <path> --findings <path> --output <path>` — the privileged half: load the context bundle + partial findings as data, run the LLM + refute pass, finalize (scope-creep enforcement, dismissals, noise budget), and write the final artifact. Zero repo/checkout access beyond a trusted base-branch checkout for `.advreview.yml` and the dismissal store.
+
+If your repo accepts fork PRs and you want the review comment (and, with the split, the LLM review) to land on them, copy both workflow files. The single-workflow examples above remain correct for repos that only take same-repo PRs.
 
 ### Using OpenAI, Claude, or another provider instead of Groq
 
