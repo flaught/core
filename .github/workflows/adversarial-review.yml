@@ -124,9 +124,10 @@ jobs:
         if: always()
         env:
           PR_NUMBER: ${{ github.event.pull_request.number }}
+        # Written to the workspace root (not a subdir) so the comment workflow's
+        # download-artifact lands it at comment/pr-number.txt with no nesting.
         run: |
-          mkdir -p pr-meta
-          printf '%s\n' "$PR_NUMBER" > pr-meta/pr-number.txt
+          printf '%s\n' "$PR_NUMBER" > pr-number.txt
 
       # actions/upload-artifact@v4.6.2 — pinned to commit SHA for supply-chain integrity
       - name: Upload findings artifact
@@ -144,7 +145,7 @@ jobs:
           name: flaught-review-comment
           path: |
             review-body.md
-            pr-meta/pr-number.txt
+            pr-number.txt
           retention-days: 14
 
       - name: Check severity gate
