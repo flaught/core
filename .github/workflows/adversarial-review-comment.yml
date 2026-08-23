@@ -1,0 +1,69 @@
+# Flaught — Adversarial Review (privileged comment poster)
+#
+# Companion to adversarial-review.yml. Triggered by `workflow_run` when
+# the unprivileged review workflow completes, this job downloads the
+# review-body.md + pr-number.txt artifacts it produced and posts them as
+# a PR comment.
+#
+# Why this is a separate workflow (pwn-request prevention):
+#   On pull_request events from forks, GitHub restricts GITHUB_TOKEN to
+#   read-only and withholds repository secrets, so the review workflow
+#   cannot call `gh pr comment` (it fails with "Resource not accessible
+#   by integration (addComment)"). `workflow_run` runs in the base-repo
+#   context with a write-capable token and access to secrets, so the
+#   comment posts here.
+#
+#   Security rule: this privileged workflow NEVER checks out or executes
+#   the fork's code. It only downloads data artifacts (rendered markdown +
+#   PR number) from the trusted review run and forwards them to the PR.
+#   Downloaded artifacts are treated as untrusted data (stringified into
+#   a file and posted as-is), never executed.
+
+name: Adversarial Review (post comment)
+
+on:
+  workflow_run:
+    workflows: ["Adversarial Review"]
+    types: [completed]
+
+jobs:
+  comment:
+    runs-on: ubuntu-latest
+    if: github.event.workflow_run.conclusion != 'cancelled'
+    permissions:
+      pull-requests: write   # post the review comment
+      actions: read           # download artifacts from the triggering run
+      contents: read
+
+    steps:
+      # actions/download-artifact@v4.3.0 — pinned to commit SHA for supply-chain integrity.
+      # Downloads from the workflow run that triggered this one (run-id from the
+      # workflow_run event payload), not the current run.
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: flaught-review-comment
+          run-id: ${{ github.event.workflow_run.id }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          path: comment
+
+      - name: Post review comment
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+        # pr-number.txt and review-body.md are untrusted data from the review run
+        # (themselves derived from attacker-controlled PR metadata). They are read
+        # into variables and passed to gh as a body-file / argument — never
+        # evaluated as shell. PR_NUMBER is validated as a positive integer before
+        # use as a defensive measure.
+        run: |
+          if [ ! -f comment/pr-number.txt ] || [ ! -f comment/review-body.md ]; then
+            echo "No review-comment artifact present (review may not have produced one). Nothing to post."
+            exit 0
+          fi
+          PR_NUMBER="$(cat comment/pr-number.txt | tr -d '[:space:]')"
+          if ! printf '%s' "$PR_NUMBER" | grep -Eq '^[0-9]+$'; then
+            echo "::error::Refusing to post: pr-number.txt did not contain a valid integer (got: '$PR_NUMBER')"
+            exit 1
+          fi
+          echo "Posting review comment to PR #$PR_NUMBER"
+          gh pr comment "$PR_NUMBER" --body-file comment/review-body.md
