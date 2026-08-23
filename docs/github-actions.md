@@ -178,6 +178,25 @@ Add `GROQ_API_KEY` to your repository secrets (Settings → Secrets and variable
 
 **Note on the "Comment on PR" step:** it re-runs `flaught review` a second time to get markdown for the comment body, since `--output` only writes the JSON artifact — there's no "render markdown from an existing artifact" command yet. That second run uses `--no-llm` deliberately: running it *without* `--no-llm` would call the LLM API a second time per PR (doubling cost/latency) just to reproduce a report. The tradeoff is that the posted comment only reflects deterministic/test-inversion/scope-creep findings, not the LLM pass — the uploaded `findings.json` artifact from the first (full) run is the source of truth for LLM findings.
 
+### Comments on fork PRs need a second workflow
+
+The single-workflow examples above post the comment from the same `pull_request` job that runs the review. That works for PRs from branches **in the same repo**, but **breaks for PRs from forks** with:
+
+```
+GraphQL: Resource not accessible by integration (addComment)
+```
+
+This is by design, not a Flaught bug. For `pull_request` events from forks, GitHub restricts the auto-generated `GITHUB_TOKEN` to **read-only** and **withholds repository secrets** — so `pull-requests: write` in the `permissions:` block does not grant comment access, and a PAT or App token stored as a secret would be empty there too (secrets are not passed to fork-PR workflows at all). The review itself runs fine and produces `findings.json`; only the comment step fails.
+
+The fix is the canonical **two-workflow (pwn-request prevention) pattern**: an unprivileged `pull_request` workflow runs the review on the fork's code (read-only token, no secrets) and uploads the rendered comment body + PR number as artifacts, then a privileged `workflow_run` workflow — which runs in the base-repo context with a write-capable token and access to secrets — downloads those artifacts and posts the comment. The privileged workflow **never checks out or executes the fork's code**; it only forwards data.
+
+This repo dogfoods exactly that split:
+
+- [`.github/workflows/adversarial-review.yml`](https://github.com/flaught/core/blob/main/.github/workflows/adversarial-review.yml) — unprivileged `pull_request`: runs the review, renders `review-body.md`, uploads `flaught-findings` + `flaught-review-comment` artifacts, and enforces the severity gate (exit 1 blocks merge).
+- [`.github/workflows/adversarial-review-comment.yml`](https://github.com/flaught/core/blob/main/.github/workflows/adversarial-review-comment.yml) — privileged `workflow_run`: downloads `flaught-review-comment` from the triggering run and posts it with `gh pr comment` using the write-capable `GITHUB_TOKEN`.
+
+If your repo accepts fork PRs and you want the review comment to land on them, copy both files. The single-workflow examples above remain correct for repos that only take same-repo PRs.
+
 ### Using OpenAI, Claude, or another provider instead of Groq
 
 Set `provider`/`model`/`api_key_env` in `.advreview.yml` for whichever provider you want (see [Configuration](configuration.md#llm-providers) for the full list), then swap the secret in the step above. For example, Claude:
