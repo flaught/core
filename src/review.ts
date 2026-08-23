@@ -12,7 +12,7 @@ import { loadConfig } from "./config.js";
 import type { FlaughtConfig } from "./schemas/config.js";
 import { createProvider, type LLMReviewResult } from "./llm/provider.js";
 import { buildSystemPrompt, buildUserPrompt } from "./llm/prompt.js";
-import { loadTemplates } from "./prompt/templates.js";
+import { loadTemplates, type PromptTemplates } from "./prompt/templates.js";
 import {
   type FindingsArtifact,
   type Finding,
@@ -248,124 +248,25 @@ export async function runReview(options: ReviewOptions = {}): Promise<ReviewResu
   } else if (context.changedFiles.length === 0) {
     progress("No changes to review — skipping LLM call.");
   } else {
-    // Pre-flight: validate that the configured model exists on the provider
-    progress("Validating model liveness...");
-    try {
-      const liveness = await validateModelLiveness(config);
-      progress(`  Model ${liveness.provider}/${liveness.model} is available`);
-    } catch (err) {
-      if (err instanceof ModelNotFoundError) {
-        progress(`  ⚠ Model not found: ${err.model}`);
-        // Re-throw with the clear message — this is a hard stop, not a warning
-        throw err;
-      }
-      // Liveness check failures (network, etc.) are warnings, not hard stops
-      progress(`  ⚠ Could not validate model liveness: ${err instanceof Error ? err.message : String(err)}`);
-      progress(`  Continuing — if the model is also unavailable, the review call will fail with a clear error.`);
-    }
-
-    const provider = createProvider(config);
-    const systemPrompt = buildSystemPrompt(config, templates);
-    const activeDismissals = dismissalStore ? getActiveDismissals(dismissalStore) : [];
-    const userPrompt = buildUserPrompt(context, config, options.prDescription, templates, activeDismissals);
-
-    // Inject deterministic tool findings into the prompt
-    const toolContext = formatToolFindingsForPrompt(deterministicFindings);
-
-    // Inject scope-creep heuristic findings into the prompt (pre-computed before LLM call)
-    const scopeCreepContext = formatScopeCreepForPrompt(
-      scopeCreepHeuristic.length > 0
-        ? { pr_intent: options.prDescription ?? "No PR description provided", flagged_hunks: scopeCreepHeuristic }
-        : null,
-    );
-
-    // Tell the LLM up front which paths are exempt from scope-creep scoring
-    // (e.g. an ADR accompanying the change it documents) — filterExcludedScopeCreep
-    // below is the enforcement backstop if it ignores this.
-    const scopeCreepExclusionsContext = formatScopeCreepExclusionsForPrompt(config.scope_creep.exclude_paths);
-
-    let fullUserPrompt = userPrompt;
-    if (toolContext) {
-      fullUserPrompt = `${fullUserPrompt}\n\n---\n\n${toolContext}`;
-    }
-    if (scopeCreepContext) {
-      fullUserPrompt = `${fullUserPrompt}\n\n---\n\n${scopeCreepContext}`;
-    }
-    if (scopeCreepExclusionsContext) {
-      fullUserPrompt = `${fullUserPrompt}\n\n---\n\n${scopeCreepExclusionsContext}`;
-    }
-
-    const promptChars = systemPrompt.length + fullUserPrompt.length;
-    const promptTokensEst = Math.round(promptChars / 4);
-    progress(`Running adversarial review with ${config.llm.provider}/${config.llm.model}...`);
-    progress(`  Prompt size: ~${promptTokensEst.toLocaleString()} tokens (${promptChars.toLocaleString()} chars)`);
-    if (deterministicFindings.length > 0) {
-      progress(`  Grounding with ${deterministicFindings.length} deterministic tool findings`);
-    }
-
-    // ── LLM review + refute pass ──
-    // If the LLM call fails, we gracefully degrade: still write the artifact
-    // with deterministic findings and error details, but no LLM findings.
-    try {
-      llmResult = await provider.review(systemPrompt, fullUserPrompt);
-      findings.push(...llmResult.findings);
-
-      if (llmResult.usage) {
-        progress(`  Token usage: ${llmResult.usage.prompt_tokens.toLocaleString()} prompt + ${llmResult.usage.completion_tokens.toLocaleString()} completion = ${llmResult.usage.total_tokens.toLocaleString()} total`);
-      }
-
-      progress(`  LLM found ${llmResult.findings.length} findings`);
-    } catch (err) {
-      llmError = err instanceof Error ? err.message : String(err);
-      progress(`  ⚠ LLM review failed: ${llmError}`);
-      progress(`  Continuing with deterministic findings only.`);
-      llmResult = null;
-    }
-
-    // ── Refute pass: the skeptic challenges each LLM finding ──
-    // Only run if the LLM succeeded and produced findings.
-    // Deterministic findings are ground truth — they don't get refuted.
-    if (llmError) {
-      progress("Skipping refute pass — LLM review failed.");
-    } else {
-      const llmFindingsForRefute = findings.filter((f) => f.source_type === "llm");
-      if (options.skipRefute) {
-        progress("Refute pass skipped (--no-refute).");
-        // Set refute_result to null for all LLM findings (no skeptic evaluation)
-        findings = findings.map((f) =>
-          f.source_type === "llm" ? { ...f, refute_result: null } : f,
-        );
-      } else if (config.refute.enabled && llmFindingsForRefute.length > 0) {
-        // If the skeptic call itself fails (400, timeout, etc.), keep the
-        // findings from the LLM pass that already succeeded rather than
-        // losing the whole review — just leave them un-refuted.
-        try {
-          const refuteResult = await runRefutePass(
-            findings,
-            context,
-            config,
-            templates,
-            progress,
-          );
-          findings = refuteResult.findings;
-          progress(`  Refute model: ${refuteResult.model}`);
-          if (refuteResult.usage) {
-            progress(`  Refute tokens: ${refuteResult.usage.prompt_tokens.toLocaleString()} prompt + ${refuteResult.usage.completion_tokens.toLocaleString()} completion = ${refuteResult.usage.total_tokens.toLocaleString()} total`);
-          }
-        } catch (err) {
-          llmError = `Refute (skeptic) pass failed: ${err instanceof Error ? err.message : String(err)}`;
-          progress(`  ⚠ ${llmError}`);
-          progress(`  Continuing with un-refuted LLM findings.`);
-          findings = findings.map((f) =>
-            f.source_type === "llm" ? { ...f, refute_result: null } : f,
-          );
-        }
-      } else if (!config.refute.enabled) {
-        progress("Refute pass disabled in config — skipping skeptic.");
-      } else {
-        progress("No LLM findings to refute — skipping skeptic pass.");
-      }
-    }
+    // LLM adversarial review + refute/skeptic pass. Extracted into runLlmStage
+    // so the same code path backs both the live-checkout review and the
+    // artifact-driven `flaught review --only-llm` half of the fork-PR split
+    // (core-8fz): the LLM pass only needs the assembled context + deterministic
+    // findings, never the git checkout itself.
+    const llmStage = await runLlmStage({
+      context,
+      deterministicFindings,
+      scopeCreepHeuristic,
+      config,
+      templates,
+      dismissalStore,
+      prDescription: options.prDescription,
+      skipRefute: options.skipRefute,
+      onProgress: progress,
+    });
+    llmResult = llmStage.llmResult;
+    llmError = llmStage.llmError;
+    findings.push(...llmStage.llmFindings);
   }
 
   // 5. Test inversion
@@ -544,6 +445,175 @@ export async function runReview(options: ReviewOptions = {}): Promise<ReviewResu
     durationSeconds,
     llmError: llmError,
   };
+}
+
+// ─── LLM review + refute stage (decoupled from the checkout) ───────────────
+
+export interface LlmStageInput {
+  /** Assembled review context — from a live checkout OR a context artifact. */
+  context: ReviewContext;
+  /** Deterministic tool findings, to ground the LLM prompt. */
+  deterministicFindings: DeterministicFinding[];
+  /** Heuristic scope-creep hunks, injected into the prompt. */
+  scopeCreepHeuristic: FlaggedHunk[];
+  config: FlaughtConfig;
+  templates: PromptTemplates;
+  /** Dismissal store (for injecting active dismissals into the prompt). */
+  dismissalStore: DismissalStore | null;
+  /** PR title/body, the scope-creep intent anchor. */
+  prDescription?: string;
+  /** Skip the skeptic/refute pass even if LLM review succeeds. */
+  skipRefute?: boolean;
+  onProgress?: ProgressCallback;
+}
+
+export interface LlmStageResult {
+  /** LLM findings with refute_result applied (refuted, or null if skipped/failed). */
+  llmFindings: Finding[];
+  /** Raw LLM review result, or null if the call failed. */
+  llmResult: LLMReviewResult | null;
+  /** Error message if the LLM call or refute pass failed; null otherwise. */
+  llmError: string | null;
+}
+
+/**
+ * LLM adversarial review + refute/skeptic pass, decoupled from context assembly
+ * and the git checkout.
+ *
+ * This is the privileged half of the fork-PR review split (core-8fz): it takes
+ * an already-assembled `ReviewContext` (loaded from a context artifact by
+ * `flaught review --only-llm --context <path>`) plus the deterministic findings
+ * that ground the prompt, calls the LLM, and runs the skeptic pass. It never
+ * touches the repo — the diff and file contents arrive as DATA on `context`,
+ * so the fork's code is never executed in the privileged workflow.
+ *
+ * The same function backs the monolithic `flaught review` path, so both the
+ * live-checkout and artifact-driven reviews share one LLM+refute code path.
+ *
+ * Returns the LLM findings (refute_result applied) separately from any
+ * deterministic findings — the caller decides where to merge them.
+ */
+export async function runLlmStage(input: LlmStageInput): Promise<LlmStageResult> {
+  const progress = input.onProgress ?? noopProgress;
+  const { context, deterministicFindings, scopeCreepHeuristic, config, templates, dismissalStore, prDescription, skipRefute } = input;
+
+  // Pre-flight: validate that the configured model exists on the provider
+  progress("Validating model liveness...");
+  try {
+    const liveness = await validateModelLiveness(config);
+    progress(`  Model ${liveness.provider}/${liveness.model} is available`);
+  } catch (err) {
+    if (err instanceof ModelNotFoundError) {
+      progress(`  ⚠ Model not found: ${err.model}`);
+      // Re-throw with the clear message — this is a hard stop, not a warning
+      throw err;
+    }
+    // Liveness check failures (network, etc.) are warnings, not hard stops
+    progress(`  ⚠ Could not validate model liveness: ${err instanceof Error ? err.message : String(err)}`);
+    progress(`  Continuing — if the model is also unavailable, the review call will fail with a clear error.`);
+  }
+
+  const provider = createProvider(config);
+  const systemPrompt = buildSystemPrompt(config, templates);
+  const activeDismissals = dismissalStore ? getActiveDismissals(dismissalStore) : [];
+  const userPrompt = buildUserPrompt(context, config, prDescription, templates, activeDismissals);
+
+  // Inject deterministic tool findings into the prompt
+  const toolContext = formatToolFindingsForPrompt(deterministicFindings);
+
+  // Inject scope-creep heuristic findings into the prompt (pre-computed before LLM call)
+  const scopeCreepContext = formatScopeCreepForPrompt(
+    scopeCreepHeuristic.length > 0
+      ? { pr_intent: prDescription ?? "No PR description provided", flagged_hunks: scopeCreepHeuristic }
+      : null,
+  );
+
+  // Tell the LLM up front which paths are exempt from scope-creep scoring
+  // (e.g. an ADR accompanying the change it documents) — filterExcludedScopeCreep
+  // in the caller is the enforcement backstop if it ignores this.
+  const scopeCreepExclusionsContext = formatScopeCreepExclusionsForPrompt(config.scope_creep.exclude_paths);
+
+  let fullUserPrompt = userPrompt;
+  if (toolContext) {
+    fullUserPrompt = `${fullUserPrompt}\n\n---\n\n${toolContext}`;
+  }
+  if (scopeCreepContext) {
+    fullUserPrompt = `${fullUserPrompt}\n\n---\n\n${scopeCreepContext}`;
+  }
+  if (scopeCreepExclusionsContext) {
+    fullUserPrompt = `${fullUserPrompt}\n\n---\n\n${scopeCreepExclusionsContext}`;
+  }
+
+  const promptChars = systemPrompt.length + fullUserPrompt.length;
+  const promptTokensEst = Math.round(promptChars / 4);
+  progress(`Running adversarial review with ${config.llm.provider}/${config.llm.model}...`);
+  progress(`  Prompt size: ~${promptTokensEst.toLocaleString()} tokens (${promptChars.toLocaleString()} chars)`);
+  if (deterministicFindings.length > 0) {
+    progress(`  Grounding with ${deterministicFindings.length} deterministic tool findings`);
+  }
+
+  let llmResult: LLMReviewResult | null = null;
+  let llmError: string | null = null;
+  let llmFindings: Finding[] = [];
+
+  // ── LLM review ──
+  // If the LLM call fails, we gracefully degrade: return no LLM findings;
+  // the caller still has its deterministic findings to write the artifact.
+  try {
+    llmResult = await provider.review(systemPrompt, fullUserPrompt);
+    llmFindings = [...llmResult.findings];
+
+    if (llmResult.usage) {
+      progress(`  Token usage: ${llmResult.usage.prompt_tokens.toLocaleString()} prompt + ${llmResult.usage.completion_tokens.toLocaleString()} completion = ${llmResult.usage.total_tokens.toLocaleString()} total`);
+    }
+
+    progress(`  LLM found ${llmResult.findings.length} findings`);
+  } catch (err) {
+    llmError = err instanceof Error ? err.message : String(err);
+    progress(`  ⚠ LLM review failed: ${llmError}`);
+    progress(`  Continuing with deterministic findings only.`);
+    llmResult = null;
+  }
+
+  // ── Refute pass: the skeptic challenges each LLM finding ──
+  // Only run if the LLM succeeded and produced findings. The skeptic only ever
+  // touches LLM findings, so we pass just the LLM subset (deterministic findings
+  // are ground truth and stay with the caller).
+  if (llmError) {
+    progress("Skipping refute pass — LLM review failed.");
+  } else if (skipRefute) {
+    progress("Refute pass skipped (--no-refute).");
+    llmFindings = llmFindings.map((f) => ({ ...f, refute_result: null }));
+  } else if (config.refute.enabled && llmFindings.length > 0) {
+    // If the skeptic call itself fails (400, timeout, etc.), keep the findings
+    // from the LLM pass that already succeeded rather than losing them —
+    // just leave them un-refuted.
+    try {
+      const refuteResult = await runRefutePass(
+        llmFindings,
+        context,
+        config,
+        templates,
+        progress,
+      );
+      llmFindings = refuteResult.findings.filter((f) => f.source_type === "llm");
+      progress(`  Refute model: ${refuteResult.model}`);
+      if (refuteResult.usage) {
+        progress(`  Refute tokens: ${refuteResult.usage.prompt_tokens.toLocaleString()} prompt + ${refuteResult.usage.completion_tokens.toLocaleString()} completion = ${refuteResult.usage.total_tokens.toLocaleString()} total`);
+      }
+    } catch (err) {
+      llmError = `Refute (skeptic) pass failed: ${err instanceof Error ? err.message : String(err)}`;
+      progress(`  ⚠ ${llmError}`);
+      progress(`  Continuing with un-refuted LLM findings.`);
+      llmFindings = llmFindings.map((f) => ({ ...f, refute_result: null }));
+    }
+  } else if (!config.refute.enabled) {
+    progress("Refute pass disabled in config — skipping skeptic.");
+  } else {
+    progress("No LLM findings to refute — skipping skeptic pass.");
+  }
+
+  return { llmFindings, llmResult, llmError };
 }
 
 // ─── Noise budget enforcement ───────────────────────────────────────────────
