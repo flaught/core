@@ -6,7 +6,7 @@ Flaught runs deterministic tools (Semgrep, a linter, a vuln scanner) and an LLM 
 
 If you believe you have found a security issue in Flaught — for example, command injection through config, unsafe handling of untrusted LLM output, or a path-traversal or YAML-deserialization problem — **do not open a public issue.**
 
-Report it privately to **SECURITY_CONTACT_EMAIL** with:
+Report it privately to **dgabriel@gmail.com** with:
 
 - a description of the issue and its impact,
 - the minimal config or input that reproduces it,
