@@ -38,13 +38,16 @@ jobs:
     steps:
       # actions/download-artifact@v4.3.0 — pinned to commit SHA for supply-chain integrity.
       # Downloads from the workflow run that triggered this one (run-id from the
-      # workflow_run event payload), not the current run.
+      # workflow_run event payload), not the current run. continue-on-error so a
+      # review run that produced no artifact (e.g. a stale fork PR still on the
+      # old single-workflow file) degrades gracefully instead of failing the job.
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           name: flaught-review-comment
           run-id: ${{ github.event.workflow_run.id }}
           github-token: ${{ secrets.GITHUB_TOKEN }}
           path: comment
+        continue-on-error: true
 
       - name: Post review comment
         env:
