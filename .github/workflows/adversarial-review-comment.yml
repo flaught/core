@@ -1,23 +1,27 @@
-# Flaught — Adversarial Review (privileged comment poster)
+# Flaught — Adversarial Review (privileged: LLM pass on fork PRs + comment poster)
 #
-# Companion to adversarial-review.yml. Triggered by `workflow_run` when
-# the unprivileged review workflow completes, this job downloads the
-# review-body.md + pr-number.txt artifacts it produced and posts them as
-# a PR comment.
+# Companion to adversarial-review.yml. Triggered by `workflow_run` when the
+# unprivileged review workflow completes, this job runs in the BASE-REPO
+# context: write-capable token + access to secrets (GROQ_API_KEY). It does
+# one of two things depending on which artifact the unprivileged run uploaded:
 #
-# Why this is a separate workflow (pwn-request prevention):
-#   On pull_request events from forks, GitHub restricts GITHUB_TOKEN to
-#   read-only and withholds repository secrets, so the review workflow
-#   cannot call `gh pr comment` (it fails with "Resource not accessible
-#   by integration (addComment)"). `workflow_run` runs in the base-repo
-#   context with a write-capable token and access to secrets, so the
-#   comment posts here.
+#   fork PR (flaught-context bundle present):
+#     Check out the TRUSTED default branch (main) to build Flaught and read
+#     .advreview.yml, then run `flaught review --only-llm --context context.json
+#     --findings findings.json`. The LLM adversarial + refute pass runs against
+#     the diff carried as DATA on the context bundle — this workflow NEVER
+#     checks out or executes the fork's code (pwn-request prevention). The
+#     secret (GROQ_API_KEY) is used to CALL the LLM, never shown to it, so a
+#     malicious fork can't exfiltrate it via prompt injection. The rendered
+#     markdown becomes the PR comment.
 #
-#   Security rule: this privileged workflow NEVER checks out or executes
-#   the fork's code. It only downloads data artifacts (rendered markdown +
-#   PR number) from the trusted review run and forwards them to the PR.
-#   Downloaded artifacts are treated as untrusted data (stringified into
-#   a file and posted as-is), never executed.
+#   same-repo PR (flaught-review-comment present, no bundle):
+#     The unprivileged run already ran the full LLM review and rendered the
+#     comment body. Just post it.
+#
+# Both paths treat downloaded artifacts as UNTRUSTED DATA (the fork controls
+# the diff contents): pr-number.txt is validated as a positive integer before
+# use, and the comment body is posted as a body-file (never evaluated as shell).
 
 name: Adversarial Review (post comment)
 
@@ -39,9 +43,36 @@ jobs:
       # actions/download-artifact@v8.0.1 — pinned to commit SHA for supply-chain integrity.
       # Downloads from the workflow run that triggered this one (run-id from the
       # workflow_run event payload), not the current run. continue-on-error so a
-      # review run that produced no artifact (e.g. a stale fork PR still on the
-      # old single-workflow file) degrades gracefully instead of failing the job.
-      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+      # missing optional artifact degrades gracefully instead of failing the job.
+      - name: Download findings
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: flaught-findings
+          run-id: ${{ github.event.workflow_run.id }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          path: findings
+        continue-on-error: true
+
+      - name: Download PR metadata
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: flaught-pr-meta
+          run-id: ${{ github.event.workflow_run.id }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          path: prmeta
+        continue-on-error: true
+
+      - name: Download context bundle (fork-PR split)
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: flaught-context
+          run-id: ${{ github.event.workflow_run.id }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          path: ctx
+        continue-on-error: true
+
+      - name: Download rendered comment (same-repo path)
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: flaught-review-comment
           run-id: ${{ github.event.workflow_run.id }}
@@ -49,26 +80,111 @@ jobs:
           path: comment
         continue-on-error: true
 
+      - name: Select path
+        id: path
+        run: |
+          if [ -f ctx/context.json ]; then
+            echo "split=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "split=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      # ── Fork-PR path: run the LLM pass against the context bundle ──
+      # Check out the TRUSTED default branch (main) — workflow_run runs in the
+      # base-repo context, so the default ref is main (NOT the fork PR). This is
+      # safe: we never check out the fork's code, only trusted main, to build
+      # Flaught and read .advreview.yml + the dismissal store.
+      - name: Checkout main (trusted, for config + Flaught build)
+        if: steps.path.outputs.split == 'true'
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Setup Node
+        if: steps.path.outputs.split == 'true'
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6.5.0
+        with:
+          node-version: 24
+
+      - name: Build Flaught from main
+        if: steps.path.outputs.split == 'true'
+        run: |
+          npm ci
+          npm run build
+          npm link
+
+      - name: Install Semgrep
+        if: steps.path.outputs.split == 'true'
+        run: pip install semgrep
+
+      # The LLM adversarial + refute pass. The diff arrives as DATA on the
+      # context bundle; this step never touches the fork's checkout. GROQ_API_KEY
+      # is available here (workflow_run has secrets) and is used only as the
+      # Authorization header to call the LLM — never interpolated into the prompt.
+      - name: Run LLM pass against context bundle
+        if: steps.path.outputs.split == 'true'
+        env:
+          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+        run: |
+          set +e
+          flaught review \
+            --only-llm \
+            --context ctx/context.json \
+            --findings findings/findings.json \
+            --output findings/findings-final.json \
+            --config .advreview.yml \
+            --quiet > comment-body.md 2>/tmp/onlyllm-err.txt
+          # If the LLM pass itself rendered nothing (e.g. it crashed), fall back
+          # to a short message rather than posting an empty comment.
+          if [ ! -s comment-body.md ]; then
+            echo "⚠️ Flaught's LLM review could not be rendered. See the workflow logs for details." > comment-body.md
+          fi
+          # Surface the stderr (progress) for debugging.
+          if [ -s /tmp/onlyllm-err.txt ]; then
+            echo "--- --only-llm progress ---"
+            cat /tmp/onlyllm-err.txt
+          fi
+
+      - name: Upload final findings (fork-PR path, for trend tracking)
+        if: always() && steps.path.outputs.split == 'true'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: flaught-findings-final
+          path: findings/findings-final.json
+          retention-days: 90
+          if-no-files-found: warn
+
+      # ── Post the comment (both paths converge here) ──
       - name: Post review comment
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GITHUB_REPOSITORY: ${{ github.repository }}
-        # pr-number.txt and review-body.md are untrusted data from the review run
-        # (themselves derived from attacker-controlled PR metadata). They are read
-        # into variables and passed to gh as a body-file / argument — never
-        # evaluated as shell. PR_NUMBER is validated as a positive integer before
-        # use as a defensive measure.
+        # pr-number.txt is untrusted data (derived from PR metadata). Read into a
+        # var, validate as a positive integer, pass to gh as an argument — never
+        # evaluated as shell. The comment body is a body-file, posted as-is.
         run: |
-          if [ ! -f comment/pr-number.txt ] || [ ! -f comment/review-body.md ]; then
-            echo "No review-comment artifact present (review may not have produced one). Nothing to post."
+          if [ ! -f prmeta/pr-number.txt ]; then
+            echo "No PR metadata present (review may not have produced one). Nothing to post."
             exit 0
           fi
-          PR_NUMBER="$(cat comment/pr-number.txt | tr -d '[:space:]')"
+          PR_NUMBER="$(cat prmeta/pr-number.txt | tr -d '[:space:]')"
           if ! printf '%s' "$PR_NUMBER" | grep -Eq '^[0-9]+$'; then
             echo "::error::Refusing to post: pr-number.txt did not contain a valid integer (got: '$PR_NUMBER')"
             exit 1
           fi
+
+          # Fork path: the LLM pass wrote comment-body.md. Same-repo path: the
+          # unprivileged run rendered comment/review-body.md.
+          if [ -f comment-body.md ]; then
+            BODY="comment-body.md"
+          elif [ -f comment/review-body.md ]; then
+            BODY="comment/review-body.md"
+          else
+            echo "No comment body to post (neither comment-body.md nor comment/review-body.md present)."
+            exit 0
+          fi
+
           echo "Posting review comment to PR #$PR_NUMBER"
-          # --repo is required because this workflow never runs actions/checkout (pwn-request
-          # prevention), so there is no .git for gh to infer the repository from.
-          gh pr comment "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --body-file comment/review-body.md
+          # --repo is required because this workflow never checks out the reviewed
+          # PR's code; for the fork path it checks out main (trusted) but gh still
+          # needs the repo made explicit.
+          gh pr comment "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --body-file "$BODY"

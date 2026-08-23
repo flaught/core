@@ -347,6 +347,65 @@ export function contextToJSON(ctx: ReviewContext): ReviewContextJSON {
   };
 }
 
+/**
+ * Reconstruct a ReviewContext from its JSON-safe form.
+ *
+ * This is the inverse of contextToJSON and is what the privileged half of the
+ * fork-PR review split (`flaught review --only-llm --context <path>`) uses to
+ * load a context artifact produced by the unprivileged half — without a git
+ * checkout. The dependency graph is rebuilt from the serialized file contents
+ * (buildDependencyGraph re-parses imports), so the round-tripped context is
+ * equivalent to the original for LLM-prompt and refute-pass purposes.
+ *
+ * The serialized `dependencyGraph` field is deliberately not used to rebuild the
+ * graph object — re-deriving it from contents keeps a single source of truth
+ * (the file contents) and avoids drift if the serialized edges were stale.
+ */
+export function contextFromJSON(json: ReviewContextJSON): ReviewContext {
+  // Light shape guard so malformed artifacts fail with a clear message instead
+  // of a cryptic Object.entries(undefined). The privileged half of the
+  // fork-PR split must treat the artifact as untrusted data; runReviewOnlyLlm
+  // enforces size caps before calling this.
+  if (typeof json !== "object" || json === null) {
+    throw new Error("contextFromJSON: input is not an object");
+  }
+  const j = json as unknown as Record<string, unknown>;
+  if (
+    typeof j.diff !== "string" ||
+    !Array.isArray(j.changedFiles) ||
+    !Array.isArray(j.neighborhoodFiles) ||
+    typeof j.changedFileContents !== "object" || j.changedFileContents === null ||
+    typeof j.neighborhoodFileContents !== "object" || j.neighborhoodFileContents === null ||
+    typeof j.baseSha !== "string" ||
+    typeof j.headSha !== "string" ||
+    typeof j.repoRoot !== "string"
+  ) {
+    throw new Error("contextFromJSON: artifact is missing required ReviewContext fields");
+  }
+
+  const changedFileContents = new Map(Object.entries(json.changedFileContents));
+  const neighborhoodFileContents = new Map(Object.entries(json.neighborhoodFileContents));
+
+  // The graph covers every file in changed + neighborhood contents.
+  const allContents = new Map<string, string>();
+  for (const [k, v] of changedFileContents) allContents.set(k, v);
+  for (const [k, v] of neighborhoodFileContents) allContents.set(k, v);
+
+  const dependencyGraph = buildDependencyGraph(allContents);
+
+  return {
+    diff: json.diff,
+    changedFiles: json.changedFiles,
+    neighborhoodFiles: json.neighborhoodFiles,
+    changedFileContents,
+    neighborhoodFileContents,
+    dependencyGraph,
+    baseSha: json.baseSha,
+    headSha: json.headSha,
+    repoRoot: json.repoRoot,
+  };
+}
+
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 async function detectDefaultBranch(git: SimpleGit): Promise<string> {

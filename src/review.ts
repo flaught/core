@@ -7,12 +7,14 @@
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 const pkgVersion: string = require("../package.json").version;
 
-import { assembleContext, type ReviewContext, type ChangedFile } from "./context/assembler.js";
+import * as fs from "node:fs";
+import * as path from "node:path";
+import { assembleContext, contextFromJSON, type ReviewContext, type ReviewContextJSON, type ChangedFile } from "./context/assembler.js";
 import { loadConfig } from "./config.js";
 import type { FlaughtConfig } from "./schemas/config.js";
 import { createProvider, type LLMReviewResult } from "./llm/provider.js";
 import { buildSystemPrompt, buildUserPrompt } from "./llm/prompt.js";
-import { loadTemplates } from "./prompt/templates.js";
+import { loadTemplates, type PromptTemplates } from "./prompt/templates.js";
 import {
   type FindingsArtifact,
   type Finding,
@@ -71,6 +73,14 @@ export interface ReviewResult {
   durationSeconds: number;
   /** LLM error if the LLM call failed (review still completes with deterministic findings) */
   llmError: string | null;
+  /**
+   * Raw deterministic tool findings (pre-conversion). Populated so the
+   * `--emit-context` bundle can carry them for the privileged half's LLM
+   * grounding prompt (the converted Finding[] in the artifact loses the
+   * structured vuln fields formatToolFindingsForPrompt needs). Null when not
+   * applicable (e.g. --only-llm, which consumes rather than produces these).
+   */
+  deterministicFindings: DeterministicFinding[];
 }
 
 // ─── Run the full review ────────────────────────────────────────────────────
@@ -85,6 +95,14 @@ export interface ReviewOptions {
   skipLlm?: boolean;
   /** Skip the skeptic/refute pass even if LLM review is enabled */
   skipRefute?: boolean;
+  /**
+   * Emit a context bundle for the fork-PR review split (core-8fz): skip the
+   * noise budget so the partial findings artifact carries the FULL
+   * deterministic + test-inversion set (un-truncated) for the privileged
+   * `--only-llm` half to budget against the LLM findings. Used with --no-llm
+   * + --emit-context.
+   */
+  emitBundle?: boolean;
   /** Progress callback for logging */
   onProgress?: ProgressCallback;
 }
@@ -248,124 +266,25 @@ export async function runReview(options: ReviewOptions = {}): Promise<ReviewResu
   } else if (context.changedFiles.length === 0) {
     progress("No changes to review — skipping LLM call.");
   } else {
-    // Pre-flight: validate that the configured model exists on the provider
-    progress("Validating model liveness...");
-    try {
-      const liveness = await validateModelLiveness(config);
-      progress(`  Model ${liveness.provider}/${liveness.model} is available`);
-    } catch (err) {
-      if (err instanceof ModelNotFoundError) {
-        progress(`  ⚠ Model not found: ${err.model}`);
-        // Re-throw with the clear message — this is a hard stop, not a warning
-        throw err;
-      }
-      // Liveness check failures (network, etc.) are warnings, not hard stops
-      progress(`  ⚠ Could not validate model liveness: ${err instanceof Error ? err.message : String(err)}`);
-      progress(`  Continuing — if the model is also unavailable, the review call will fail with a clear error.`);
-    }
-
-    const provider = createProvider(config);
-    const systemPrompt = buildSystemPrompt(config, templates);
-    const activeDismissals = dismissalStore ? getActiveDismissals(dismissalStore) : [];
-    const userPrompt = buildUserPrompt(context, config, options.prDescription, templates, activeDismissals);
-
-    // Inject deterministic tool findings into the prompt
-    const toolContext = formatToolFindingsForPrompt(deterministicFindings);
-
-    // Inject scope-creep heuristic findings into the prompt (pre-computed before LLM call)
-    const scopeCreepContext = formatScopeCreepForPrompt(
-      scopeCreepHeuristic.length > 0
-        ? { pr_intent: options.prDescription ?? "No PR description provided", flagged_hunks: scopeCreepHeuristic }
-        : null,
-    );
-
-    // Tell the LLM up front which paths are exempt from scope-creep scoring
-    // (e.g. an ADR accompanying the change it documents) — filterExcludedScopeCreep
-    // below is the enforcement backstop if it ignores this.
-    const scopeCreepExclusionsContext = formatScopeCreepExclusionsForPrompt(config.scope_creep.exclude_paths);
-
-    let fullUserPrompt = userPrompt;
-    if (toolContext) {
-      fullUserPrompt = `${fullUserPrompt}\n\n---\n\n${toolContext}`;
-    }
-    if (scopeCreepContext) {
-      fullUserPrompt = `${fullUserPrompt}\n\n---\n\n${scopeCreepContext}`;
-    }
-    if (scopeCreepExclusionsContext) {
-      fullUserPrompt = `${fullUserPrompt}\n\n---\n\n${scopeCreepExclusionsContext}`;
-    }
-
-    const promptChars = systemPrompt.length + fullUserPrompt.length;
-    const promptTokensEst = Math.round(promptChars / 4);
-    progress(`Running adversarial review with ${config.llm.provider}/${config.llm.model}...`);
-    progress(`  Prompt size: ~${promptTokensEst.toLocaleString()} tokens (${promptChars.toLocaleString()} chars)`);
-    if (deterministicFindings.length > 0) {
-      progress(`  Grounding with ${deterministicFindings.length} deterministic tool findings`);
-    }
-
-    // ── LLM review + refute pass ──
-    // If the LLM call fails, we gracefully degrade: still write the artifact
-    // with deterministic findings and error details, but no LLM findings.
-    try {
-      llmResult = await provider.review(systemPrompt, fullUserPrompt);
-      findings.push(...llmResult.findings);
-
-      if (llmResult.usage) {
-        progress(`  Token usage: ${llmResult.usage.prompt_tokens.toLocaleString()} prompt + ${llmResult.usage.completion_tokens.toLocaleString()} completion = ${llmResult.usage.total_tokens.toLocaleString()} total`);
-      }
-
-      progress(`  LLM found ${llmResult.findings.length} findings`);
-    } catch (err) {
-      llmError = err instanceof Error ? err.message : String(err);
-      progress(`  ⚠ LLM review failed: ${llmError}`);
-      progress(`  Continuing with deterministic findings only.`);
-      llmResult = null;
-    }
-
-    // ── Refute pass: the skeptic challenges each LLM finding ──
-    // Only run if the LLM succeeded and produced findings.
-    // Deterministic findings are ground truth — they don't get refuted.
-    if (llmError) {
-      progress("Skipping refute pass — LLM review failed.");
-    } else {
-      const llmFindingsForRefute = findings.filter((f) => f.source_type === "llm");
-      if (options.skipRefute) {
-        progress("Refute pass skipped (--no-refute).");
-        // Set refute_result to null for all LLM findings (no skeptic evaluation)
-        findings = findings.map((f) =>
-          f.source_type === "llm" ? { ...f, refute_result: null } : f,
-        );
-      } else if (config.refute.enabled && llmFindingsForRefute.length > 0) {
-        // If the skeptic call itself fails (400, timeout, etc.), keep the
-        // findings from the LLM pass that already succeeded rather than
-        // losing the whole review — just leave them un-refuted.
-        try {
-          const refuteResult = await runRefutePass(
-            findings,
-            context,
-            config,
-            templates,
-            progress,
-          );
-          findings = refuteResult.findings;
-          progress(`  Refute model: ${refuteResult.model}`);
-          if (refuteResult.usage) {
-            progress(`  Refute tokens: ${refuteResult.usage.prompt_tokens.toLocaleString()} prompt + ${refuteResult.usage.completion_tokens.toLocaleString()} completion = ${refuteResult.usage.total_tokens.toLocaleString()} total`);
-          }
-        } catch (err) {
-          llmError = `Refute (skeptic) pass failed: ${err instanceof Error ? err.message : String(err)}`;
-          progress(`  ⚠ ${llmError}`);
-          progress(`  Continuing with un-refuted LLM findings.`);
-          findings = findings.map((f) =>
-            f.source_type === "llm" ? { ...f, refute_result: null } : f,
-          );
-        }
-      } else if (!config.refute.enabled) {
-        progress("Refute pass disabled in config — skipping skeptic.");
-      } else {
-        progress("No LLM findings to refute — skipping skeptic pass.");
-      }
-    }
+    // LLM adversarial review + refute/skeptic pass. Extracted into runLlmStage
+    // so the same code path backs both the live-checkout review and the
+    // artifact-driven `flaught review --only-llm` half of the fork-PR split
+    // (core-8fz): the LLM pass only needs the assembled context + deterministic
+    // findings, never the git checkout itself.
+    const llmStage = await runLlmStage({
+      context,
+      deterministicFindings,
+      scopeCreepHeuristic,
+      config,
+      templates,
+      dismissalStore,
+      prDescription: options.prDescription,
+      skipRefute: options.skipRefute,
+      onProgress: progress,
+    });
+    llmResult = llmStage.llmResult;
+    llmError = llmStage.llmError;
+    findings.push(...llmStage.llmFindings);
   }
 
   // 5. Test inversion
@@ -493,10 +412,19 @@ export async function runReview(options: ReviewOptions = {}): Promise<ReviewResu
     }
   }
 
-  // 7. Enforce noise budget
-  findings = enforceNoiseBudget(findings, config);
+  // 7. Enforce noise budget.
+  // Skipped in emitBundle mode (the unprivileged half of the fork-PR split):
+  // the partial findings artifact must carry the FULL deterministic +
+  // test-inversion set un-truncated, so the privileged --only-llm half can
+  // budget them against the LLM findings (matching the monolithic path, which
+  // budgets once on the complete set). Dismissals still apply (idempotent).
+  if (!options.emitBundle) {
+    findings = enforceNoiseBudget(findings, config);
+  } else {
+    progress("Skipping noise budget (emit-bundle mode) — the privileged half budgets the full set.");
+  }
 
-  if (findings.length > 0) {
+  if (!options.emitBundle && findings.length > 0) {
     progress(`  After noise budget: ${findings.length} findings`);
     const bySev: Record<string, number> = {};
     const bySource: Record<string, number> = {};
@@ -515,6 +443,11 @@ export async function runReview(options: ReviewOptions = {}): Promise<ReviewResu
   artifact.tools_executed = toolExecutions;
   artifact.test_inversion = testInversion;
   artifact.scope_creep = scopeCreepResult;
+
+  // Record the PR description on the artifact so the privileged half of the
+  // fork-PR split (--only-llm) can recover the scope-creep intent anchor from
+  // the partial findings artifact without a separate bundle field.
+  artifact.pull_request.description = options.prDescription ?? null;
 
   // Record LLM error in the artifact if the LLM call failed
   if (llmError) {
@@ -543,6 +476,451 @@ export async function runReview(options: ReviewOptions = {}): Promise<ReviewResu
     exitCode,
     durationSeconds,
     llmError: llmError,
+    deterministicFindings,
+  };
+}
+
+// ─── LLM review + refute stage (decoupled from the checkout) ───────────────
+
+export interface LlmStageInput {
+  /** Assembled review context — from a live checkout OR a context artifact. */
+  context: ReviewContext;
+  /** Deterministic tool findings, to ground the LLM prompt. */
+  deterministicFindings: DeterministicFinding[];
+  /** Heuristic scope-creep hunks, injected into the prompt. */
+  scopeCreepHeuristic: FlaggedHunk[];
+  config: FlaughtConfig;
+  templates: PromptTemplates;
+  /** Dismissal store (for injecting active dismissals into the prompt). */
+  dismissalStore: DismissalStore | null;
+  /** PR title/body, the scope-creep intent anchor. */
+  prDescription?: string;
+  /** Skip the skeptic/refute pass even if LLM review succeeds. */
+  skipRefute?: boolean;
+  onProgress?: ProgressCallback;
+}
+
+export interface LlmStageResult {
+  /** LLM findings with refute_result applied (refuted, or null if skipped/failed). */
+  llmFindings: Finding[];
+  /** Raw LLM review result, or null if the call failed. */
+  llmResult: LLMReviewResult | null;
+  /** Error message if the LLM call or refute pass failed; null otherwise. */
+  llmError: string | null;
+}
+
+/**
+ * LLM adversarial review + refute/skeptic pass, decoupled from context assembly
+ * and the git checkout.
+ *
+ * This is the privileged half of the fork-PR review split (core-8fz): it takes
+ * an already-assembled `ReviewContext` (loaded from a context artifact by
+ * `flaught review --only-llm --context <path>`) plus the deterministic findings
+ * that ground the prompt, calls the LLM, and runs the skeptic pass. It never
+ * touches the repo — the diff and file contents arrive as DATA on `context`,
+ * so the fork's code is never executed in the privileged workflow.
+ *
+ * The same function backs the monolithic `flaught review` path, so both the
+ * live-checkout and artifact-driven reviews share one LLM+refute code path.
+ *
+ * Returns the LLM findings (refute_result applied) separately from any
+ * deterministic findings — the caller decides where to merge them.
+ */
+export async function runLlmStage(input: LlmStageInput): Promise<LlmStageResult> {
+  const progress = input.onProgress ?? noopProgress;
+  const { context, deterministicFindings, scopeCreepHeuristic, config, templates, dismissalStore, prDescription, skipRefute } = input;
+
+  // Pre-flight: validate that the configured model exists on the provider
+  progress("Validating model liveness...");
+  try {
+    const liveness = await validateModelLiveness(config);
+    progress(`  Model ${liveness.provider}/${liveness.model} is available`);
+  } catch (err) {
+    if (err instanceof ModelNotFoundError) {
+      progress(`  ⚠ Model not found: ${err.model}`);
+      // Re-throw with the clear message — this is a hard stop, not a warning
+      throw err;
+    }
+    // Liveness check failures (network, etc.) are warnings, not hard stops
+    progress(`  ⚠ Could not validate model liveness: ${err instanceof Error ? err.message : String(err)}`);
+    progress(`  Continuing — if the model is also unavailable, the review call will fail with a clear error.`);
+  }
+
+  const provider = createProvider(config);
+  const systemPrompt = buildSystemPrompt(config, templates);
+  const activeDismissals = dismissalStore ? getActiveDismissals(dismissalStore) : [];
+  const userPrompt = buildUserPrompt(context, config, prDescription, templates, activeDismissals);
+
+  // Inject deterministic tool findings into the prompt
+  const toolContext = formatToolFindingsForPrompt(deterministicFindings);
+
+  // Inject scope-creep heuristic findings into the prompt (pre-computed before LLM call)
+  const scopeCreepContext = formatScopeCreepForPrompt(
+    scopeCreepHeuristic.length > 0
+      ? { pr_intent: prDescription ?? "No PR description provided", flagged_hunks: scopeCreepHeuristic }
+      : null,
+  );
+
+  // Tell the LLM up front which paths are exempt from scope-creep scoring
+  // (e.g. an ADR accompanying the change it documents) — filterExcludedScopeCreep
+  // in the caller is the enforcement backstop if it ignores this.
+  const scopeCreepExclusionsContext = formatScopeCreepExclusionsForPrompt(config.scope_creep.exclude_paths);
+
+  let fullUserPrompt = userPrompt;
+  if (toolContext) {
+    fullUserPrompt = `${fullUserPrompt}\n\n---\n\n${toolContext}`;
+  }
+  if (scopeCreepContext) {
+    fullUserPrompt = `${fullUserPrompt}\n\n---\n\n${scopeCreepContext}`;
+  }
+  if (scopeCreepExclusionsContext) {
+    fullUserPrompt = `${fullUserPrompt}\n\n---\n\n${scopeCreepExclusionsContext}`;
+  }
+
+  const promptChars = systemPrompt.length + fullUserPrompt.length;
+  const promptTokensEst = Math.round(promptChars / 4);
+  progress(`Running adversarial review with ${config.llm.provider}/${config.llm.model}...`);
+  progress(`  Prompt size: ~${promptTokensEst.toLocaleString()} tokens (${promptChars.toLocaleString()} chars)`);
+  if (deterministicFindings.length > 0) {
+    progress(`  Grounding with ${deterministicFindings.length} deterministic tool findings`);
+  }
+
+  let llmResult: LLMReviewResult | null = null;
+  let llmError: string | null = null;
+  let llmFindings: Finding[] = [];
+
+  // ── LLM review ──
+  // If the LLM call fails, we gracefully degrade: return no LLM findings;
+  // the caller still has its deterministic findings to write the artifact.
+  try {
+    llmResult = await provider.review(systemPrompt, fullUserPrompt);
+    llmFindings = [...llmResult.findings];
+
+    if (llmResult.usage) {
+      progress(`  Token usage: ${llmResult.usage.prompt_tokens.toLocaleString()} prompt + ${llmResult.usage.completion_tokens.toLocaleString()} completion = ${llmResult.usage.total_tokens.toLocaleString()} total`);
+    }
+
+    progress(`  LLM found ${llmResult.findings.length} findings`);
+  } catch (err) {
+    llmError = err instanceof Error ? err.message : String(err);
+    progress(`  ⚠ LLM review failed: ${llmError}`);
+    progress(`  Continuing with deterministic findings only.`);
+    llmResult = null;
+  }
+
+  // ── Refute pass: the skeptic challenges each LLM finding ──
+  // Only run if the LLM succeeded and produced findings. The skeptic only ever
+  // touches LLM findings, so we pass just the LLM subset (deterministic findings
+  // are ground truth and stay with the caller).
+  if (llmError) {
+    progress("Skipping refute pass — LLM review failed.");
+  } else if (skipRefute) {
+    progress("Refute pass skipped (--no-refute).");
+    llmFindings = llmFindings.map((f) => ({ ...f, refute_result: null }));
+  } else if (config.refute.enabled && llmFindings.length > 0) {
+    // If the skeptic call itself fails (400, timeout, etc.), keep the findings
+    // from the LLM pass that already succeeded rather than losing them —
+    // just leave them un-refuted.
+    try {
+      const refuteResult = await runRefutePass(
+        llmFindings,
+        context,
+        config,
+        templates,
+        progress,
+      );
+      llmFindings = refuteResult.findings.filter((f) => f.source_type === "llm");
+      progress(`  Refute model: ${refuteResult.model}`);
+      if (refuteResult.usage) {
+        progress(`  Refute tokens: ${refuteResult.usage.prompt_tokens.toLocaleString()} prompt + ${refuteResult.usage.completion_tokens.toLocaleString()} completion = ${refuteResult.usage.total_tokens.toLocaleString()} total`);
+      }
+    } catch (err) {
+      llmError = `Refute (skeptic) pass failed: ${err instanceof Error ? err.message : String(err)}`;
+      progress(`  ⚠ ${llmError}`);
+      progress(`  Continuing with un-refuted LLM findings.`);
+      llmFindings = llmFindings.map((f) => ({ ...f, refute_result: null }));
+    }
+  } else if (!config.refute.enabled) {
+    progress("Refute pass disabled in config — skipping skeptic.");
+  } else {
+    progress("No LLM findings to refute — skipping skeptic pass.");
+  }
+
+  return { llmFindings, llmResult, llmError };
+}
+
+// ─── Review bundle (context artifact for the fork-PR split) ──────────────────
+
+/**
+ * The artifact written by `flaught review --emit-context` and read by
+ * `flaught review --only-llm --context`. Carries the serialized review context
+ * (diff + file contents + dependency graph, as data) plus the RAW deterministic
+ * tool findings, so the privileged half can ground the LLM prompt without a
+ * git checkout. The converted Finding[] live in the separate findings.json
+ * artifact; only the raw DeterministicFinding[] (with structured vuln fields)
+ * need to ride along here, because formatToolFindingsForPrompt uses them.
+ */
+export interface ReviewBundleJSON {
+  context: ReviewContextJSON;
+  deterministicFindings: DeterministicFinding[];
+}
+
+// ─── Untrusted-artifact guards (the privileged half treats the bundle as data
+//     from a potentially-malicious fork; bound CPU/memory against DoS) ───────
+
+const MAX_DIFF_BYTES = 16 * 1024 * 1024; // 16 MiB
+const MAX_FILE_CONTENT_BYTES = 16 * 1024 * 1024; // 16 MiB per file
+const MAX_TOTAL_CONTENT_BYTES = 64 * 1024 * 1024; // 64 MiB across all files
+const MAX_FILES = 5000;
+
+/**
+ * Load + validate a context bundle from disk. The bundle is untrusted data in
+ * the fork-PR split (a malicious fork controls the file contents that become
+ * changedFileContents), so this enforces shape + size caps before the
+ * privileged half spends CPU rebuilding the dependency graph or handing the
+ * contents to the LLM. Throws a clear error on any violation.
+ */
+function loadReviewBundle(contextPath: string): ReviewBundleJSON {
+  let raw: string;
+  try {
+    raw = fs.readFileSync(contextPath, "utf-8");
+  } catch (err) {
+    throw new Error(`Could not read context artifact at ${contextPath}: ${err instanceof Error ? err.message : String(err)}`);
+  }
+  let json: unknown;
+  try {
+    json = JSON.parse(raw);
+  } catch (err) {
+    throw new Error(`Context artifact at ${contextPath} is not valid JSON: ${err instanceof Error ? err.message : String(err)}`);
+  }
+  return validateReviewBundle(json, contextPath);
+}
+
+function validateReviewBundle(json: unknown, source: string): ReviewBundleJSON {
+  if (typeof json !== "object" || json === null) {
+    throw new Error(`Context artifact at ${source} is not an object.`);
+  }
+  const b = json as Record<string, unknown>;
+  if (typeof b.context !== "object" || b.context === null) {
+    throw new Error(`Context artifact at ${source} is missing the 'context' object.`);
+  }
+  if (!Array.isArray(b.deterministicFindings)) {
+    throw new Error(`Context artifact at ${source}: 'deterministicFindings' is not an array.`);
+  }
+
+  const c = b.context as Record<string, unknown>;
+  if (typeof c.diff !== "string") {
+    throw new Error(`Context artifact at ${source}: 'context.diff' is not a string.`);
+  }
+  if (Buffer.byteLength(c.diff) > MAX_DIFF_BYTES) {
+    throw new Error(`Context artifact at ${source}: diff exceeds ${MAX_DIFF_BYTES} bytes (possible DoS); rejected.`);
+  }
+  if (!Array.isArray(c.changedFiles) || !Array.isArray(c.neighborhoodFiles)) {
+    throw new Error(`Context artifact at ${source}: 'context.changedFiles'/'neighborhoodFiles' must be arrays.`);
+  }
+  if (typeof c.changedFileContents !== "object" || c.changedFileContents === null ||
+      typeof c.neighborhoodFileContents !== "object" || c.neighborhoodFileContents === null) {
+    throw new Error(`Context artifact at ${source}: 'context.*FileContents' must be objects.`);
+  }
+  if (typeof c.baseSha !== "string" || typeof c.headSha !== "string" || typeof c.repoRoot !== "string") {
+    throw new Error(`Context artifact at ${source}: 'context.baseSha'/'headSha'/'repoRoot' must be strings.`);
+  }
+  if (typeof c.dependencyGraph !== "object" || c.dependencyGraph === null) {
+    throw new Error(`Context artifact at ${source}: 'context.dependencyGraph' must be an object.`);
+  }
+
+  const changedEntries = Object.entries(c.changedFileContents);
+  const neighEntries = Object.entries(c.neighborhoodFileContents);
+  if (changedEntries.length + neighEntries.length > MAX_FILES) {
+    throw new Error(`Context artifact at ${source}: exceeds ${MAX_FILES} files (possible DoS); rejected.`);
+  }
+  let total = 0;
+  for (const [k, v] of [...changedEntries, ...neighEntries]) {
+    if (typeof v !== "string") {
+      throw new Error(`Context artifact at ${source}: file content for '${String(k)}' is not a string.`);
+    }
+    const size = Buffer.byteLength(v);
+    if (size > MAX_FILE_CONTENT_BYTES) {
+      throw new Error(`Context artifact at ${source}: file '${String(k)}' exceeds ${MAX_FILE_CONTENT_BYTES} bytes; rejected.`);
+    }
+    total += size;
+  }
+  if (total > MAX_TOTAL_CONTENT_BYTES) {
+    throw new Error(`Context artifact at ${source}: total file contents exceed ${MAX_TOTAL_CONTENT_BYTES} bytes (possible DoS); rejected.`);
+  }
+
+  return { context: c as unknown as ReviewContextJSON, deterministicFindings: b.deterministicFindings as DeterministicFinding[] };
+}
+
+// ─── --only-llm: the privileged half of the fork-PR split ─────────────────────
+
+export interface OnlyLlmOptions {
+  /** Path to the context bundle written by `flaught review --emit-context`. */
+  contextPath: string;
+  /** Path to the partial findings artifact written by `flaught review --output`. */
+  findingsPath: string;
+  /** Path to .advreview.yml in the trusted (base-branch) checkout. */
+  configPath?: string;
+  /** Repository root of the trusted checkout (for config/dismissal-store/template resolution). */
+  repoPath?: string;
+  /** Skip the skeptic/refute pass even if LLM review succeeds. */
+  skipRefute?: boolean;
+  onProgress?: ProgressCallback;
+}
+
+/**
+ * Run ONLY the LLM adversarial review + refute pass against a context artifact,
+ * then finalize the findings (scope-creep enforcement, dismissals, noise budget)
+ * and render reports. This is the privileged half of the fork-PR review split
+ * (core-8fz): it reads the diff + file contents as DATA from the context bundle
+ * and never touches a git checkout of the fork's code. Config and the dismissal
+ * store come from a trusted base-branch checkout (repoPath), not the fork.
+ *
+ * Returns the same ReviewResult shape as runReview so the CLI handles both
+ * paths uniformly.
+ */
+export async function runReviewOnlyLlm(options: OnlyLlmOptions): Promise<ReviewResult> {
+  const progress = options.onProgress ?? noopProgress;
+  const startTime = Date.now();
+
+  // 1. Load the context bundle (context + raw deterministic findings) as data.
+  //    Validated + size-capped by loadReviewBundle: the bundle is untrusted in
+  //    the fork-PR model (a malicious fork controls the file contents), so we
+  //    bound CPU/memory before rebuilding the dependency graph or calling the LLM.
+  progress("Loading review context artifact...");
+  const bundle = loadReviewBundle(options.contextPath);
+  const context = contextFromJSON(bundle.context);
+
+  // 2. Load the partial findings artifact (deterministic + test-inversion, un-budgeted).
+  progress("Loading deterministic findings artifact...");
+  let partial: FindingsArtifact;
+  try {
+    partial = JSON.parse(fs.readFileSync(options.findingsPath, "utf-8")) as FindingsArtifact;
+  } catch (err) {
+    throw new Error(`Could not read findings artifact at ${options.findingsPath}: ${err instanceof Error ? err.message : String(err)}`);
+  }
+
+  // 3. Load config + dismissal store from the TRUSTED checkout (not the fork).
+  // repoPath defaults to cwd (the privileged workflow's main checkout).
+  const repoRoot = options.repoPath ? path.resolve(options.repoPath) : process.cwd();
+  progress("Loading config...");
+  const config = await loadConfig(options.configPath, repoRoot);
+  progress(`  Provider: ${config.llm.provider}/${config.llm.model}`);
+  const dismissalStore: DismissalStore | null = config.dismissals.enabled
+    ? loadDismissalStore(resolveDismissalsPath(repoRoot, config.dismissals.path))
+    : null;
+  const templates = loadTemplates(repoRoot, config);
+
+  // 4. Recover the inputs runLlmStage needs from the artifacts.
+  const deterministicFindings: DeterministicFinding[] = bundle.deterministicFindings ?? [];
+  const scopeCreepHeuristic: FlaggedHunk[] = partial.scope_creep?.flagged_hunks ?? [];
+  const prDescription = partial.pull_request?.description ?? undefined;
+
+  // 5. Start from the partial findings (deterministic + test-inversion).
+  let findings: Finding[] = [...partial.findings];
+
+  // 6. Run the LLM adversarial + refute pass (shared with the monolithic path).
+  const llmStage = await runLlmStage({
+    context,
+    deterministicFindings,
+    scopeCreepHeuristic,
+    config,
+    templates,
+    dismissalStore,
+    prDescription,
+    skipRefute: options.skipRefute,
+    onProgress: progress,
+  });
+
+  // 7. Merge the LLM findings into the deterministic/test-inversion set.
+  findings.push(...llmStage.llmFindings);
+
+  // 8. Scope-creep enforcement: strip any LLM scope-creep finding on an exempt path
+  //    (the heuristic backstop the LLM is told about up front but may ignore).
+  if (context.changedFiles.length > 0 && config.scope_creep.enabled && config.scope_creep.exclude_paths.length > 0) {
+    const before = findings.length;
+    findings = filterExcludedScopeCreep(findings, config.scope_creep.exclude_paths);
+    if (findings.length < before) {
+      progress(`  Filtered ${before - findings.length} scope-creep finding(s) on exempt path(s)`);
+    }
+  }
+
+  // 9. Merge LLM-detected scope creep into the scope-creep result (heuristic + LLM).
+  let scopeCreepResult: ScopeCreep | null = partial.scope_creep;
+  if (context.changedFiles.length > 0 && config.scope_creep.enabled) {
+    const llmScopeCreep = extractScopeCreepFromFindings(findings, prDescription);
+    const heuristicFiles = new Set(scopeCreepHeuristic.map((h) => h.file));
+    const allFlagged: FlaggedHunk[] = [...scopeCreepHeuristic];
+    if (llmScopeCreep) {
+      for (const hunk of llmScopeCreep.flagged_hunks) {
+        if (!heuristicFiles.has(hunk.file)) allFlagged.push(hunk);
+      }
+    }
+    scopeCreepResult = allFlagged.length > 0
+      ? { pr_intent: prDescription ?? "No PR description provided", flagged_hunks: allFlagged }
+      : null;
+  }
+
+  // 10. Apply persisted dismissals (fingerprint-matched) across the full set.
+  if (dismissalStore) {
+    const applied = applyDismissals(findings, dismissalStore);
+    findings = applied.findings;
+    if (applied.appliedCount > 0) {
+      progress(`  ${applied.appliedCount} finding(s) auto-dismissed via ${config.dismissals.path}`);
+    }
+  }
+
+  // 11. Enforce the noise budget on the COMPLETE set (deterministic + test-inversion + LLM),
+  //     matching the monolithic path. (The unprivileged half skipped this on purpose.)
+  findings = enforceNoiseBudget(findings, config);
+  if (findings.length > 0) {
+    progress(`  After noise budget: ${findings.length} findings`);
+  }
+
+  // 12. Re-id findings for a clean, collision-free artifact. The partial artifact
+  //     already assigned D-/F- ids to deterministic/test-inversion findings, and
+  //     the LLM provider assigned F- ids to its findings, so the merged set can
+  //     collide. Re-id by source_type (deterministic -> D-, llm -> F-); ids are
+  //     run-local display only — the fingerprint is the stable identity.
+  let dIdx = 0;
+  let fIdx = 0;
+  findings = findings.map((f) => ({
+    ...f,
+    id: f.source_type === "llm" ? `F-${String(++fIdx).padStart(4, "0")}` : `D-${String(++dIdx).padStart(4, "0")}`,
+  }));
+
+  // 13. Build the final artifact, carrying forward the partial's tool/test-inversion metadata.
+  progress("Building findings artifact...");
+  const artifact = buildArtifact(context, findings, config);
+  artifact.tools_executed = partial.tools_executed;
+  artifact.test_inversion = partial.test_inversion;
+  artifact.scope_creep = scopeCreepResult;
+  artifact.pull_request = partial.pull_request;
+  if (llmStage.llmError) {
+    artifact.run.llm_error = llmStage.llmError;
+  }
+
+  // 14. Render reports + exit code.
+  progress("Rendering reports...");
+  const markdown = renderMarkdownReport(artifact);
+  const json = renderJsonArtifact(artifact);
+  const exitCode = computeExitCode(artifact, config);
+
+  const durationSeconds = Math.round((Date.now() - startTime) / 1000);
+  artifact.run.duration_seconds = durationSeconds;
+  progress(`Done in ${durationSeconds}s.`);
+
+  return {
+    context,
+    llmResult: llmStage.llmResult,
+    toolResults: partial.tools_executed,
+    artifact,
+    markdown,
+    json,
+    exitCode,
+    durationSeconds,
+    llmError: llmStage.llmError,
+    deterministicFindings,
   };
 }
 
