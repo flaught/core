@@ -1,0 +1,36 @@
+name: Feature request
+description: Suggest a new capability or a change to existing behavior
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: What problem are you trying to solve?
+      description: The use case, not the solution. What can't you do today, or what is painful?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: What would help?
+      description: The behavior you'd like. Optional — if you only have the problem, leave it blank and we'll design together.
+    validations:
+      required: false
+  - type: dropdown
+    id: area
+    attributes:
+      label: Which part of Flaught?
+      options:
+        - Deterministic tools (Semgrep / linter / vuln scanner)
+        - LLM adversarial pass
+        - Refute / skeptic pass
+        - Test inversion
+        - Scope-creep detection
+        - Prompt templates
+        - LLM providers
+        - CLI / config
+        - GitHub Actions / CI
+        - Dashboard / trends
+        - Other
+    validations:
+      required: false

@@ -1,0 +1,46 @@
+name: Bug report
+description: Something Flaught does is wrong or surprising
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Tell us what happened. If Flaught produced a finding you think is wrong, say whether it is deterministic (Semgrep/linter/vuln) or LLM-asserted, and attach the relevant snippet from `findings.json` if you can.
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: A short, precise description of the behavior.
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: How to reproduce
+      description: The exact command and the smallest config/diff that triggers it.
+      placeholder: |
+        flaught review --base main --output findings.json
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Flaught version
+      placeholder: "flaught --version  (e.g. 0.8.0) or the git SHA"
+    validations:
+      required: true
+  - type: input
+    id: provider
+    attributes:
+      label: Provider / model
+      placeholder: "e.g. groq / openai/gpt-oss-20b, or --no-llm"
+    validations:
+      required: false
+  - type: textarea
+    id: artifact
+    attributes:
+      label: Relevant findings.json snippet
+      description: Optional. Paste the finding object, not the whole artifact.
+      render: json
+    validations:
+      required: false
