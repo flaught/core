@@ -69,4 +69,6 @@ jobs:
             exit 1
           fi
           echo "Posting review comment to PR #$PR_NUMBER"
-          gh pr comment "$PR_NUMBER" --body-file comment/review-body.md
+          # --repo is required because this workflow never runs actions/checkout (pwn-request
+          # prevention), so there is no .git for gh to infer the repository from.
+          gh pr comment "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --body-file comment/review-body.md
