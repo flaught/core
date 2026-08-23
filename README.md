@@ -109,7 +109,7 @@ You can also override the reviewer's posture, categories, severity definitions, 
 | ---- | ---------------------------------------- |
 | `0`  | Clean: no findings above severity gate  |
 | `1`  | Gated: findings exceed threshold        |
-| `2`  | Error: config/API/LLM problem — a tool fault, not a code problem. Recommended CI handling: warn, don't block merge. See [exit code handling](https://github.com/flaught/core/blob/main/docs/github-actions.md#exit-code-handling). |
+| `2`  | Error: invalid input or config/API/LLM problem — a tool fault, not a code problem. Recommended CI handling: warn, don't block merge. See [exit code handling](https://github.com/flaught/core/blob/main/docs/github-actions.md#exit-code-handling). |
 
 ## Trends dashboard
 
@@ -118,6 +118,11 @@ Each CI run's `findings.json` artifact is a snapshot. To see trends across runs,
 ```bash
 flaught dashboard --input ./ci-artifacts --output dashboard.html
 ```
+
+If the input tree contains no valid findings artifacts, the command exits with
+code `2` and does not create or overwrite the output file. The error names the
+resolved input directory and shows the `gh run download` command used to
+populate it.
 
 ## LLM providers: review with a different model than the one that wrote the code
 
