@@ -3,7 +3,8 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import * as os from "node:os";
 import { simpleGit, type SimpleGit } from "simple-git";
-import { runReview, isDocFile, isDocsOnlyDiff } from "./review.js";
+import { runReview, runReviewOnlyLlm, isDocFile, isDocsOnlyDiff } from "./review.js";
+import { contextToJSON } from "./context/assembler.js";
 import type { Finding } from "./schemas/findings.js";
 import { resolveDismissalsPath, loadDismissalStore, addDismissal, saveDismissalStore } from "./dismissals/store.js";
 
@@ -628,5 +629,118 @@ describe("runReview (LLM graceful degradation)", () => {
     const kept = result.artifact.findings.find((f) => f.id === "L-0001");
     expect(kept).toBeTruthy();
     expect(kept!.refute_result).toBeNull();
+  }, 30_000);
+});
+// ─── --only-llm: the privileged half of the fork-PR split (core-8fz) ──────────
+
+describe("runReviewOnlyLlm (context-artifact split)", () => {
+  const noLlmSideEffectsYml = [
+    "version: 1",
+    "test_inversion:",
+    "  enabled: false",
+    "scope_creep:",
+    "  enabled: false",
+    "tools:",
+    "  semgrep:",
+    "    enabled: false",
+    "  linter:",
+    "    enabled: false",
+    "  vuln_scanner:",
+    "    enabled: false",
+    "",
+  ].join("\n");
+
+  afterEach(() => {
+    cleanup();
+    mockReview.mockReset();
+  });
+
+  /** Produce the unprivileged half's outputs: a partial findings artifact + a context bundle. */
+  async function produceBundle(repoPath: string): Promise<{ bundlePath: string; findingsPath: string }> {
+    const partial = await runReview({
+      repoPath,
+      baseRef: "HEAD~1",
+      headRef: "HEAD",
+      configPath: path.join(repoPath, ".advreview.yml"),
+      skipLlm: true,
+      emitBundle: true,
+    });
+    const bundlePath = path.join(repoPath, "context.json");
+    const findingsPath = path.join(repoPath, "findings.json");
+    fs.writeFileSync(
+      bundlePath,
+      JSON.stringify({ context: contextToJSON(partial.context), deterministicFindings: partial.deterministicFindings }, null, 2),
+      "utf-8",
+    );
+    fs.writeFileSync(findingsPath, partial.json, "utf-8");
+    return { bundlePath, findingsPath };
+  }
+
+  it("runs the LLM pass against a context artifact and merges into the final artifact", async () => {
+    const repoPath = fs.mkdtempSync(path.join(os.tmpdir(), "flaught-onlyllm-"));
+    tempDirs.push(repoPath);
+    const git = simpleGit(repoPath);
+    await git.init(["--initial-branch=main"]);
+    await git.addConfig("user.email", "test@flaught.dev");
+    await git.addConfig("user.name", "Flaught Test");
+    await commitFiles(git, { ".advreview.yml": noLlmSideEffectsYml, "src/index.ts": "console.log('hello');" }, "initial");
+    await commitFiles(git, { "src/index.ts": "console.log('hello world');" }, "change");
+
+    const { bundlePath, findingsPath } = await produceBundle(repoPath);
+
+    const llmFinding: Finding = {
+      id: "L-0001", severity: "medium", category: "maintainability",
+      title: "Something worth flagging", description: "Because reasons.",
+      evidence: { file: "src/index.ts", line_start: 1, line_end: 1, snippet: "", blast_radius: [], rule_id: null },
+      source: "llm-review", source_type: "llm", confidence: 0.8, references: [],
+      fingerprint: "fp-1", dismissed: false, dismissed_by: null, dismissed_at: null, dismissal_reason: null, refute_result: null,
+    };
+    mockReview.mockResolvedValue({ findings: [llmFinding], raw: "{}" });
+
+    const result = await runReviewOnlyLlm({
+      contextPath: bundlePath,
+      findingsPath,
+      configPath: path.join(repoPath, ".advreview.yml"),
+      repoPath,
+      skipRefute: true,
+    });
+
+    expect(result.llmResult).not.toBeNull();
+    expect(result.llmError).toBeNull();
+    const llmKept = result.artifact.findings.find((f) => f.source_type === "llm");
+    expect(llmKept).toBeTruthy();
+    expect(llmKept!.title).toBe("Something worth flagging");
+    // re-id'd to F-
+    expect(llmKept!.id).toMatch(/^F-\d{4}$/);
+    expect(result.artifact.summary.by_source_type.llm).toBe(1);
+    expect(result.markdown).toContain("Something worth flagging");
+  }, 30_000);
+
+  it("gracefully degrades when the LLM call fails, preserving deterministic findings", async () => {
+    const repoPath = fs.mkdtempSync(path.join(os.tmpdir(), "flaught-onlyllmfail-"));
+    tempDirs.push(repoPath);
+    const git = simpleGit(repoPath);
+    await git.init(["--initial-branch=main"]);
+    await git.addConfig("user.email", "test@flaught.dev");
+    await git.addConfig("user.name", "Flaught Test");
+    await commitFiles(git, { ".advreview.yml": noLlmSideEffectsYml, "src/index.ts": "console.log('hello');" }, "initial");
+    await commitFiles(git, { "src/index.ts": "console.log('hello world');" }, "change");
+
+    const { bundlePath, findingsPath } = await produceBundle(repoPath);
+    mockReview.mockRejectedValue(new Error("Groq API error: 400 Bad Request"));
+
+    const result = await runReviewOnlyLlm({
+      contextPath: bundlePath,
+      findingsPath,
+      configPath: path.join(repoPath, ".advreview.yml"),
+      repoPath,
+      skipRefute: true,
+    });
+
+    expect(result.llmResult).toBeNull();
+    expect(result.llmError).toContain("Groq API error");
+    expect(result.artifact.run.llm_error).toContain("Groq API error");
+    expect(result.artifact.summary.by_source_type.llm).toBe(0);
+    expect(result.markdown).toContain("LLM adversarial review failed");
   }, 30_000);
 });

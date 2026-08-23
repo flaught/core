@@ -7,7 +7,9 @@
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 const pkgVersion: string = require("../package.json").version;
 
-import { assembleContext, type ReviewContext, type ChangedFile } from "./context/assembler.js";
+import * as fs from "node:fs";
+import * as path from "node:path";
+import { assembleContext, contextFromJSON, type ReviewContext, type ReviewContextJSON, type ChangedFile } from "./context/assembler.js";
 import { loadConfig } from "./config.js";
 import type { FlaughtConfig } from "./schemas/config.js";
 import { createProvider, type LLMReviewResult } from "./llm/provider.js";
@@ -71,6 +73,14 @@ export interface ReviewResult {
   durationSeconds: number;
   /** LLM error if the LLM call failed (review still completes with deterministic findings) */
   llmError: string | null;
+  /**
+   * Raw deterministic tool findings (pre-conversion). Populated so the
+   * `--emit-context` bundle can carry them for the privileged half's LLM
+   * grounding prompt (the converted Finding[] in the artifact loses the
+   * structured vuln fields formatToolFindingsForPrompt needs). Null when not
+   * applicable (e.g. --only-llm, which consumes rather than produces these).
+   */
+  deterministicFindings: DeterministicFinding[];
 }
 
 // ─── Run the full review ────────────────────────────────────────────────────
@@ -85,6 +95,14 @@ export interface ReviewOptions {
   skipLlm?: boolean;
   /** Skip the skeptic/refute pass even if LLM review is enabled */
   skipRefute?: boolean;
+  /**
+   * Emit a context bundle for the fork-PR review split (core-8fz): skip the
+   * noise budget so the partial findings artifact carries the FULL
+   * deterministic + test-inversion set (un-truncated) for the privileged
+   * `--only-llm` half to budget against the LLM findings. Used with --no-llm
+   * + --emit-context.
+   */
+  emitBundle?: boolean;
   /** Progress callback for logging */
   onProgress?: ProgressCallback;
 }
@@ -394,10 +412,19 @@ export async function runReview(options: ReviewOptions = {}): Promise<ReviewResu
     }
   }
 
-  // 7. Enforce noise budget
-  findings = enforceNoiseBudget(findings, config);
+  // 7. Enforce noise budget.
+  // Skipped in emitBundle mode (the unprivileged half of the fork-PR split):
+  // the partial findings artifact must carry the FULL deterministic +
+  // test-inversion set un-truncated, so the privileged --only-llm half can
+  // budget them against the LLM findings (matching the monolithic path, which
+  // budgets once on the complete set). Dismissals still apply (idempotent).
+  if (!options.emitBundle) {
+    findings = enforceNoiseBudget(findings, config);
+  } else {
+    progress("Skipping noise budget (emit-bundle mode) — the privileged half budgets the full set.");
+  }
 
-  if (findings.length > 0) {
+  if (!options.emitBundle && findings.length > 0) {
     progress(`  After noise budget: ${findings.length} findings`);
     const bySev: Record<string, number> = {};
     const bySource: Record<string, number> = {};
@@ -416,6 +443,11 @@ export async function runReview(options: ReviewOptions = {}): Promise<ReviewResu
   artifact.tools_executed = toolExecutions;
   artifact.test_inversion = testInversion;
   artifact.scope_creep = scopeCreepResult;
+
+  // Record the PR description on the artifact so the privileged half of the
+  // fork-PR split (--only-llm) can recover the scope-creep intent anchor from
+  // the partial findings artifact without a separate bundle field.
+  artifact.pull_request.description = options.prDescription ?? null;
 
   // Record LLM error in the artifact if the LLM call failed
   if (llmError) {
@@ -444,6 +476,7 @@ export async function runReview(options: ReviewOptions = {}): Promise<ReviewResu
     exitCode,
     durationSeconds,
     llmError: llmError,
+    deterministicFindings,
   };
 }
 
@@ -614,6 +647,196 @@ export async function runLlmStage(input: LlmStageInput): Promise<LlmStageResult>
   }
 
   return { llmFindings, llmResult, llmError };
+}
+
+// ─── Review bundle (context artifact for the fork-PR split) ──────────────────
+
+/**
+ * The artifact written by `flaught review --emit-context` and read by
+ * `flaught review --only-llm --context`. Carries the serialized review context
+ * (diff + file contents + dependency graph, as data) plus the RAW deterministic
+ * tool findings, so the privileged half can ground the LLM prompt without a
+ * git checkout. The converted Finding[] live in the separate findings.json
+ * artifact; only the raw DeterministicFinding[] (with structured vuln fields)
+ * need to ride along here, because formatToolFindingsForPrompt uses them.
+ */
+export interface ReviewBundleJSON {
+  context: ReviewContextJSON;
+  deterministicFindings: DeterministicFinding[];
+}
+
+// ─── --only-llm: the privileged half of the fork-PR split ─────────────────────
+
+export interface OnlyLlmOptions {
+  /** Path to the context bundle written by `flaught review --emit-context`. */
+  contextPath: string;
+  /** Path to the partial findings artifact written by `flaught review --output`. */
+  findingsPath: string;
+  /** Path to .advreview.yml in the trusted (base-branch) checkout. */
+  configPath?: string;
+  /** Repository root of the trusted checkout (for config/dismissal-store/template resolution). */
+  repoPath?: string;
+  /** Skip the skeptic/refute pass even if LLM review succeeds. */
+  skipRefute?: boolean;
+  onProgress?: ProgressCallback;
+}
+
+/**
+ * Run ONLY the LLM adversarial review + refute pass against a context artifact,
+ * then finalize the findings (scope-creep enforcement, dismissals, noise budget)
+ * and render reports. This is the privileged half of the fork-PR review split
+ * (core-8fz): it reads the diff + file contents as DATA from the context bundle
+ * and never touches a git checkout of the fork's code. Config and the dismissal
+ * store come from a trusted base-branch checkout (repoPath), not the fork.
+ *
+ * Returns the same ReviewResult shape as runReview so the CLI handles both
+ * paths uniformly.
+ */
+export async function runReviewOnlyLlm(options: OnlyLlmOptions): Promise<ReviewResult> {
+  const progress = options.onProgress ?? noopProgress;
+  const startTime = Date.now();
+
+  // 1. Load the context bundle (context + raw deterministic findings) as data.
+  progress("Loading review context artifact...");
+  let bundle: ReviewBundleJSON;
+  try {
+    bundle = JSON.parse(fs.readFileSync(options.contextPath, "utf-8")) as ReviewBundleJSON;
+  } catch (err) {
+    throw new Error(`Could not read context artifact at ${options.contextPath}: ${err instanceof Error ? err.message : String(err)}`);
+  }
+  const context = contextFromJSON(bundle.context);
+
+  // 2. Load the partial findings artifact (deterministic + test-inversion, un-budgeted).
+  progress("Loading deterministic findings artifact...");
+  let partial: FindingsArtifact;
+  try {
+    partial = JSON.parse(fs.readFileSync(options.findingsPath, "utf-8")) as FindingsArtifact;
+  } catch (err) {
+    throw new Error(`Could not read findings artifact at ${options.findingsPath}: ${err instanceof Error ? err.message : String(err)}`);
+  }
+
+  // 3. Load config + dismissal store from the TRUSTED checkout (not the fork).
+  // repoPath defaults to cwd (the privileged workflow's main checkout).
+  const repoRoot = options.repoPath ? path.resolve(options.repoPath) : process.cwd();
+  progress("Loading config...");
+  const config = await loadConfig(options.configPath, repoRoot);
+  progress(`  Provider: ${config.llm.provider}/${config.llm.model}`);
+  const dismissalStore: DismissalStore | null = config.dismissals.enabled
+    ? loadDismissalStore(resolveDismissalsPath(repoRoot, config.dismissals.path))
+    : null;
+  const templates = loadTemplates(repoRoot, config);
+
+  // 4. Recover the inputs runLlmStage needs from the artifacts.
+  const deterministicFindings: DeterministicFinding[] = bundle.deterministicFindings ?? [];
+  const scopeCreepHeuristic: FlaggedHunk[] = partial.scope_creep?.flagged_hunks ?? [];
+  const prDescription = partial.pull_request?.description ?? undefined;
+
+  // 5. Start from the partial findings (deterministic + test-inversion).
+  let findings: Finding[] = [...partial.findings];
+
+  // 6. Run the LLM adversarial + refute pass (shared with the monolithic path).
+  const llmStage = await runLlmStage({
+    context,
+    deterministicFindings,
+    scopeCreepHeuristic,
+    config,
+    templates,
+    dismissalStore,
+    prDescription,
+    skipRefute: options.skipRefute,
+    onProgress: progress,
+  });
+
+  // 7. Merge the LLM findings into the deterministic/test-inversion set.
+  findings.push(...llmStage.llmFindings);
+
+  // 8. Scope-creep enforcement: strip any LLM scope-creep finding on an exempt path
+  //    (the heuristic backstop the LLM is told about up front but may ignore).
+  if (context.changedFiles.length > 0 && config.scope_creep.enabled && config.scope_creep.exclude_paths.length > 0) {
+    const before = findings.length;
+    findings = filterExcludedScopeCreep(findings, config.scope_creep.exclude_paths);
+    if (findings.length < before) {
+      progress(`  Filtered ${before - findings.length} scope-creep finding(s) on exempt path(s)`);
+    }
+  }
+
+  // 9. Merge LLM-detected scope creep into the scope-creep result (heuristic + LLM).
+  let scopeCreepResult: ScopeCreep | null = partial.scope_creep;
+  if (context.changedFiles.length > 0 && config.scope_creep.enabled) {
+    const llmScopeCreep = extractScopeCreepFromFindings(findings, prDescription);
+    const heuristicFiles = new Set(scopeCreepHeuristic.map((h) => h.file));
+    const allFlagged: FlaggedHunk[] = [...scopeCreepHeuristic];
+    if (llmScopeCreep) {
+      for (const hunk of llmScopeCreep.flagged_hunks) {
+        if (!heuristicFiles.has(hunk.file)) allFlagged.push(hunk);
+      }
+    }
+    scopeCreepResult = allFlagged.length > 0
+      ? { pr_intent: prDescription ?? "No PR description provided", flagged_hunks: allFlagged }
+      : null;
+  }
+
+  // 10. Apply persisted dismissals (fingerprint-matched) across the full set.
+  if (dismissalStore) {
+    const applied = applyDismissals(findings, dismissalStore);
+    findings = applied.findings;
+    if (applied.appliedCount > 0) {
+      progress(`  ${applied.appliedCount} finding(s) auto-dismissed via ${config.dismissals.path}`);
+    }
+  }
+
+  // 11. Enforce the noise budget on the COMPLETE set (deterministic + test-inversion + LLM),
+  //     matching the monolithic path. (The unprivileged half skipped this on purpose.)
+  findings = enforceNoiseBudget(findings, config);
+  if (findings.length > 0) {
+    progress(`  After noise budget: ${findings.length} findings`);
+  }
+
+  // 12. Re-id findings for a clean, collision-free artifact. The partial artifact
+  //     already assigned D-/F- ids to deterministic/test-inversion findings, and
+  //     the LLM provider assigned F- ids to its findings, so the merged set can
+  //     collide. Re-id by source_type (deterministic -> D-, llm -> F-); ids are
+  //     run-local display only — the fingerprint is the stable identity.
+  let dIdx = 0;
+  let fIdx = 0;
+  findings = findings.map((f) => ({
+    ...f,
+    id: f.source_type === "llm" ? `F-${String(++fIdx).padStart(4, "0")}` : `D-${String(++dIdx).padStart(4, "0")}`,
+  }));
+
+  // 13. Build the final artifact, carrying forward the partial's tool/test-inversion metadata.
+  progress("Building findings artifact...");
+  const artifact = buildArtifact(context, findings, config);
+  artifact.tools_executed = partial.tools_executed;
+  artifact.test_inversion = partial.test_inversion;
+  artifact.scope_creep = scopeCreepResult;
+  artifact.pull_request = partial.pull_request;
+  if (llmStage.llmError) {
+    artifact.run.llm_error = llmStage.llmError;
+  }
+
+  // 14. Render reports + exit code.
+  progress("Rendering reports...");
+  const markdown = renderMarkdownReport(artifact);
+  const json = renderJsonArtifact(artifact);
+  const exitCode = computeExitCode(artifact, config);
+
+  const durationSeconds = Math.round((Date.now() - startTime) / 1000);
+  artifact.run.duration_seconds = durationSeconds;
+  progress(`Done in ${durationSeconds}s.`);
+
+  return {
+    context,
+    llmResult: llmStage.llmResult,
+    toolResults: partial.tools_executed,
+    artifact,
+    markdown,
+    json,
+    exitCode,
+    durationSeconds,
+    llmError: llmStage.llmError,
+    deterministicFindings,
+  };
 }
 
 // ─── Noise budget enforcement ───────────────────────────────────────────────

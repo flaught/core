@@ -69,7 +69,10 @@ program
   .option("--json", "Output full context as JSON (for debugging/integration)")
   .option("--output <path>", "Write JSON artifact to file")
   .option("--no-llm", "Skip LLM review (context assembly only)")
-  .option("--emit-context <path>", "Write the serialized review context to a file (for `flaught review --only-llm`)")
+  .option("--emit-context <path>", "Write the review context bundle to a file (for `flaught review --only-llm`). Pairs with --no-llm as the unprivileged half of the fork-PR split.")
+  .option("--only-llm", "Run ONLY the LLM review + refute pass against a context artifact (privileged half of the fork-PR split). Requires --context and --findings.")
+  .option("--context <path>", "Path to a context bundle from `flaught review --emit-context` (used with --only-llm)")
+  .option("--findings <path>", "Path to a partial findings artifact from `flaught review --output` (used with --only-llm)")
   .option("--no-refute", "Skip the skeptic/refute pass even if LLM review is enabled")
   .option("--pr-description <text>", "PR description for scope-creep detection")
   .option("--quiet", "Only output the final report, no progress messages")
@@ -170,6 +173,9 @@ async function runCliReview(opts: {
   quiet?: boolean;
   githubInline?: boolean;
   emitContext?: string;
+  onlyLlm?: boolean;
+  context?: string;
+  findings?: string;
 }): Promise<void> {
   const progress: ProgressCallback = opts.quiet
     ? () => {}
@@ -188,6 +194,37 @@ async function runCliReview(opts: {
     return;
   }
 
+  // --only-llm: the privileged half of the fork-PR split. Loads a context
+  // bundle + partial findings artifact (both data) and runs ONLY the LLM +
+  // refute pass, then finalizes. Never touches a git checkout of the reviewed
+  // code — the diff arrives as data on the context bundle.
+  if (opts.onlyLlm) {
+    if (!opts.context || !opts.findings) {
+      console.error("\n❌ --only-llm requires --context <path> and --findings <path> (from a prior `flaught review --no-llm --emit-context --output`).");
+      process.exit(2);
+    }
+    const { runReviewOnlyLlm } = await import("./review.js");
+    const result = await runReviewOnlyLlm({
+      contextPath: opts.context,
+      findingsPath: opts.findings,
+      configPath: opts.config,
+      repoPath: opts.repo ? path.resolve(opts.repo) : undefined,
+      skipRefute: (opts as Record<string, unknown>).refute === false,
+      onProgress: progress,
+    });
+    console.log(result.markdown);
+    if (result.llmError) {
+      console.error(`\n⚠️ LLM review failed: ${result.llmError}`);
+      console.error(`  Review completed with deterministic findings only. LLM findings are not included.`);
+    }
+    if (opts.output) {
+      const outputPath = path.resolve(opts.output);
+      fs.writeFileSync(outputPath, result.json, "utf-8");
+      console.error(`\n📄 JSON artifact written to ${outputPath}`);
+    }
+    process.exit(result.exitCode);
+  }
+
   // Full review pipeline
   const result = await runReview({
     repoPath: opts.repo ? path.resolve(opts.repo) : undefined,
@@ -197,6 +234,7 @@ async function runCliReview(opts: {
     prDescription: opts.prDescription,
     skipLlm: !opts.llm,
     skipRefute: (opts as Record<string, unknown>).refute === false, // --no-refute sets refute to false
+    emitBundle: !!opts.emitContext, // unprivileged half: don't budget (the privileged half budgets the full set)
     onProgress: progress,
   });
 
@@ -216,14 +254,16 @@ async function runCliReview(opts: {
     console.error(`\n📄 JSON artifact written to ${outputPath}`);
   }
 
-  // Write the serialized review context to a file if requested. This is the
-  // artifact the privileged half of the fork-PR review split consumes via
-  // `flaught review --only-llm --context <path>` — it carries the diff and file
-  // contents as data, so the LLM pass can run later without a git checkout.
+  // Write the review context BUNDLE to a file if requested. The bundle carries
+  // the serialized ReviewContext (diff + file contents + dependency graph, as
+  // DATA) plus the raw DeterministicFinding[] the LLM grounding prompt needs —
+  // everything the privileged `flaught review --only-llm --context <path>` half
+  // needs to run the LLM pass without a git checkout of the reviewed code.
   if (opts.emitContext) {
     const contextPath = path.resolve(opts.emitContext);
-    fs.writeFileSync(contextPath, JSON.stringify(contextToJSON(result.context), null, 2), "utf-8");
-    console.error(`\n📦 Review context written to ${contextPath}`);
+    const bundle = { context: contextToJSON(result.context), deterministicFindings: result.deterministicFindings };
+    fs.writeFileSync(contextPath, JSON.stringify(bundle, null, 2), "utf-8");
+    console.error(`\n📦 Review context bundle written to ${contextPath}`);
   }
 
   // Post inline comments on PR diff lines if --github-inline
