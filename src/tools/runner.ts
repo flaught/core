@@ -435,19 +435,19 @@ export function parseVulnJsonOutput(stdout: string, command: string): Determinis
 
     // npm audit format
     if (data.vulnerabilities) {
-      for (const [, vuln] of Object.entries(data.vulnerabilities as Record<string, any>)) {
+      for (const [, vuln] of Object.entries(data.vulnerabilities as Record<string, NpmAuditVulnerability>)) {
         // npm audit `via` can be a string array (package names) or an array of
         // advisory objects with title, url, severity, cwe, cvss, etc.
         // We want the richest data available.
-        const viaAdvisories: any[] = Array.isArray(vuln.via)
-          ? vuln.via.filter((v: any) => typeof v === "object" && v !== null)
+        const viaAdvisories: NpmAuditAdvisory[] = Array.isArray(vuln.via)
+          ? vuln.via.filter((v): v is NpmAuditAdvisory => typeof v === "object" && v !== null)
           : [];
 
         // Use the highest-severity advisory for the canonical title/description
         const primaryAdvisory = viaAdvisories.length > 0
-          ? viaAdvisories.sort((a: any, b: any) => {
+          ? viaAdvisories.sort((a, b) => {
               const order: Record<string, number> = { critical: 0, high: 1, moderate: 2, low: 3, info: 4 };
-              return (order[a.severity] ?? 2) - (order[b.severity] ?? 2);
+              return (order[a.severity ?? ""] ?? 2) - (order[b.severity ?? ""] ?? 2);
             })[0]
           : null;
 
@@ -466,8 +466,7 @@ export function parseVulnJsonOutput(stdout: string, command: string): Determinis
             descriptionParts.push(`- ${adv.title ?? adv.name ?? "Unknown"} (${adv.severity ?? "unknown"} severity)${adv.url ? ` — ${adv.url}` : ""}`);
           }
         } else if (viaAdvisories.length === 1) {
-          const adv = viaAdvisories[0];
-          descriptionParts.push(adv.title ?? "Vulnerability found by npm audit.");
+          descriptionParts.push(viaAdvisories[0]?.title ?? "Vulnerability found by npm audit.");
         }
 
         if (vuln.isDirect) {
@@ -476,7 +475,7 @@ export function parseVulnJsonOutput(stdout: string, command: string): Determinis
           descriptionParts.push("Transitive dependency.");
         }
 
-        if (vuln.effects?.length > 0) {
+        if (vuln.effects && vuln.effects.length > 0) {
           descriptionParts.push(`Affected via: ${vuln.effects.join(" → ")}.`);
         }
 
@@ -490,16 +489,16 @@ export function parseVulnJsonOutput(stdout: string, command: string): Determinis
 
         // Collect all advisory URLs for references
         const advisoryUrls = viaAdvisories
-          .map((v: any) => v.url)
-          .filter((u: any): u is string => typeof u === "string" && u.length > 0);
+          .map((v) => v.url)
+          .filter((u): u is string => typeof u === "string" && u.length > 0);
 
         // Collect all CWEs
-        const cwes = viaAdvisories.flatMap((v: any) =>
+        const cwes = viaAdvisories.flatMap((v) =>
           Array.isArray(v.cwe) ? v.cwe : (v.cwe ? [v.cwe] : [])
         );
 
         // Use the highest CVSS score across advisories
-        const cvssScore = viaAdvisories.reduce((max: number, v: any) => {
+        const cvssScore = viaAdvisories.reduce((max: number, v) => {
           const score = v.cvss?.score;
           return typeof score === "number" && score > max ? score : max;
         }, 0);
@@ -510,7 +509,7 @@ export function parseVulnJsonOutput(stdout: string, command: string): Determinis
         if (vuln.range) snippetParts.push(`Affected: ${pkgName} ${vuln.range}`);
         if (vuln.isDirect) {
           snippetParts.push("Direct dependency.");
-        } else if (vuln.effects?.length > 0) {
+        } else if (vuln.effects && vuln.effects.length > 0) {
           snippetParts.push(`Via: ${vuln.effects.join(" → ")}`);
         }
         if (vuln.fixAvailable) {
@@ -523,7 +522,7 @@ export function parseVulnJsonOutput(stdout: string, command: string): Determinis
 
         findings.push({
           title,
-          severity: mapNpmAuditSeverity(vuln.severity),
+          severity: mapNpmAuditSeverity(vuln.severity ?? "medium"),
           category: "security",
           file: vuln.findings?.[0]?.paths?.[0] ?? pkgName,
           line: 0,
@@ -701,6 +700,54 @@ interface ExecResult {
   exitCode: number;
 }
 
+/**
+ * Shape of the error thrown by Node's child_process exec when the process
+ * exits non-zero: it carries the captured stdout/stderr and an exit code.
+ * Linters/vuln scanners often exit non-zero on findings while still emitting
+ * valid output, so we read those fields rather than treating it as fatal.
+ */
+interface ExecError {
+  stdout?: string;
+  stderr?: string;
+  code?: number | string;
+}
+
+/**
+ * Minimal shape of an npm-audit `vulnerabilities[<pkg>].via` advisory entry —
+ * only the fields parseVulnJsonOutput reads. The real npm audit schema is
+ * richer and varies by version; this is a deliberately narrow view over
+ * untrusted JSON (validated by usage, not by a full schema).
+ */
+interface NpmAuditAdvisory {
+  title?: string;
+  name?: string;
+  url?: string;
+  severity?: string;
+  cwe?: string | string[];
+  cvss?: { score?: number };
+}
+
+/**
+ * Minimal shape of an npm-audit `vulnerabilities[<pkg>]` entry. `via` is an
+ * array of either a package-name string (transitive) or an advisory object;
+ * `fixAvailable` is either a boolean or an object describing the fix.
+ */
+interface NpmAuditVulnerability {
+  name?: string;
+  via?: Array<string | NpmAuditAdvisory>;
+  range?: string;
+  isDirect?: boolean;
+  severity?: string;
+  effects?: string[];
+  nodes?: string[];
+  findings?: Array<{ paths?: string[] }>;
+  // npm audit's fixAvailable is either an object (fix detail) or `true`. The
+  // code below assumes the object form; the rare `true` case degrades to
+  // undefined fields (matching prior `any` behavior), so we type it as the
+  // object form to match the existing assumption without changing behavior.
+  fixAvailable?: { name: string; version: string; isSemVerMajor?: boolean };
+}
+
 // ── Safe command execution (argument array, no shell) ──────────────────────────
 
 async function execCommandSafe(args: string[], cwd: string, timeoutMs: number = 120_000): Promise<ExecResult> {
@@ -722,14 +769,15 @@ async function execCommandSafe(args: string[], cwd: string, timeoutMs: number = 
       stderr: stderr ?? "",
       exitCode: 0,
     };
-  } catch (err: any) {
+  } catch (err) {
+    const e = err as ExecError;
     // Many linters/vuln scanners exit non-zero when they find issues
     // This is not necessarily an error — the output may still be valid
     return {
       success: true,
-      stdout: err.stdout ?? "",
-      stderr: err.stderr ?? "",
-      exitCode: err.code ?? 1,
+      stdout: e.stdout ?? "",
+      stderr: e.stderr ?? "",
+      exitCode: typeof e.code === "number" ? e.code : 1,
     };
   }
 }
@@ -759,14 +807,15 @@ async function execCommandShell(command: string, cwd: string, timeoutMs: number 
       stderr: stderr ?? "",
       exitCode: 0,
     };
-  } catch (err: any) {
+  } catch (err) {
+    const e = err as ExecError;
     // Many linters/vuln scanners exit non-zero when they find issues
     // This is not necessarily an error — the output may still be valid
     return {
       success: true,
-      stdout: err.stdout ?? "",
-      stderr: err.stderr ?? "",
-      exitCode: err.code ?? 1,
+      stdout: e.stdout ?? "",
+      stderr: e.stderr ?? "",
+      exitCode: typeof e.code === "number" ? e.code : 1,
     };
   }
 }
