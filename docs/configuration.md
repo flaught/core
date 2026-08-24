@@ -194,6 +194,30 @@ llm:
 
 This only works for gateways that speak the OpenAI `/chat/completions` shape. A gateway that speaks Anthropic's Messages API instead — including most enterprise Claude proxies — needs `provider: anthropic` with `base_url` overridden (see above), not `provider: openai`.
 
+#### Worked example: DeepSeek
+
+[DeepSeek](https://api-docs.deepseek.com/) exposes an OpenAI-compatible `/chat/completions` API, so it runs under `provider: openai` with a `base_url` override:
+
+```yaml
+llm:
+  provider: openai
+  model: deepseek-v4-flash        # or deepseek-v4-pro for a stronger (pricier) review
+  base_url: https://api.deepseek.com   # OpenAI-compatible; https://api.deepseek.com/v1 is accepted too
+  api_key_env: DEEPSEEK_API_KEY
+```
+
+Get a key at `platform.deepseek.com → API Keys` and add `DEEPSEEK_API_KEY` to your repository/user secrets (Settings → Secrets and variables → Actions, or export it in your shell).
+
+`base_url` is a first-class field of every provider — including `openai` — not a gateway-only hack (see [Full reference](#full-reference)); DeepSeek is reached purely by pointing that field at its endpoint. The `openai` provider posts to `{base_url}/chat/completions` with `response_format: { type: "json_object" }`, so the endpoint must accept OpenAI-shaped chat completions and JSON output mode.
+
+**The compatibility boundary — what the OpenAI-shaped transport does and does not guarantee:**
+
+- `base_url` must be the path prefix the provider's OpenAI-compatible endpoint expects. OpenAI's own endpoint requires `/v1` (`https://api.openai.com/v1`); DeepSeek accepts both `https://api.deepseek.com` and `https://api.deepseek.com/v1`; some gateways want a different prefix. Flaught appends `/chat/completions` to your `base_url` — match the provider's docs, don't assume a prefix.
+- `model` is endpoint-specific: it must be a name the provider actually serves (here `deepseek-v4-flash` / `deepseek-v4-pro`), not a generic OpenAI model name. DeepSeek's legacy `deepseek-chat` / `deepseek-reasoner` names are being retired in favour of the `deepseek-v4-*` family.
+- JSON response-format (which Flaught relies on for its structured review output) and tool calling are **not implied by the OpenAI transport alone** — they depend on the endpoint and model. DeepSeek V4 supports both; a bare gateway might not. If a review run fails with a JSON/parse error on a custom endpoint, this is the first thing to check.
+- Validate available model names against the provider's `/models` endpoint where available, e.g.:
+  `curl -H "Authorization: Bearer $DEEPSEEK_API_KEY" https://api.deepseek.com/models | jq '.data[].id'`
+
 ## Refute pass (skeptic)
 
 Every LLM finding goes through a second pass where a skeptic model tries to refute it — see [Conventions & Patterns](../CLAUDE.md#conventions--patterns) in the repo root for the design rationale. By default the skeptic runs on the same provider/model as the main review, which means the model that wrote the findings is also grading them. Configure `refute.provider` and/or `refute.model` to break that correlation:
