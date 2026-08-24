@@ -197,7 +197,7 @@ This repo dogfoods exactly that split, **extended so fork PRs also get the LLM a
 
 **Security invariant:** the secret is used to *call* the LLM, never *shown* to it. The only untrusted input the LLM sees is the diff text, so a malicious fork can't exfiltrate the key via prompt injection — worst case is comment-content social-engineering (text on a PR). The privileged workflow never checks out or executes the fork's code.
 
-**v1 limitation:** for fork PRs the severity gate blocks only on *deterministic* findings (the LLM findings land after the gate, as an advisory comment). Tightening this to a blocking check is future work.
+**Severity gate on fork PRs:** the unprivileged run's `Adversarial Review` check gates on *deterministic* findings; the privileged `workflow_run` posts a separate **`Adversarial Review (LLM)`** commit status on the fork PR's head SHA — `failure` when the `--only-llm` exit code is 1 (LLM findings exceed the severity threshold), `success` otherwise. Same-repo PRs post the same status from the unprivileged run (full review exit code). Add `Adversarial Review (LLM)` to main's required status checks (Settings → Branches → Branch protection) so LLM findings block merge on fork PRs too. (The status is also `success` on a tool/LLM error — exit 2 — so a Groq outage never blocks merge.)
 
 #### The CLI flags behind the split
 
