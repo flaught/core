@@ -50,7 +50,7 @@ jobs:
           name: flaught-findings
           run-id: ${{ github.event.workflow_run.id }}
           github-token: ${{ secrets.GITHUB_TOKEN }}
-          path: findings
+          path: ${{ runner.temp }}/findings
         continue-on-error: true
 
       - name: Download PR metadata
@@ -59,7 +59,7 @@ jobs:
           name: flaught-pr-meta
           run-id: ${{ github.event.workflow_run.id }}
           github-token: ${{ secrets.GITHUB_TOKEN }}
-          path: prmeta
+          path: ${{ runner.temp }}/prmeta
         continue-on-error: true
 
       - name: Download context bundle (fork-PR split)
@@ -68,7 +68,7 @@ jobs:
           name: flaught-context
           run-id: ${{ github.event.workflow_run.id }}
           github-token: ${{ secrets.GITHUB_TOKEN }}
-          path: ctx
+          path: ${{ runner.temp }}/ctx
         continue-on-error: true
 
       - name: Download rendered comment (same-repo path)
@@ -77,17 +77,21 @@ jobs:
           name: flaught-review-comment
           run-id: ${{ github.event.workflow_run.id }}
           github-token: ${{ secrets.GITHUB_TOKEN }}
-          path: comment
+          path: ${{ runner.temp }}/comment
         continue-on-error: true
 
       - name: Select path
         id: path
+        # Downloads land in runner.temp (outside the checkout workspace) so the
+        # later `actions/checkout` step can't clean them.
         run: |
-          if [ -f ctx/context.json ]; then
+          if [ -f "$RUNNER_TEMP/ctx/context.json" ]; then
             echo "split=true" >> "$GITHUB_OUTPUT"
           else
             echo "split=false" >> "$GITHUB_OUTPUT"
           fi
+        env:
+          RUNNER_TEMP: ${{ runner.temp }}
 
       # ── Fork-PR path: run the LLM pass against the context bundle ──
       # Check out the TRUSTED default branch (main) — workflow_run runs in the
@@ -124,19 +128,20 @@ jobs:
         env:
           GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
           GITHUB_REPOSITORY: ${{ github.repository }}
+          RUNNER_TEMP: ${{ runner.temp }}
         run: |
           set +e
           flaught review \
             --only-llm \
-            --context ctx/context.json \
-            --findings findings/findings.json \
-            --output findings/findings-final.json \
+            --context "$RUNNER_TEMP/ctx/context.json" \
+            --findings "$RUNNER_TEMP/findings/findings.json" \
+            --output "$RUNNER_TEMP/findings/findings-final.json" \
             --config .advreview.yml \
-            --quiet > comment-body.md 2>/tmp/onlyllm-err.txt
+            --quiet > "$RUNNER_TEMP/comment-body.md" 2>/tmp/onlyllm-err.txt
           # If the LLM pass itself rendered nothing (e.g. it crashed), fall back
           # to a short message rather than posting an empty comment.
-          if [ ! -s comment-body.md ]; then
-            echo "⚠️ Flaught's LLM review could not be rendered. See the workflow logs for details." > comment-body.md
+          if [ ! -s "$RUNNER_TEMP/comment-body.md" ]; then
+            echo "⚠️ Flaught's LLM review could not be rendered. See the workflow logs for details." > "$RUNNER_TEMP/comment-body.md"
           fi
           # Surface the stderr (progress) for debugging.
           if [ -s /tmp/onlyllm-err.txt ]; then
@@ -149,7 +154,7 @@ jobs:
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: flaught-findings-final
-          path: findings/findings-final.json
+          path: ${{ runner.temp }}/findings/findings-final.json
           retention-days: 90
           if-no-files-found: warn
 
@@ -158,26 +163,26 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GITHUB_REPOSITORY: ${{ github.repository }}
-        # pr-number.txt is untrusted data (derived from PR metadata). Read into a
+          RUNNER_TEMP: ${{ runner.temp }}
         # var, validate as a positive integer, pass to gh as an argument — never
         # evaluated as shell. The comment body is a body-file, posted as-is.
         run: |
-          if [ ! -f prmeta/pr-number.txt ]; then
+          if [ ! -f "$RUNNER_TEMP/prmeta/pr-number.txt" ]; then
             echo "No PR metadata present (review may not have produced one). Nothing to post."
             exit 0
           fi
-          PR_NUMBER="$(cat prmeta/pr-number.txt | tr -d '[:space:]')"
+          PR_NUMBER="$(cat "$RUNNER_TEMP/prmeta/pr-number.txt" | tr -d '[:space:]')"
           if ! printf '%s' "$PR_NUMBER" | grep -Eq '^[0-9]+$'; then
             echo "::error::Refusing to post: pr-number.txt did not contain a valid integer (got: '$PR_NUMBER')"
             exit 1
           fi
 
-          # Fork path: the LLM pass wrote comment-body.md. Same-repo path: the
-          # unprivileged run rendered comment/review-body.md.
-          if [ -f comment-body.md ]; then
-            BODY="comment-body.md"
-          elif [ -f comment/review-body.md ]; then
-            BODY="comment/review-body.md"
+          # Fork path: the LLM pass wrote comment-body.md in runner.temp. Same-repo
+          # path: the unprivileged run rendered $RUNNER_TEMP/comment/review-body.md.
+          if [ -f "$RUNNER_TEMP/comment-body.md" ]; then
+            BODY="$RUNNER_TEMP/comment-body.md"
+          elif [ -f "$RUNNER_TEMP/comment/review-body.md" ]; then
+            BODY="$RUNNER_TEMP/comment/review-body.md"
           else
             echo "No comment body to post (neither comment-body.md nor comment/review-body.md present)."
             exit 0
