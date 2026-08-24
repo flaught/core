@@ -289,18 +289,19 @@ async function runTests(command: string, cwd: string): Promise<TestRunResult> {
       stderr,
       durationMs,
     };
-  } catch (err: any) {
+  } catch (err) {
+    const e = err as { stdout?: string; stderr?: string; code?: number | string };
     const durationMs = Date.now() - startTime;
 
     // Many test runners exit non-zero when tests fail, but still produce output
-    const stdout = err.stdout ?? "";
-    const stderr = err.stderr ?? "";
+    const stdout = e.stdout ?? "";
+    const stderr = e.stderr ?? "";
     const parsed = parseTestOutput(stdout + "\n" + stderr, command);
 
     return {
       command,
       success: true, // The runner ran, even if tests failed
-      exitCode: err.code ?? 1,
+      exitCode: typeof e.code === "number" ? e.code : 1,
       passed: parsed.passed,
       failed: parsed.failed,
       stdout,
