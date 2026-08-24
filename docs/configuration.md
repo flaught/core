@@ -208,6 +208,8 @@ llm:
 
 Get a key at `platform.deepseek.com → API Keys` and add `DEEPSEEK_API_KEY` to your repository/user secrets (Settings → Secrets and variables → Actions, or export it in your shell).
 
+`base_url` is a first-class field of every provider — including `openai` — not a gateway-only hack (see [Full reference](#full-reference)); DeepSeek is reached purely by pointing that field at its endpoint. The `openai` provider posts to `{base_url}/chat/completions` with `response_format: { type: "json_object" }`, so the endpoint must accept OpenAI-shaped chat completions and JSON output mode.
+
 **The compatibility boundary — what the OpenAI-shaped transport does and does not guarantee:**
 
 - `base_url` must be the path prefix the provider's OpenAI-compatible endpoint expects. OpenAI's own endpoint requires `/v1` (`https://api.openai.com/v1`); DeepSeek accepts both `https://api.deepseek.com` and `https://api.deepseek.com/v1`; some gateways want a different prefix. Flaught appends `/chat/completions` to your `base_url` — match the provider's docs, don't assume a prefix.
