@@ -42,6 +42,7 @@ jobs:
     permissions:
       pull-requests: write   # for --github-inline on same-repo PRs (fork PRs get read-only regardless)
       contents: read
+      statuses: write       # post the Adversarial Review (LLM) gate status on same-repo PRs
 
     steps:
       # actions/checkout@v7.0.1 — pinned to commit SHA for supply-chain integrity
@@ -192,3 +193,30 @@ jobs:
         if: steps.review.outputs.exit_code == '2'
         run: |
           echo "::warning::Flaught encountered an error (config, API, or runtime) and could not complete the review. This does NOT block merge — an LLM/infra outage is not evidence of a real code problem. Check the workflow logs and consider re-running."
+
+      # Post a named commit status "Adversarial Review (LLM)" so branch protection
+      # can require it and the LLM gate blocks merge. On same-repo PRs the full
+      # review (incl. LLM) ran here with a write-capable token, so this step posts
+      # the gate result. (Fork PRs can't post here — read-only token — so the
+      # privileged workflow_run posts the same status from the --only-llm exit.)
+      - name: Post LLM-gate status (same-repo path)
+        if: always() && steps.review.outputs.split != 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          EXIT_CODE: ${{ steps.review.outputs.exit_code }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          if [ "$EXIT_CODE" = "1" ]; then
+            STATE=failure
+            DESC="Flaught LLM gate: findings exceed the severity threshold"
+          else
+            STATE=success
+            DESC="Flaught LLM gate: passed"
+          fi
+          gh api --method POST "repos/$GITHUB_REPOSITORY/statuses/$HEAD_SHA" \
+            -f state="$STATE" -f context="Adversarial Review (LLM)" \
+            -f description="$DESC" -f target_url="$RUN_URL" \
+            --silent
+          echo "Posted LLM-gate status: $STATE"

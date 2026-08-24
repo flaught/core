@@ -38,6 +38,7 @@ jobs:
       pull-requests: write   # post the review comment
       actions: read           # download artifacts from the triggering run
       contents: read
+      statuses: write         # post the Adversarial Review (LLM) gate status (fork-PR path)
 
     steps:
       # actions/download-artifact@v8.0.1 — pinned to commit SHA for supply-chain integrity.
@@ -124,6 +125,7 @@ jobs:
       # is available here (workflow_run has secrets) and is used only as the
       # Authorization header to call the LLM — never interpolated into the prompt.
       - name: Run LLM pass against context bundle
+        id: llm
         if: steps.path.outputs.split == 'true'
         env:
           GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
@@ -138,6 +140,8 @@ jobs:
             --output "$RUNNER_TEMP/findings/findings-final.json" \
             --config .advreview.yml \
             --quiet > "$RUNNER_TEMP/comment-body.md" 2>/tmp/onlyllm-err.txt
+          LLM_EXIT=$?
+          echo "llm_exit=$LLM_EXIT" >> "$GITHUB_OUTPUT"
           # If the LLM pass itself rendered nothing (e.g. it crashed), fall back
           # to a short message rather than posting an empty comment.
           if [ ! -s "$RUNNER_TEMP/comment-body.md" ]; then
@@ -157,6 +161,34 @@ jobs:
           path: ${{ runner.temp }}/findings/findings-final.json
           retention-days: 90
           if-no-files-found: warn
+
+      # Post the named commit status "Adversarial Review (LLM)" on the fork PR's
+      # head SHA so branch protection can require it and LLM findings block merge.
+      # The --only-llm exit code is the LLM gate (1 = findings exceed threshold).
+      # workflow_run runs in the base-repo context with a write-capable token, so
+      # it can post a status on the fork PR's commit (the same-repo path posts the
+      # same status from the unprivileged run).
+      - name: Post LLM-gate status (fork-PR path)
+        if: always() && steps.path.outputs.split == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
+          LLM_EXIT: ${{ steps.llm.outputs.llm_exit }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          if [ "$LLM_EXIT" = "1" ]; then
+            STATE=failure
+            DESC="Flaught LLM gate: findings exceed the severity threshold"
+          else
+            STATE=success
+            DESC="Flaught LLM gate: passed"
+          fi
+          gh api --method POST "repos/$GITHUB_REPOSITORY/statuses/$HEAD_SHA" \
+            -f state="$STATE" -f context="Adversarial Review (LLM)" \
+            -f description="$DESC" -f target_url="$RUN_URL" \
+            --silent
+          echo "Posted LLM-gate status: $STATE"
 
       # ── Post the comment (both paths converge here) ──
       - name: Post review comment
