@@ -4,6 +4,113 @@ Flaught is designed to run in CI. This page has three ready-to-use workflows and
 
 > **If you want findings to block merge, don't stop at copy-pasting an example below.** The Minimal, Ollama Cloud, and self-hosted Ollama workflows use `continue-on-error: true`, which never fails the job — not on exit 1 (real findings) and not on exit 2 (tool/LLM error). The "Full" workflow below is the one exception: it already uses the exit-code-split pattern from [Exit code handling](#exit-code-handling), so real findings block merge while a Groq outage only warns. If you hand-modify any of these to make findings block merge (e.g. by just dropping `continue-on-error: true`), you will also make tool/LLM errors block merge unless you re-derive the split — that's exactly the bug [Exit code handling](#exit-code-handling) exists to prevent.
 
+## How the adversarial review runs (fork + same-repo)
+
+This repo's own CI runs the diagram below on every PR. Two trust zones — an
+**unprivileged** `pull_request` run (sandboxed, no secrets, may run the fork's
+code) and a **privileged** `workflow_run` (write token + `GROQ_API_KEY`, never
+checks out the fork's code) — keep the secret and the fork's code apart. The
+LLM sees the diff as **data**, never executes it.
+
+```
+                      contributor opens a pull request
+                      (same-repo branch  OR  a fork)
+                                  │  pull_request
+                                  ▼
+        ╔══════════════════════════════════════════════════════════╗
+        ║  WORKFLOW 1 — "Adversarial Review"  (UNPRIVILEGED)       ║
+        ║  read-only GITHUB_TOKEN · NO secrets · runs fork code    ║
+        ╚══════════════════════════════════════════════════════════╝
+            │                                   │
+   GROQ_API_KEY present?                GROQ_API_KEY empty
+   (same-repo PR)                        (fork PR — GitHub withholds
+            │ yes                          secrets from fork PRs)
+            ▼                                   ▼
+   flaught review                          flaught review \
+     (full: LLM + refute                      --no-llm \
+      + --github-inline)                       --emit-context context.json \
+            │                                  --output findings.json
+            │                                        │
+            ▼                                        ▼
+   render comment body                     emit context bundle
+   (review-body.md)                        (diff + file contents as DATA)
+            │                                        │
+            └────────────────┬─────────────────────────┘
+                             ▼
+        ┌────────────────────────────────────────────────────────┐
+        │  UPLOAD artifacts (always):                             │
+        │    flaught-findings   ── partial/deterministic results │
+        │    flaught-pr-meta    ── PR number                       │
+        │    flaught-context    ── context bundle (fork path only) │
+        │    flaught-review-comment ── review-body (same-repo only)│
+        │                                                         │
+        │  "Adversarial Review" CHECK = deterministic gate:        │
+        │     exit 1 (findings exceed threshold) → check fails ✗   │
+        └────────────────────────────────────────────────────────┘
+            │ (same-repo path ends here — comment already rendered)
+            │
+            │  (fork path) workflow_run on completion
+            ▼
+        ╔══════════════════════════════════════════════════════════╗
+        ║  WORKFLOW 2 — "post comment"  (PRIVILEGED)                ║
+        ║  write GITHUB_TOKEN + GROQ_API_KEY · base-repo context    ║
+        ║  NEVER runs actions/checkout of the fork — trusted MAIN  ║
+        ║  only (for .advreview.yml + building Flaught)             ║
+        ╚══════════════════════════════════════════════════════════╝
+                             │
+                download artifacts → runner.temp
+                (context.json + findings.json = DATA, not code)
+                             ▼
+                checkout trusted main · build Flaught from main
+                             ▼
+                flaught review --only-llm \
+                  --context $RUNNER_TEMP/ctx/context.json \
+                  --findings $RUNNER_TEMP/findings/findings.json
+                             │
+              ┌──────────────┴───────────────┐
+              ▼                              ▼
+   ┌──────────────────────┐    ┌─────────────────────────────────┐
+   │ LLM + refute pass    │    │  SECURITY INVARIANT:            │
+   │ against the diff as  │    │   GROQ_API_KEY is the           │
+   │ DATA — the fork's   │    │   Authorization header to CALL   │
+   │ code is never        │    │   the LLM. It is NEVER shown    │
+   │ executed here.       │    │   to the model, so a malicious   │
+   └──────────┬───────────┘    │   fork can't exfiltrate it via   │
+              │                │   prompt injection. Worst case  │
+              ▼                │   = misleading comment text.     │
+   merge LLM findings          └─────────────────────────────────┘
+   into findings.json
+              │
+       ┌──────┴───────────────┐
+       ▼                      ▼
+   post review comment    post commit status
+   (markdown: 🤖 LLM +     "Adversarial Review (LLM)"
+    🔧 deterministic       = failure  if gate breached (exit 1)
+    findings + skeptic    = success   otherwise
+    verdicts)                (incl. exit 2 / LLM error → success,
+                             so a Groq outage NEVER blocks merge)
+
+                                  │
+                                  ▼
+        ┌────────────────────────────────────────────────────────┐
+        │  BRANCH PROTECTION on main requires:                    │
+        │    • "Adversarial Review (LLM)"  ── blocks merge if ✗   │
+        │    • code-owner approval                                 │
+        │                                                          │
+        │  → a fork PR with LLM findings that exceed the gate is   │
+        │    BLOCKED, the same as one with deterministic findings. │
+        └────────────────────────────────────────────────────────┘
+```
+
+**The three signals it works** (check on any fork PR): the unprivileged run
+prints `No GROQ_API_KEY (fork PR) — … emitting a context bundle` and uploads
+`flaught-context`; the privileged run has a `Run LLM pass against context
+bundle` step; and a `github-actions` comment lands with 🤖/`F-` LLM findings.
+
+**Same-repo PRs** run the full LLM review inside the unprivileged job (it has
+the key) and post `Adversarial Review (LLM)` from that job's exit code — no
+second workflow needed.
+
 ## Minimal — deterministic tools only (no API key needed)
 
 Runs Semgrep, your linter, and vulnerability scanner with zero LLM cost. Test inversion and scope-creep heuristics still work.
