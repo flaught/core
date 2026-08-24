@@ -147,6 +147,7 @@ Any OpenAI-compatible endpoint works via `base_url`. Anthropic has its own nativ
 - **[Prompt Templates](https://github.com/flaught/core/blob/main/docs/prompt-templates.md)**: override or extend the LLM reviewer's posture, categories, rules, and context via `.flaught-prompt/`
 - **[Findings schema](https://github.com/flaught/core/blob/main/docs/findings-schema.md)**: artifact structure, field definitions, severity levels, categories, dismissal, blast radius
 - **[Dismissals](https://github.com/flaught/core/blob/main/docs/dismissals.md)**: persisting false-positive suppressions across runs via stable fingerprints, `flaught dismiss`/`dismissals` CLI
+- **[Roadmap](https://github.com/flaught/core/blob/main/docs/roadmap.md)**: the curated public roadmap, by theme
 - **[GitHub Actions](https://github.com/flaught/core/blob/main/docs/github-actions.md)**: three ready-to-use workflows (minimal, full, Ollama) plus exit code handling
 - **[Programmatic API](https://github.com/flaught/core/blob/main/docs/api.md)**: use Flaught as a library in Node.js
 - **[Troubleshooting](https://github.com/flaught/core/blob/main/docs/troubleshooting.md)**: every error message, what it means, how to fix it

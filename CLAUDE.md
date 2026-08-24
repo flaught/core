@@ -63,8 +63,8 @@ This protocol applies when ending a Beads implementation workflow. It is subordi
 ```bash
 npm install          # Install dependencies
 npm run build        # Compile TypeScript (tsc)
-npm test             # Full test suite (251 tests, ~20s)
-npm run test:unit   # Unit tests only (220 tests, ~3s) — what pre-commit runs
+npm test             # Full test suite (345 tests, ~20s)
+npm run test:unit   # Unit tests only (308 tests, ~5s) — what pre-commit runs
 npm run dev          # Watch mode for development
 npm run review       # Run Flaught against local changes
 ```
@@ -101,6 +101,10 @@ Key config files:
 
 The default LLM is `openai/gpt-oss-20b` on Groq. The refute pass uses the same
 provider by default but supports a separate provider/model for anti-correlation.
+
+## Issue tracking
+
+bd = private project brain (epics, graph, design, handoff); GitHub Issues = public task surface; `docs/roadmap.md` = curated theme-structured roadmap. Session-start: `bd github pull` then `bd prime`. Mirror bd→GitHub only when self-contained + wants outside eyes; epics never mirrored; reconcile same-topic pairs by linking, never duplicate. The bd distinction is maintainer/agent-only — it must not leak into contributor-facing docs (CONTRIBUTING.md, README, docs/roadmap.md); contributors only need GitHub Issues. Full policy lives in the `bd remember` key `issue-tracking-policy` (injected at `bd prime`).
 
 ## Conventions & Patterns
 

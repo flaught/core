@@ -29,7 +29,15 @@ npm run test:unit
 
 ## The review loop
 
-Run Flaught locally before pushing, the same way CI will:
+Run Flaught locally before pushing, the same way CI will. The lowest-friction path uses the build output directly, no global install:
+
+```bash
+npm run build
+npm run review -- --base main     # full review vs the merge-base with main (runs node dist/cli.js)
+npm run review -- --no-llm        # deterministic tools only, no API key needed
+```
+
+If you want the `flaught` command on your PATH (handy across other checkouts), link it instead:
 
 ```bash
 npm run build
@@ -64,6 +72,14 @@ You don't have to get to zero findings to merge, but each non-dismissed finding 
 - Scope is optional but useful: `feat(test-inversion): skip for docs-only diffs`.
 - Breaking changes go under a `BREAKING CHANGE:` footer or a `!` after the type.
 - Keep the summary under ~72 characters; put detail in the body, wrapped.
+
+## Where things are tracked
+
+File bugs and propose features via **GitHub Issues** — that's the project's public task surface and all a contributor needs. Browse the `good first issue` label for starter work. The public roadmap (themes, not a task list) lives in [`docs/roadmap.md`](docs/roadmap.md).
+
+## Reporting a security issue
+
+Do **not** open a public issue for a security vulnerability. See [SECURITY.md](SECURITY.md) for the private reporting address, what's in scope, and supported versions.
 
 ## What lands
 
