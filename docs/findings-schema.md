@@ -2,7 +2,7 @@
 
 Every finding carries a `source_type` field that distinguishes **deterministic** (tool-asserted) from **LLM-asserted** evidence. This is the governance-critical field — it tells you whether a finding came from a tool that always produces the same output, or from an LLM that may hallucinate.
 
-The schema is versioned from day one — currently `schema_version: 2` — and self-describing (`$schema` URL). Every artifact includes the `_caveat` field — an honest disclaimer about what the data represents.
+The schema is versioned from day one — currently `schema_version: 3` — and self-describing (`$schema` URL). Every artifact includes the `_caveat` field — an honest disclaimer about what the data represents.
 
 ## Finding structure
 
@@ -93,8 +93,8 @@ The JSON artifact (`--output findings.json`) is a complete, self-contained recor
 
 ```json
 {
-  "$schema": "https://flaught.dev/schemas/findings/v2.schema.json",
-  "schema_version": 2,
+  "$schema": "https://flaught.dev/schemas/findings/v3.schema.json",
+  "schema_version": 3,
   "_caveat": "This artifact is evidence that adversarial scrutiny occurred on this PR. It is NOT evidence that findings are correct. LLM-asserted findings may include hallucinations. Deterministic-tool findings have their own false-positive rates. Treat this as a prompt for human review, not as audit-truth.",
   "generated_at": "2025-01-15T10:25:00Z",
   "flaught_version": "0.2.0",
@@ -118,6 +118,14 @@ The JSON artifact (`--output findings.json`) is a complete, self-contained recor
     "id": "flaught-1705315500-a3b2c1",
     "ci_url": null,
     "duration_seconds": 45
+  },
+
+  "analysis_completeness": {
+    "state": "full",
+    "dropped": [],
+    "prompt_chars": 4200,
+    "prompt_limit": 100000,
+    "note": "Full context assembled — diff, changed files, and blast radius all sent to the LLM."
   },
 
   "tools_executed": [
@@ -233,8 +241,30 @@ The `evidence.blast_radius` field on each finding lists files in the one-hop dep
 - Python (`import` and `from ... import`)
 - Go (`import`)
 
+## Analysis completeness
+
+The LLM user prompt has a hard size cap (~100,000 chars). On a large PR the assembled context — diff + changed files + blast-radius neighborhood — may not fit, and Flaught truncates in a fixed priority order until it does:
+
+1. **Neighborhood** (blast-radius file contents) dropped first
+2. **Changed-file contents** dropped next
+3. **The diff itself** truncated last (worst case — the LLM saw only part of the change)
+
+The `analysis_completeness` field records the outcome so a consumer cannot mistake *"Flaught completed"* for *"Flaught comprehensively reviewed this."* Those are not the same on a large PR.
+
+| Field | Values |
+| --- | --- |
+| `state` | `"full"` (everything sent) or `"partial"` (something was truncated) |
+| `dropped` | Which tiers were removed, in priority order: `"neighborhood"`, `"changed-file-contents"`, `"diff"` (only sections that were actually present are listed) |
+| `prompt_chars` | User-prompt character count actually sent |
+| `prompt_limit` | The cap that triggered truncation |
+| `note` | Human-readable summary of what the LLM did and did not see |
+
+`analysis_completeness` is `null` when the LLM pass did not run at all (`--no-llm`, no changes, or the unprivileged emit-bundle half of the fork-PR split). The Markdown PR comment also surfaces a `Partial analysis` warning whenever the state is `partial`.
+
+> **"Flaught completed" is not the same as "Flaught comprehensively reviewed this."** This field makes that distinction legible in the data, so a downstream consumer or merge gate cannot mistake a partial run for a full one.
+
 ## Schema versioning
 
-The schema uses integer versioning. The current version is `2` (bumped from `1` when `fingerprint` and `evidence.rule_id` were added — see [dismissals](dismissals.md)). Breaking changes will increment the version. The `$schema` URL points to a JSON Schema document for validation.
+The schema uses integer versioning. The current version is `3` (bumped from `2` when `analysis_completeness` was added so consumers can distinguish "Flaught completed" from "Flaught comprehensively reviewed this"; `2` bumped from `1` when `fingerprint` and `evidence.rule_id` were added — see [dismissals](dismissals.md)). Breaking changes will increment the version. The `$schema` URL points to a JSON Schema document for validation.
 
 The `_caveat` field is always present and never stripped — it's an honest disclaimer about what the artifact represents and what it doesn't.

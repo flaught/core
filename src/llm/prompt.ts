@@ -10,6 +10,7 @@
 import type { ReviewContext } from "../context/assembler.js";
 import type { FlaughtConfig } from "../schemas/config.js";
 import type { DismissalEntry } from "../schemas/dismissals.js";
+import type { AnalysisCompleteness } from "../schemas/findings.js";
 import {
   assembleSystemPrompt,
   assembleUserAppend,
@@ -81,13 +82,24 @@ export function buildSystemPrompt(
  * When templates are provided, user-append.md content is appended after
  * the built-in review instructions.
  */
-export function buildUserPrompt(
+/** Result of building the user prompt: the prompt text plus first-class
+ * metadata about whether the LLM received the full change context or some
+ * was truncated to fit the prompt size cap. The completeness is surfaced on
+ * the findings artifact so a consumer/gate can distinguish "Flaught completed"
+ * from "Flaught comprehensively reviewed this" — those are not the same on a
+ * large PR. */
+export interface BuiltUserPrompt {
+  prompt: string;
+  completeness: AnalysisCompleteness;
+}
+
+export function buildUserPromptWithCompleteness(
   context: ReviewContext,
   _config: FlaughtConfig,
   prDescription?: string,
   templates: PromptTemplates = NO_TEMPLATES,
   activeDismissals: DismissalEntry[] = [],
-): string {
+): BuiltUserPrompt {
   const sections: string[] = [];
   const MAX_PROMPT_CHARS = 100_000; // ~25K tokens, leaves room for the system prompt and output
 
@@ -192,42 +204,117 @@ export function buildUserPrompt(
   }
 
   const prompt = sections.join("\n\n---\n\n");
+  const limit = MAX_PROMPT_CHARS;
+  const fullNote =
+    "Full context assembled — diff, changed files, and blast radius all sent to the LLM.";
+
+  // Which context-bearing sections were actually present? A small PR with a huge
+  // diff has no neighborhood to drop, so `dropped` must reflect what really got
+  // removed — never claim a section was truncated if it was never there.
+  const hadNeighborhood = context.neighborhoodFileContents.size > 0;
+  const hadChangedFileContents = context.changedFileContents.size > 0;
+  const hadDiff = Boolean(context.diff);
+  const droppedOf = (...tiers: Array<"neighborhood" | "changed-file-contents" | "diff">) =>
+    tiers.filter((t) =>
+      t === "neighborhood" ? hadNeighborhood :
+      t === "changed-file-contents" ? hadChangedFileContents :
+      hadDiff);
 
   // ── Truncate if the prompt is too long ──
-  if (prompt.length > MAX_PROMPT_CHARS) {
-    // Priority order for truncation: neighborhood contents first, then file contents, then diff
-    // The summary sections (changed files, blast radius, review instructions) are kept.
-
-    // Try without neighborhood contents
-    const withoutNeighborhood = sections
-      .filter((s) => !s.includes("Neighborhood File Contents"))
-      .join("\n\n---\n\n");
-    if (withoutNeighborhood.length <= MAX_PROMPT_CHARS) {
-      return withoutNeighborhood + "\n\n---\n\n⚠️ Neighborhood file contents were truncated to fit the prompt size limit.";
-    }
-
-    // Try without file contents too
-    const essential = sections
-      .filter((s) => !s.includes("Neighborhood File Contents") && !s.includes("Changed File Contents"))
-      .join("\n\n---\n\n");
-    if (essential.length <= MAX_PROMPT_CHARS) {
-      return essential + "\n\n---\n\n⚠️ File contents were truncated to fit the prompt size limit. Only the diff and summaries are included.";
-    }
-
-    // Last resort: truncate the diff itself
-    const diffSection = sections.find((s) => s.includes("Unified Diff"));
-    const nonDiffSections = sections.filter((s) => !s.includes("Unified Diff") && !s.includes("Neighborhood File Contents") && !s.includes("Changed File Contents"));
-    const diffBudget = MAX_PROMPT_CHARS - nonDiffSections.join("\n\n---\n\n").length - 200;
-    if (diffSection && diffBudget > 1000) {
-      const truncatedDiff = diffSection.slice(0, diffBudget);
-      return [...nonDiffSections, truncatedDiff].join("\n\n---\n\n") +
-        `\n\n---\n\n⚠️ The diff was truncated to fit the prompt size limit (${context.changedFiles.length} files changed; showing first ~${diffBudget} chars).`;
-    }
-
-    // Absolute fallback
-    return nonDiffSections.join("\n\n---\n\n") +
-      `\n\n⚠️ Context was truncated to fit the prompt size limit.`;
+  // Priority order: neighborhood contents first, then file contents, then the diff.
+  // The summary sections (changed files, blast radius, review instructions) are kept.
+  // Each tier records what was dropped so the artifact can tell a consumer the
+  // LLM saw less than the whole change — "Flaught completed" ≠ "comprehensively reviewed".
+  if (prompt.length <= limit) {
+    return {
+      prompt,
+      completeness: { state: "full", dropped: [], prompt_chars: prompt.length, prompt_limit: limit, note: fullNote },
+    };
   }
 
-  return prompt;
+  // Tier 1: drop neighborhood (blast-radius) file contents. The LLM still has
+  // the full diff and changed-file contents, just not the surrounding code.
+  const withoutNeighborhood = sections
+    .filter((s) => !s.includes("Neighborhood File Contents"))
+    .join("\n\n---\n\n");
+  if (withoutNeighborhood.length <= limit) {
+    return {
+      prompt: withoutNeighborhood + "\n\n---\n\n⚠️ Neighborhood file contents were truncated to fit the prompt size limit.",
+      completeness: {
+        state: "partial",
+        dropped: droppedOf("neighborhood"),
+        prompt_chars: withoutNeighborhood.length,
+        prompt_limit: limit,
+        note: "Neighborhood (blast-radius) file contents were truncated. The LLM saw the full diff and changed files but not the surrounding code that depends on them — findings about cross-file impact may be incomplete.",
+      },
+    };
+  }
+
+  // Tier 2: drop changed-file full contents too. The LLM has the full diff and
+  // summaries, but not the full text of the changed files.
+  const essential = sections
+    .filter((s) => !s.includes("Neighborhood File Contents") && !s.includes("Changed File Contents"))
+    .join("\n\n---\n\n");
+  if (essential.length <= limit) {
+    return {
+      prompt: essential + "\n\n---\n\n⚠️ File contents were truncated to fit the prompt size limit. Only the diff and summaries are included.",
+      completeness: {
+        state: "partial",
+        dropped: droppedOf("neighborhood", "changed-file-contents"),
+        prompt_chars: essential.length,
+        prompt_limit: limit,
+        note: "Neighborhood and changed-file contents were truncated. The LLM saw the full diff and summaries only — it may lack the context to judge how the changed code interacts with the rest of the file.",
+      },
+    };
+  }
+
+  // Tier 3: truncate the diff itself (worst case). The LLM reviewed only part
+  // of the change; findings may miss issues in the omitted portions entirely.
+  const diffSection = sections.find((s) => s.includes("Unified Diff"));
+  const nonDiffSections = sections.filter((s) => !s.includes("Unified Diff") && !s.includes("Neighborhood File Contents") && !s.includes("Changed File Contents"));
+  const diffBudget = limit - nonDiffSections.join("\n\n---\n\n").length - 200;
+  if (diffSection && diffBudget > 1000) {
+    const truncatedDiff = diffSection.slice(0, diffBudget);
+    const out = [...nonDiffSections, truncatedDiff].join("\n\n---\n\n") +
+      `\n\n---\n\n⚠️ The diff was truncated to fit the prompt size limit (${context.changedFiles.length} files changed; showing first ~${diffBudget} chars).`;
+    return {
+      prompt: out,
+      completeness: {
+        state: "partial",
+        dropped: droppedOf("neighborhood", "changed-file-contents", "diff"),
+        prompt_chars: out.length,
+        prompt_limit: limit,
+        note: `The diff itself was truncated (showing ~${diffBudget} of ${diffSection.length} chars). The LLM reviewed only part of the change — findings may miss issues in the omitted portions. Treat this run as preliminary for the unseen parts.`,
+      },
+    };
+  }
+
+  // Absolute fallback: only summaries survived.
+  const out = nonDiffSections.join("\n\n---\n\n") +
+    `\n\n⚠️ Context was truncated to fit the prompt size limit.`;
+  return {
+    prompt: out,
+    completeness: {
+      state: "partial",
+      dropped: droppedOf("neighborhood", "changed-file-contents", "diff"),
+      prompt_chars: out.length,
+      prompt_limit: limit,
+      note: "Context was severely truncated. The LLM received only summaries, not the diff or file contents. Treat all findings as preliminary.",
+    },
+  };
+}
+
+/**
+ * Back-compat wrapper: returns just the prompt text. Existing callers and the
+ * public API keep working; new callers that need the completeness metadata use
+ * {@link buildUserPromptWithCompleteness}.
+ */
+export function buildUserPrompt(
+  context: ReviewContext,
+  config: FlaughtConfig,
+  prDescription?: string,
+  templates: PromptTemplates = NO_TEMPLATES,
+  activeDismissals: DismissalEntry[] = [],
+): string {
+  return buildUserPromptWithCompleteness(context, config, prDescription, templates, activeDismissals).prompt;
 }

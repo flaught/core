@@ -38,6 +38,10 @@ export function renderMarkdownReport(artifact: FindingsArtifact): string {
   // Caveat
   sections.push(renderCaveat());
 
+  // Analysis-completeness warning (LLM saw less than the whole change)
+  const completenessWarning = renderCompletenessWarning(artifact);
+  if (completenessWarning) sections.push(completenessWarning);
+
   // Summary
   sections.push(renderSummary(artifact));
 
@@ -79,6 +83,32 @@ function renderHeader(_artifact: FindingsArtifact): string {
 
 function renderCaveat(): string {
   return `> ⚠️ ${CAVEAT}`;
+}
+
+/**
+ * Surface analysis completeness as a first-class warning so a reader cannot
+ * mistake "Flaught completed" for "Flaught comprehensively reviewed this". On a
+ * large PR the LLM may have seen only part of the change (neighborhood, then
+ * file contents, then the diff itself get truncated to fit the prompt cap) —
+ * the JSON artifact carries the structured `analysis_completeness` field; this
+ * is the human-facing echo of the same truth. Null = the LLM pass did not run
+ * (--no-llm / no changes / emit-bundle half), which is already covered by the
+ * LLM-error warning, so nothing is rendered here.
+ */
+function renderCompletenessWarning(artifact: FindingsArtifact): string | null {
+  const c = artifact.analysis_completeness;
+  if (!c || c.state === "full") return null;
+
+  const droppedLabel: Record<typeof c.dropped[number], string> = {
+    neighborhood: "blast-radius (neighborhood) file contents",
+    "changed-file-contents": "changed-file full contents",
+    diff: "the diff itself",
+  };
+  const dropped = c.dropped.length > 0 ? c.dropped.map((d) => droppedLabel[d]).join("; ") : "some context";
+  return [
+    `> ⚠️ **Partial analysis — the LLM did not see the whole change.**`,
+    `> To fit the prompt size cap (${c.prompt_limit.toLocaleString()} chars), ${dropped} were truncated. The LLM reviewed only part of the change, so findings may miss issues in the omitted portions. See the \`analysis_completeness\` field in the JSON artifact.`,
+  ].join("\n");
 }
 
 /**

@@ -285,6 +285,8 @@ Add `GROQ_API_KEY` to your repository secrets (Settings → Secrets and variable
 
 **Note on the "Comment on PR" step:** it re-runs `flaught review` a second time to get markdown for the comment body, since `--output` only writes the JSON artifact — there's no "render markdown from an existing artifact" command yet. That second run uses `--no-llm` deliberately: running it *without* `--no-llm` would call the LLM API a second time per PR (doubling cost/latency) just to reproduce a report. The tradeoff is that the posted comment only reflects deterministic/test-inversion/scope-creep findings, not the LLM pass — the uploaded `findings.json` artifact from the first (full) run is the source of truth for LLM findings.
 
+**Reading the artifact programmatically:** check `analysis_completeness` before treating findings as complete. On a large PR the LLM prompt may be truncated (`state: "partial"`), meaning the LLM saw less than the whole change — "Flaught completed" ≠ "comprehensively reviewed." See the [findings schema](findings-schema.md#analysis-completeness).
+
 ### Comments on fork PRs need a second workflow
 
 The single-workflow examples above post the comment from the same `pull_request` job that runs the review. That works for PRs from branches **in the same repo**, but **breaks for PRs from forks** with:

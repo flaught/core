@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { buildSystemPrompt, buildUserPrompt, formatDismissalsForPrompt } from "./prompt.js";
+import { buildSystemPrompt, buildUserPrompt, buildUserPromptWithCompleteness, formatDismissalsForPrompt } from "./prompt.js";
 import { FlaughtConfigSchema } from "../schemas/config.js";
 import type { ReviewContext } from "../context/assembler.js";
 import { NO_TEMPLATES, type PromptTemplates } from "../prompt/templates.js";
@@ -250,6 +250,82 @@ describe("buildUserPrompt", () => {
     const reviewIdx = prompt.indexOf("Review Instructions");
     expect(dismissalsIdx).toBeGreaterThan(-1);
     expect(reviewIdx).toBeGreaterThan(dismissalsIdx);
+  });
+});
+
+describe("buildUserPromptWithCompleteness", () => {
+  it("reports full completeness when the context fits the prompt cap", () => {
+    const config = FlaughtConfigSchema.parse({});
+    const context = mockContext();
+    const { prompt, completeness } = buildUserPromptWithCompleteness(context, config);
+
+    expect(completeness.state).toBe("full");
+    expect(completeness.dropped).toEqual([]);
+    expect(completeness.prompt_chars).toBe(prompt.length);
+    expect(completeness.note).toContain("Full context");
+  });
+
+  it("reports partial (neighborhood dropped) when only blast-radius contents overflow", () => {
+    const config = FlaughtConfigSchema.parse({});
+    const big = "x".repeat(120_000);
+    const context = mockContext({
+      neighborhoodFiles: ["src/routes.ts"],
+      neighborhoodFileContents: new Map([["src/routes.ts", big]]),
+    });
+    const { prompt, completeness } = buildUserPromptWithCompleteness(context, config);
+
+    expect(completeness.state).toBe("partial");
+    expect(completeness.dropped).toEqual(["neighborhood"]);
+    expect(prompt).not.toContain("Neighborhood File Contents");
+    expect(prompt).toContain("Unified Diff");
+    expect(prompt).toContain("Changed File Contents");
+    expect(completeness.note).toContain("blast-radius");
+  });
+
+  it("reports partial (neighborhood + changed-file dropped) when both overflow", () => {
+    const config = FlaughtConfigSchema.parse({});
+    const big = "x".repeat(120_000);
+    const context = mockContext({
+      neighborhoodFiles: ["src/routes.ts"],
+      changedFileContents: new Map([["src/app.ts", big]]),
+      neighborhoodFileContents: new Map([["src/routes.ts", big]]),
+    });
+    const { prompt, completeness } = buildUserPromptWithCompleteness(context, config);
+
+    expect(completeness.state).toBe("partial");
+    expect(completeness.dropped).toEqual(["neighborhood", "changed-file-contents"]);
+    expect(prompt).not.toContain("Neighborhood File Contents");
+    expect(prompt).not.toContain("Changed File Contents");
+    expect(prompt).toContain("Unified Diff");
+  });
+
+  it("reports partial (diff truncated) when the diff itself overflows", () => {
+    const config = FlaughtConfigSchema.parse({});
+    const big = "x".repeat(150_000);
+    const context = mockContext({ diff: `diff --git a/src/app.ts b/src/app.ts\n+${big}\n` });
+    const { prompt, completeness } = buildUserPromptWithCompleteness(context, config);
+
+    expect(completeness.state).toBe("partial");
+    // Changed-file contents were present and got dropped with the truncated diff;
+    // neighborhood was never present so it is not claimed.
+    expect(completeness.dropped).toEqual(["changed-file-contents", "diff"]);
+    expect(prompt).toContain("diff was truncated");
+    expect(completeness.note).toContain("diff itself was truncated");
+  });
+
+  it("does not claim a section was dropped if it was never present", () => {
+    // Huge diff, no neighborhood, no changed-file contents — only "diff" should be in dropped.
+    const config = FlaughtConfigSchema.parse({});
+    const context = mockContext({
+      diff: `diff --git a/src/app.ts b/src/app.ts\n+${"x".repeat(150_000)}\n`,
+      changedFileContents: new Map(),
+      neighborhoodFileContents: new Map(),
+    });
+    const { completeness } = buildUserPromptWithCompleteness(context, config);
+
+    expect(completeness.dropped).toEqual(["diff"]);
+    expect(completeness.dropped).not.toContain("neighborhood");
+    expect(completeness.dropped).not.toContain("changed-file-contents");
   });
 });
 

@@ -13,7 +13,7 @@ import { assembleContext, contextFromJSON, type ReviewContext, type ReviewContex
 import { loadConfig } from "./config.js";
 import type { FlaughtConfig } from "./schemas/config.js";
 import { createProvider, type LLMReviewResult } from "./llm/provider.js";
-import { buildSystemPrompt, buildUserPrompt } from "./llm/prompt.js";
+import { buildSystemPrompt, buildUserPromptWithCompleteness } from "./llm/prompt.js";
 import { loadTemplates, type PromptTemplates } from "./prompt/templates.js";
 import {
   type FindingsArtifact,
@@ -24,6 +24,7 @@ import {
   type TestInversion,
   type ScopeCreep,
   type FlaggedHunk,
+  type AnalysisCompleteness,
   SCHEMA_VERSION,
   FINDINGS_SCHEMA_URL,
   CAVEAT,
@@ -189,6 +190,7 @@ export async function runReview(options: ReviewOptions = {}): Promise<ReviewResu
   // 4. Run LLM review
   let llmResult: LLMReviewResult | null = null;
   let llmError: string | null = null;
+  let analysisCompleteness: AnalysisCompleteness | null = null;
   let findings: Finding[] = [];
 
   // Convert deterministic findings to Finding format
@@ -284,6 +286,7 @@ export async function runReview(options: ReviewOptions = {}): Promise<ReviewResu
     });
     llmResult = llmStage.llmResult;
     llmError = llmStage.llmError;
+    analysisCompleteness = llmStage.completeness;
     findings.push(...llmStage.llmFindings);
   }
 
@@ -443,6 +446,7 @@ export async function runReview(options: ReviewOptions = {}): Promise<ReviewResu
   artifact.tools_executed = toolExecutions;
   artifact.test_inversion = testInversion;
   artifact.scope_creep = scopeCreepResult;
+  artifact.analysis_completeness = analysisCompleteness;
 
   // Record the PR description on the artifact so the privileged half of the
   // fork-PR split (--only-llm) can recover the scope-creep intent anchor from
@@ -507,6 +511,8 @@ export interface LlmStageResult {
   llmResult: LLMReviewResult | null;
   /** Error message if the LLM call or refute pass failed; null otherwise. */
   llmError: string | null;
+  /** Whether the LLM received the full change context or some was truncated to fit the prompt cap. Null is impossible here (the prompt is always built), but typed nullable for the caller's union with the skip-LLM path. */
+  completeness: AnalysisCompleteness;
 }
 
 /**
@@ -549,7 +555,7 @@ export async function runLlmStage(input: LlmStageInput): Promise<LlmStageResult>
   const provider = createProvider(config);
   const systemPrompt = buildSystemPrompt(config, templates);
   const activeDismissals = dismissalStore ? getActiveDismissals(dismissalStore) : [];
-  const userPrompt = buildUserPrompt(context, config, prDescription, templates, activeDismissals);
+  const { prompt: userPrompt, completeness } = buildUserPromptWithCompleteness(context, config, prDescription, templates, activeDismissals);
 
   // Inject deterministic tool findings into the prompt
   const toolContext = formatToolFindingsForPrompt(deterministicFindings);
@@ -646,7 +652,7 @@ export async function runLlmStage(input: LlmStageInput): Promise<LlmStageResult>
     progress("No LLM findings to refute — skipping skeptic pass.");
   }
 
-  return { llmFindings, llmResult, llmError };
+  return { llmFindings, llmResult, llmError, completeness };
 }
 
 // ─── Review bundle (context artifact for the fork-PR split) ──────────────────
@@ -896,6 +902,7 @@ export async function runReviewOnlyLlm(options: OnlyLlmOptions): Promise<ReviewR
   artifact.test_inversion = partial.test_inversion;
   artifact.scope_creep = scopeCreepResult;
   artifact.pull_request = partial.pull_request;
+  artifact.analysis_completeness = llmStage.completeness;
   if (llmStage.llmError) {
     artifact.run.llm_error = llmStage.llmError;
   }
@@ -1018,6 +1025,7 @@ function buildArtifact(
       duration_seconds: 0,
       llm_error: null,
     },
+    analysis_completeness: null,
     tools_executed: [],
     findings,
     test_inversion: null,

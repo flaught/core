@@ -27,14 +27,15 @@ function makeFinding(overrides: Partial<Finding> = {}): Finding {
 function makeArtifact(overrides: Partial<FindingsArtifact> = {}): FindingsArtifact {
   const findings = overrides.findings ?? [makeFinding()];
   return {
-    $schema: "https://flaught.dev/schemas/findings/v2.schema.json",
-    schema_version: 2,
+    $schema: "https://flaught.dev/schemas/findings/v3.schema.json",
+    schema_version: 3,
     _caveat: "caveat",
     generated_at: "2026-01-01T00:00:00Z",
     flaught_version: "0.8.0",
     repository: { name: "flaught/core", url: "https://github.com/flaught/core", branch: "main" },
     pull_request: { number: 1, url: null, title: "Test PR", description: null, base_sha: "a", head_sha: "b" },
     run: { id: "run-1", ci_url: null, duration_seconds: 5, llm_error: null },
+    analysis_completeness: null,
     tools_executed: [],
     findings,
     test_inversion: null,

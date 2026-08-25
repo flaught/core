@@ -227,8 +227,11 @@ describe("runReview (no-llm mode)", () => {
 
     expect(result.context.changedFiles.length).toBeGreaterThanOrEqual(1);
     expect(result.artifact.findings).toHaveLength(0);
-    expect(result.artifact.schema_version).toBe(2);
+    expect(result.artifact.schema_version).toBe(3);
     expect(result.artifact._caveat).toContain("evidence that adversarial scrutiny occurred");
+    // The LLM pass was skipped, so completeness is null — the artifact must not
+    // claim the LLM saw anything (it never ran).
+    expect(result.artifact.analysis_completeness).toBeNull();
     expect(result.exitCode).toBe(0);
     expect(result.markdown).toContain("No findings");
     expect(result.json).toBeTruthy();
@@ -298,7 +301,7 @@ describe("runReview (no-llm mode)", () => {
     });
 
     const parsed = JSON.parse(result.json);
-    expect(parsed.schema_version).toBe(2);
+    expect(parsed.schema_version).toBe(3);
     expect(parsed.findings).toEqual([]);
     expect(parsed.noise_budget).toBeTruthy();
     expect(parsed._caveat).toBeTruthy();
@@ -570,6 +573,11 @@ describe("runReview (LLM graceful degradation)", () => {
     expect(result.llmResult).toBeNull();
     expect(result.llmError).toContain("Groq API error");
     expect(result.artifact.run.llm_error).toContain("Groq API error");
+    // The user prompt was assembled before the LLM call failed, so the
+    // artifact carries the (full, for this tiny diff) analysis-completeness
+    // metadata - the governance signal survives a degraded run.
+    expect(result.artifact.analysis_completeness).not.toBeNull();
+    expect(result.artifact.analysis_completeness?.state).toBe("full");
     expect(result.json).toBeTruthy();
     expect(JSON.parse(result.json).run.llm_error).toContain("Groq API error");
     expect(result.markdown).toContain("LLM adversarial review failed");

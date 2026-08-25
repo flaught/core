@@ -39,14 +39,15 @@ function makeFinding(overrides: Partial<Finding> = {}): Finding {
 }
 
 const minimalArtifact: FindingsArtifact = {
-  $schema: "https://flaught.dev/schemas/findings/v2.schema.json",
-  schema_version: 2,
+  $schema: "https://flaught.dev/schemas/findings/v3.schema.json",
+  schema_version: 3,
   _caveat: "This artifact is evidence that adversarial scrutiny occurred.",
   generated_at: "2026-08-22T00:00:00Z",
   flaught_version: "0.8.0",
   repository: { name: "flaught/core", url: "", branch: "main" },
   pull_request: { number: 42, url: null, title: null, description: null, base_sha: "abc123", head_sha: "def456" },
   run: { id: "flaught-001", ci_url: null, duration_seconds: 10, llm_error: null },
+  analysis_completeness: null,
   tools_executed: [],
   findings: [],
   test_inversion: null,

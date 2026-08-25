@@ -64,6 +64,7 @@ function makeArtifact(overrides: Partial<FindingsArtifact> = {}): FindingsArtifa
     repository: { name: "flaught/core", url: "https://github.com/flaught/core", branch: "main" },
     pull_request: { number: 42, url: "https://github.com/flaught/core/pull/42", title: "Add auth", description: "Adds JWT auth", base_sha: "abc123", head_sha: "def456" },
     run: { id: "flaught-1234567890-abc123", ci_url: null, duration_seconds: 47, llm_error: null },
+    analysis_completeness: null,
     tools_executed: [],
     findings,
     test_inversion: null,
@@ -188,7 +189,7 @@ describe("renderMarkdownReport", () => {
     const artifact = makeArtifact();
     const md = renderMarkdownReport(artifact);
     expect(md).toContain("Flaught v0.4.1");
-    expect(md).toContain("Schema v2");
+    expect(md).toContain("Schema v3");
   });
 
   it("warns when the LLM review failed", () => {
@@ -286,7 +287,7 @@ describe("renderJsonArtifact", () => {
     const json = renderJsonArtifact(artifact);
     const parsed = JSON.parse(json);
     expect(parsed).toBeTruthy();
-    expect(parsed.schema_version).toBe(2);
+    expect(parsed.schema_version).toBe(3);
   });
 
   it("includes the caveat", () => {
@@ -316,5 +317,59 @@ describe("renderJsonArtifact", () => {
     const parsed = JSON.parse(json);
     expect(parsed.noise_budget.high.used).toBe(1);
     expect(parsed.noise_budget.high.limit).toBe(10);
+  });
+
+  it("serializes analysis_completeness when present", () => {
+    const artifact = makeArtifact({
+      analysis_completeness: {
+        state: "partial",
+        dropped: ["neighborhood", "diff"],
+        prompt_chars: 100000,
+        prompt_limit: 100000,
+        note: "The diff itself was truncated.",
+      },
+    });
+    const parsed = JSON.parse(renderJsonArtifact(artifact));
+    expect(parsed.analysis_completeness.state).toBe("partial");
+    expect(parsed.analysis_completeness.dropped).toEqual(["neighborhood", "diff"]);
+    expect(parsed.analysis_completeness.note).toContain("diff itself was truncated");
+  });
+
+  it("serializes analysis_completeness as null when the LLM did not run", () => {
+    const artifact = makeArtifact({ analysis_completeness: null });
+    const parsed = JSON.parse(renderJsonArtifact(artifact));
+    expect(parsed.analysis_completeness).toBeNull();
+  });
+});
+
+describe("renderMarkdownReport (analysis completeness)", () => {
+  it("renders a partial-analysis warning when the LLM saw less than the whole change", () => {
+    const artifact = makeArtifact({
+      analysis_completeness: {
+        state: "partial",
+        dropped: ["neighborhood", "changed-file-contents", "diff"],
+        prompt_chars: 100000,
+        prompt_limit: 100000,
+        note: "The diff itself was truncated.",
+      },
+    });
+    const md = renderMarkdownReport(artifact);
+    expect(md).toContain("Partial analysis");
+    expect(md).toContain("diff itself");
+    expect(md).toContain("analysis_completeness");
+  });
+
+  it("renders no completeness warning when the LLM saw the full change", () => {
+    const artifact = makeArtifact({
+      analysis_completeness: { state: "full", dropped: [], prompt_chars: 5000, prompt_limit: 100000, note: "Full context." },
+    });
+    const md = renderMarkdownReport(artifact);
+    expect(md).not.toContain("Partial analysis");
+  });
+
+  it("renders no completeness warning when the LLM did not run (null)", () => {
+    const artifact = makeArtifact({ analysis_completeness: null });
+    const md = renderMarkdownReport(artifact);
+    expect(md).not.toContain("Partial analysis");
   });
 });

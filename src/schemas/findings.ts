@@ -145,6 +145,28 @@ export interface FindingsSummary {
   dismissed_count: number;
 }
 
+// ─── Analysis completeness (was the LLM given the full picture?) ─────────────
+
+/** What was dropped from the LLM user prompt, in truncation-priority order. */
+export type AnalysisCompletenessDropped =
+  | "neighborhood" // blast-radius file contents dropped first
+  | "changed-file-contents" // changed-file full contents dropped next
+  | "diff"; // the diff itself was truncated (worst case)
+
+/** First-class metadata: did the LLM see the whole change, or just part of it? */
+export interface AnalysisCompleteness {
+  /** Whether the LLM received the complete assembled context or some was truncated. */
+  state: "full" | "partial";
+  /** What was dropped to fit the prompt size cap, in truncation-priority order. */
+  dropped: AnalysisCompletenessDropped[];
+  /** User-prompt character count actually sent (post-truncation body, before tool/scope-creep appends). */
+  prompt_chars: number;
+  /** The hard cap that triggered truncation. */
+  prompt_limit: number;
+  /** Human-readable summary of what the LLM did and did not see. */
+  note: string;
+}
+
 // ─── Top-level artifact ────────────────────────────────────────────────────
 
 export interface FindingsArtifact {
@@ -180,6 +202,9 @@ export interface FindingsArtifact {
     llm_error: string | null;
   };
 
+  /** Was the LLM given the full change context, or was part truncated to fit the prompt cap? Null when the LLM pass did not run (--no-llm, no changes, or the unprivileged emit-bundle half). */
+  analysis_completeness: AnalysisCompleteness | null;
+
   tools_executed: ToolExecuted[];
 
   findings: Finding[];
@@ -194,9 +219,9 @@ export interface FindingsArtifact {
 
 // ─── Constants ─────────────────────────────────────────────────────────────
 
-export const SCHEMA_VERSION = 2;
+export const SCHEMA_VERSION = 3;
 
-export const FINDINGS_SCHEMA_URL = "https://flaught.dev/schemas/findings/v2.schema.json";
+export const FINDINGS_SCHEMA_URL = "https://flaught.dev/schemas/findings/v3.schema.json";
 
 export const CAVEAT =
   "This artifact is evidence that adversarial scrutiny occurred on this PR. " +

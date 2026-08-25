@@ -156,6 +156,8 @@ Any OpenAI-compatible endpoint works via `base_url`. Anthropic has its own nativ
 
 The JSON artifact is evidence that *scrutiny occurred*, not evidence that findings are *correct*. LLM-asserted findings may include hallucinations. Deterministic-tool findings have their own false-positive rates. Treat this as a prompt for human review, not audit-truth.
 
+On a large PR the LLM prompt may be truncated to fit a size cap; every artifact carries an `analysis_completeness` field recording what the LLM actually saw (`full` vs `partial`, and what was dropped) — so "Flaught completed" is never mistaken for "Flaught comprehensively reviewed this." See the [findings schema](docs/findings-schema.md#analysis-completeness).
+
 ## License
 
 MIT
