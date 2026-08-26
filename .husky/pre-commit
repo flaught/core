@@ -1,3 +1,9 @@
 npm run typecheck
 npx lint-staged
-npm run test:unit
+
+# Fixture tests create foreign repositories. Git exports the current
+# repository's local environment to hooks, so clear it for the test process.
+(
+  unset $(git rev-parse --local-env-vars)
+  npm run test:unit
+)
