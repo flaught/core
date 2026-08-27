@@ -145,6 +145,7 @@ Any OpenAI-compatible endpoint works via `base_url`. Anthropic has its own nativ
 
 - **[Configuration](https://github.com/flaught/core/blob/main/docs/configuration.md)**: full `.advreview.yml` reference, LLM providers, noise budget, severity gate, tools, test inversion, scope-creep
 - **[Prompt Templates](https://github.com/flaught/core/blob/main/docs/prompt-templates.md)**: override or extend the LLM reviewer's posture, categories, rules, and context via `.flaught-prompt/`
+- **[Trends dashboard](https://github.com/flaught/core/blob/main/docs/dashboard.md)**: download historical findings artifacts and render a self-contained HTML trends report
 - **[Findings schema](https://github.com/flaught/core/blob/main/docs/findings-schema.md)**: artifact structure, field definitions, severity levels, categories, dismissal, blast radius
 - **[Dismissals](https://github.com/flaught/core/blob/main/docs/dismissals.md)**: persisting false-positive suppressions across runs via stable fingerprints, `flaught dismiss`/`dismissals` CLI
 - **[Roadmap](https://github.com/flaught/core/blob/main/docs/roadmap.md)**: the curated public roadmap, by theme
