@@ -51,8 +51,9 @@ program
   .command("init")
   .description("Scaffold .advreview.yml with commented defaults")
   .option("-d, --dir <path>", "Target directory", process.cwd())
+  .option("--paranoid", "Write explicit review settings without prompting")
   .action((opts) => {
-    const filePath = initConfig(opts.dir);
+    const filePath = initConfig(opts.dir, { paranoid: opts.paranoid });
     console.log(`Created ${filePath}`);
 
     // Also scaffold .flaught-prompt/ with example template files
