@@ -17,6 +17,10 @@ describe("FlaughtConfigSchema", () => {
     expect(config.tools.semgrep.enabled).toBe(true);
     expect(config.tools.linter.enabled).toBe(true);
     expect(config.tools.vuln_scanner.enabled).toBe(true);
+    expect(config.tools.dependency_sanity.enabled).toBe(true);
+    expect(config.tools.dependency_sanity.min_age_days).toBe(30);
+    expect(config.tools.dependency_sanity.min_weekly_downloads).toBe(10);
+    expect(config.tools.dependency_sanity.typosquat_max_distance).toBe(1);
     expect(config.test_inversion.enabled).toBe(true);
     expect(config.test_inversion.scope_to_blast_radius).toBe(true);
     expect(config.test_inversion.skip_docs_only_diffs).toBe(true);

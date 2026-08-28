@@ -324,9 +324,13 @@ async function runCliReview(opts: {
   }
 
   // Exit code based on severity gate
-  if (result.exitCode !== 0) {
+  if (result.exitCode === 1) {
     console.error(
-      `\n⛔ Exiting with code ${result.exitCode}: undismissed findings at or above severity gate threshold`,
+      `\n⛔ Exiting with code 1: undismissed findings at or above severity gate threshold`,
+    );
+  } else if (result.exitCode === 2) {
+    console.error(
+      `\n⚠️ Exiting with code 2: a deterministic tool could not complete reliably (not a verdict)`,
     );
   }
   process.exit(result.exitCode);

@@ -24,7 +24,7 @@ const result = await runReview({
 
 console.log(result.markdown);   // Markdown report (for PR comments)
 console.log(result.json);       // JSON artifact string
-console.log(result.exitCode);   // 0 (clean) or 1 (severity gate exceeded) — see note below
+console.log(result.exitCode);   // 0 (clean), 1 (severity gate), or 2 (tool fault) — see note below
 console.log(result.artifact);   // Full FindingsArtifact object
 
 // Access structured results
@@ -57,12 +57,12 @@ interface ReviewResult {
   artifact: FindingsArtifact;    // Full structured artifact
   markdown: string;              // Markdown PR comment
   json: string;                  // JSON artifact string
-  exitCode: number;              // 0=clean, 1=gated (never 2 — see note below)
+  exitCode: number;              // 0=clean, 1=gated, 2=tool fault (see note below)
   durationSeconds: number;       // Total run duration
 }
 ```
 
-**Note:** `exitCode` on a resolved `ReviewResult` is always `0` or `1`. The CLI's exit code `2` (config/API error) isn't a value `runReview()` returns — it happens when `runReview()` *throws* (`MissingAPIKeyError`, `LLMError`, or another error), which the CLI's `handleError()` catches and converts to `process.exit(2)`. A library consumer calling `runReview()` directly should `try`/`catch` for that case instead of checking `exitCode` — see [Error handling](#error-handling) below.
+**Note:** `exitCode` on a resolved `ReviewResult` is `0` (clean), `1` (findings exceeded the severity gate), or `2` when a deterministic tool could not complete reliably (for example the npm registry is unreachable during a dependency-sanity check). `2` is a tool fault, not a verdict — CI should warn, not block merge. The CLI also exits `2` when `runReview()` *throws* (`MissingAPIKeyError`, `LLMError`, or another error), which `handleError()` catches. A library consumer calling `runReview()` directly should `try`/`catch` in addition to checking `exitCode` — see [Error handling](#error-handling) below.
 
 ### ReviewOptions
 

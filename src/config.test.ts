@@ -125,11 +125,16 @@ describe("initConfig", () => {
     expect(tools.semgrep?.enabled).toBe(true);
     expect(tools.linter?.enabled).toBe(true);
     expect(tools.vuln_scanner?.enabled).toBe(true);
+    expect(tools.dependency_sanity?.enabled).toBe(true);
 
     const config = await loadConfig(filePathFor(dir));
     expect(config.tools.semgrep.enabled).toBe(true);
     expect(config.tools.linter.enabled).toBe(true);
     expect(config.tools.vuln_scanner.enabled).toBe(true);
+    expect(config.tools.dependency_sanity.enabled).toBe(true);
+    expect(config.tools.dependency_sanity.min_age_days).toBe(30);
+    expect(config.tools.dependency_sanity.min_weekly_downloads).toBe(10);
+    expect(config.tools.dependency_sanity.typosquat_max_distance).toBe(1);
   });
 });
 
