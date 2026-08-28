@@ -27,7 +27,7 @@ Config → Context assembly → Deterministic tools → LLM adversarial pass →
 | Stage                     | What it does                                                                    |
 | ------------------------- | -------------------------------------------------------------------------------- |
 | **Context assembly**      | Diff, changed files, one-hop dependency neighborhood (blast radius)              |
-| **Deterministic tools**   | Semgrep, linter, vuln scanner: findings tagged `source_type: "deterministic"`    |
+| **Deterministic tools**   | Semgrep, linter, vuln scanner, dependency sanity: findings tagged `source_type: "deterministic"` |
 | **LLM adversarial pass**  | Structured skeptical review: security, architecture, scope-creep, test quality   |
 | **Test inversion**        | Runs tests on pre-change code; flags tests passing on both sides                 |
 | **Scope-creep detection** | Heuristic plus LLM: flags hunks unrelated to the PR's stated intent              |

@@ -70,10 +70,21 @@ const VulnScannerConfigSchema = z.object({
   command: z.string().nullable().default(null),
 });
 
+const DependencySanityConfigSchema = z.object({
+  enabled: z.boolean().default(true),
+  /** Flag packages younger than this many days (from registry `time.created`). */
+  min_age_days: z.number().int().nonnegative().default(30),
+  /** Flag packages with fewer than this many npm downloads in the last week. */
+  min_weekly_downloads: z.number().int().nonnegative().default(10),
+  /** Flag added names at this Levenshtein distance (or closer) to a popular package. */
+  typosquat_max_distance: z.number().int().positive().default(1),
+});
+
 const ToolsSchema = z.object({
   semgrep: SemgrepConfigSchema.default({}),
   linter: LinterConfigSchema.default({}),
   vuln_scanner: VulnScannerConfigSchema.default({}),
+  dependency_sanity: DependencySanityConfigSchema.default({}),
 });
 
 // ─── Test inversion ────────────────────────────────────────────────────────
