@@ -171,10 +171,10 @@ export async function runReview(options: ReviewOptions = {}): Promise<ReviewResu
   let scopeCreepHeuristic: FlaggedHunk[] = [];
 
   if (context.changedFiles.length > 0) {
-    const anyToolEnabled = config.tools.semgrep.enabled || config.tools.linter.enabled || config.tools.vuln_scanner.enabled;
+    const anyToolEnabled = config.tools.semgrep.enabled || config.tools.linter.enabled || config.tools.vuln_scanner.enabled || config.tools.dependency_sanity.enabled;
     if (anyToolEnabled) {
       progress("Running deterministic tools...");
-      const toolResult = await runDeterministicTools(config, context.repoRoot, progress);
+      const toolResult = await runDeterministicTools(config, context.repoRoot, progress, context.diff);
       toolExecutions = toolResult.executions;
       deterministicFindings = toolResult.findings;
     } else {
@@ -1074,18 +1074,25 @@ export function isDocsOnlyDiff(changedFiles: ChangedFile[]): boolean {
 // ─── Exit code computation ──────────────────────────────────────────────────
 
 function computeExitCode(artifact: FindingsArtifact, config: FlaughtConfig): number {
-  if (config.severity_gate.fail_on === "none") return 0;
-
   const severityOrder: Severity[] = ["critical", "high", "medium", "low", "info"];
-  const threshold = severityOrder.indexOf(config.severity_gate.fail_on);
 
-  for (const finding of artifact.findings) {
-    if (finding.dismissed) continue;
-    const findingLevel = severityOrder.indexOf(finding.severity);
-    if (findingLevel <= threshold) {
-      return 1;
+  if (config.severity_gate.fail_on !== "none") {
+    const threshold = severityOrder.indexOf(config.severity_gate.fail_on);
+
+    for (const finding of artifact.findings) {
+      if (finding.dismissed) continue;
+      const findingLevel = severityOrder.indexOf(finding.severity);
+      if (findingLevel <= threshold) {
+        return 1;
+      }
     }
   }
+
+  // Registry outage (etc.) is a tool fault, not a verdict. CI should warn, not block.
+  const toolFault = artifact.tools_executed.some(
+    (t) => t.tool === "dependency_sanity" && t.exit_code === 2,
+  );
+  if (toolFault) return 2;
 
   return 0;
 }

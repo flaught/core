@@ -37,6 +37,11 @@ llm:
 #   vuln_scanner:
 #     enabled: true
 #     command: npm audit                     # override auto-detected scanner
+#   dependency_sanity:
+#     enabled: true
+#     min_age_days: 30                      # flag packages younger than this
+#     min_weekly_downloads: 10             # flag packages below this weekly download count
+#     typosquat_max_distance: 1            # Levenshtein distance to a popular package name
 
 # ── Test inversion ─────────────────────────────────────────
 # test_inversion:
@@ -309,8 +314,22 @@ Flaught auto-detects which tools to run based on your repo contents:
 | **Semgrep** | Always tries; skips gracefully if not installed | `tools.semgrep.enabled`, `tools.semgrep.config` |
 | **Linter** | `eslint` (JS/TS), `ruff`/`flake8` (Python), `go vet` (Go) | `tools.linter.enabled`, `tools.linter.command` |
 | **Vuln scanner** | `npm audit` (JS), `pip-audit` (Python), `govulncheck` (Go) | `tools.vuln_scanner.enabled`, `tools.vuln_scanner.command` |
+| **Dependency sanity** | Added `package.json` deps vs the npm registry | `tools.dependency_sanity.enabled`, `min_age_days`, `min_weekly_downloads`, `typosquat_max_distance` |
 
 All tools degrade gracefully — if a tool isn't installed, Flaught skips it and continues. Findings from deterministic tools are tagged `source_type: "deterministic"` with confidence 1.0.
+
+### Dependency sanity
+
+For packages **added** in `package.json` (`dependencies`, `devDependencies`, `peerDependencies`, `optionalDependencies` — version bumps of existing names are ignored), Flaught queries the npm registry:
+
+| Check | Default | Severity |
+|---|---|---|
+| Registry existence (`GET registry.npmjs.org/<name>`) | 404 → finding | high |
+| Package age (`time.created`) | younger than `min_age_days` (30) | medium |
+| Weekly downloads | below `min_weekly_downloads` (10) | low |
+| Typosquat (Levenshtein vs popular names, e.g. `reactt` → `react`) | distance ≤ `typosquat_max_distance` (1) | high |
+
+Network failures are not treated as malicious packages: one failed request warns and continues; a registry outage records a tool fault (exit 2) instead of a verdict. Local specs (`workspace:`, `file:`, git URLs) are not looked up on npm.
 
 ## Test inversion
 
