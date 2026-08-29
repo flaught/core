@@ -14,6 +14,7 @@ describe("FlaughtConfigSchema", () => {
     expect(config.llm.api_key_env).toBe("GROQ_API_KEY");
     expect(config.llm.temperature).toBe(0.2);
     expect(config.llm.max_tokens).toBe(4096);
+    expect(config.llm.min_confidence).toBe(0);
     expect(config.tools.semgrep.enabled).toBe(true);
     expect(config.tools.linter.enabled).toBe(true);
     expect(config.tools.vuln_scanner.enabled).toBe(true);
