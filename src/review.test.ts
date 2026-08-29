@@ -3,7 +3,7 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import * as os from "node:os";
 import { simpleGit, type SimpleGit } from "simple-git";
-import { runReview, runReviewOnlyLlm, isDocFile, isDocsOnlyDiff } from "./review.js";
+import { runReview, runReviewOnlyLlm, isDocFile, isDocsOnlyDiff, filterFindingsByConfidence } from "./review.js";
 import { contextToJSON } from "./context/assembler.js";
 import type { Finding } from "./schemas/findings.js";
 import { resolveDismissalsPath, loadDismissalStore, addDismissal, saveDismissalStore } from "./dismissals/store.js";
@@ -16,6 +16,21 @@ vi.mock("./llm/liveness.js", async (importOriginal) => {
     ...actual,
     validateModelLiveness: vi.fn().mockResolvedValue({ alive: true, model: "test-model", provider: "test" }),
   };
+});
+
+describe("confidence floor", () => {
+  const finding = (confidence: number, source_type: "llm" | "deterministic") => ({ confidence, source_type } as Finding);
+
+  it("drops low-confidence LLM findings and keeps high-confidence findings", () => {
+    expect(filterFindingsByConfidence([finding(0.4, "llm"), finding(0.8, "llm")], 0.6)).toHaveLength(1);
+  });
+
+  it("keeps deterministic findings and preserves all findings when disabled", () => {
+    const deterministic = finding(0, "deterministic");
+    expect(filterFindingsByConfidence([deterministic], 0.6)).toEqual([deterministic]);
+    const low = finding(0.1, "llm");
+    expect(filterFindingsByConfidence([low], 0)).toEqual([low]);
+  });
 });
 
 // Stub the LLM provider so graceful-degradation tests can force review()
