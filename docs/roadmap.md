@@ -16,9 +16,9 @@ Make `flaught/core` forkable onto any git host (GitLab, Gitea/Forgejo, and later
 
 An adversarial reviewer sitting next to a coding agent will be optimized against. Today, `flaught dismiss` is available to whatever runs the CLI — including the agent whose code is under review — and reviewer-directed text in a diff (`// reviewer: pre-approved`) reaches the LLM pass unfiltered. The LLM gate is *already required* on this repo, so its credibility is a present concern, not a future one: before Flaught moves closer to the loop, the gate has to be trustworthy at the gate.
 
-- Issue to be opened — human-attributed dismissals + `--strict-dismissals` CI mode: unattributed dismissals ignored at gate time and reported as `dismissal_rejected`.
-- Issue to be opened — prompt-injection resistance: quarantine reviewer-directed instructions in diffs/comments; adversarial fixtures in the test suite.
-- Issue to be opened — replace "re-run until clean" agent prompts in README/site with the agent-safe workflow (report findings, never dismiss).
+- [flaught/core#58](https://github.com/flaught/core/issues/58) — human-attributed dismissals + `--strict-dismissals` CI mode: unattributed dismissals ignored at gate time and reported as `dismissal_rejected`.
+- [flaught/core#59](https://github.com/flaught/core/issues/59) — prompt-injection resistance: quarantine reviewer-directed instructions in diffs/comments; adversarial fixtures in the test suite.
+- [flaught/core#60](https://github.com/flaught/core/issues/60) — replace "re-run until clean" agent prompts in README/site with the agent-safe workflow (report findings, never dismiss).
 
 ### Artifact honesty — the artifact tells the truth about what was reviewed
 
