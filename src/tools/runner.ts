@@ -14,6 +14,11 @@
 
 import { type FlaughtConfig } from "../schemas/config.js";
 import { type ToolExecuted } from "../schemas/findings.js";
+import { detectTestWeakening } from "../agent-checks/test-weakening.js";
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
+
+const execFileAsync = promisify(execFile);
 
 // ─── Tool result ────────────────────────────────────────────────────────────
 
@@ -89,6 +94,16 @@ export async function runDeterministicTools(
   const results: ToolResult[] = [];
   const executions: ToolExecuted[] = [];
   const allFindings: DeterministicFinding[] = [];
+
+  try {
+    const { stdout } = await execFileAsync("git", ["diff", "--unified=0", "HEAD~1", "HEAD"], { cwd: repoPath });
+    const { stdout: names } = await execFileAsync("git", ["diff", "--name-only", "--diff-filter=D", "HEAD~1", "HEAD"], { cwd: repoPath });
+    const findings = detectTestWeakening(stdout, names.split(/\r?\n/).filter(Boolean));
+    allFindings.push(...findings);
+    progress(`    test-weakening: ${findings.length} findings`);
+  } catch {
+    progress("    test-weakening: skipped (git diff unavailable)");
+  }
 
   // ── Semgrep ──
   if (config.tools.semgrep.enabled) {
