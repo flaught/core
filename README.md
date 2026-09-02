@@ -70,6 +70,12 @@ flaught review --output findings.json --quiet   # CI mode
 flaught dismiss D-0002 --artifact findings.json --reason "..." # suppress a false positive, persisted across runs
 ```
 
+For zero-question setup, use `flaught init --paranoid` instead of plain `init`.
+It writes explicit settings for all deterministic tools, test inversion,
+scope-creep detection, a high-severity gate, and persistent dismissals, with
+links explaining each setting. See the [paranoid preset](docs/configuration.md#paranoid-preset)
+for prerequisites and how it relates to the normal defaults.
+
 ### API key
 
 `flaught init` defaults to Groq. Generate a free key at [console.groq.com/keys](https://console.groq.com/keys), then:

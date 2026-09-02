@@ -4,6 +4,7 @@ import * as path from "node:path";
 import * as os from "node:os";
 import { loadConfig, findConfigFile, initConfig } from "./config.js";
 import * as yaml from "js-yaml";
+import { DEFAULT_CONFIG } from "./schemas/config.js";
 
 let tempDirs: string[] = [];
 
@@ -91,6 +92,48 @@ describe("findConfigFile", () => {
 });
 
 describe("initConfig", () => {
+  it("writes explicit paranoid settings that validate against the schema", async () => {
+    const dir = tempRepo();
+    const filePath = initConfig(dir, { paranoid: true });
+    const content = fs.readFileSync(filePath, "utf-8");
+    const raw = yaml.load(content);
+
+    expect(raw).toEqual({
+      version: 1,
+      llm: {
+        provider: "groq",
+        model: "openai/gpt-oss-20b",
+        api_key_env: "GROQ_API_KEY",
+      },
+      tools: {
+        semgrep: { enabled: true },
+        linter: { enabled: true },
+        vuln_scanner: { enabled: true },
+      },
+      test_inversion: { enabled: true },
+      scope_creep: { enabled: true },
+      severity_gate: { fail_on: "high" },
+      dismissals: { enabled: true, path: ".flaught-dismissals.json" },
+    });
+    expect(await loadConfig(filePath)).toEqual(DEFAULT_CONFIG);
+    for (const section of [
+      "full-reference", "llm-providers", "deterministic-tools", "test-inversion",
+      "scope-creep-detection", "severity-gate", "dismissals",
+    ]) {
+      expect(content).toContain(`docs/configuration.md#${section}`);
+    }
+    expect(content).toContain("TODO: Enable --strict-dismissals when it is available");
+  });
+
+  it("keeps the default template unchanged when paranoid is false", () => {
+    const defaultFile = initConfig(tempRepo());
+    const explicitDefaultFile = initConfig(tempRepo(), { paranoid: false });
+    const content = fs.readFileSync(defaultFile, "utf-8");
+    expect(fs.readFileSync(explicitDefaultFile, "utf-8")).toBe(content);
+    expect(yaml.load(content)).not.toHaveProperty("tools");
+    expect(content).not.toContain("--strict-dismissals");
+  });
+
   it("warns that commented-out blocks are already active defaults", () => {
     // Regression: every commented block (tools, test_inversion, etc.) shows
     // this schema's actual default, in effect whether or not it's
