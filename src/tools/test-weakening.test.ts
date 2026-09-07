@@ -60,6 +60,23 @@ describe("test weakening detection", () => {
     });
   });
 
+  it("detects a test body replaced with comments", () => {
+    const diff = [
+      "diff --git a/src/example.test.ts b/src/example.test.ts",
+      "--- a/src/example.test.ts",
+      "+++ b/src/example.test.ts",
+      "@@ -7,2 +7,2 @@",
+      "-it(\"important\", () => {",
+      "+// it(\"important\", () => {",
+    ].join("\n");
+
+    expect(detectTestWeakening(diff)[0]).toMatchObject({
+      ruleId: "commented-test-body",
+      file: "src/example.test.ts",
+      line: 7,
+    });
+  });
+
   it("does not flag a clean test diff", () => {
     expect(detectTestWeakening("+expect(value).toBe(1)")).toEqual([]);
   });
