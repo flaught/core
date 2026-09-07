@@ -34,6 +34,7 @@ const LlmSchema = z.object({
   base_url: z.string().nullable().default(null),
   temperature: z.number().min(0).max(1).default(0.2),
   max_tokens: z.number().int().positive().default(4096),
+  min_confidence: z.number().min(0).max(1).default(0),
   timeout_seconds: z.number().int().positive().default(120),
   /**
    * Reasoning effort for models that support it (GPT-OSS on Groq, OpenAI o-series).

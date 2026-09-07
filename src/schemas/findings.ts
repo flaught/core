@@ -214,6 +214,9 @@ export interface FindingsArtifact {
 
   noise_budget: NoiseBudget;
 
+  /** Number of LLM findings removed by the optional confidence floor. */
+  dropped_below_min_confidence?: number;
+
   summary: FindingsSummary;
 }
 

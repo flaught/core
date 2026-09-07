@@ -196,6 +196,7 @@ export async function runReview(options: ReviewOptions = {}): Promise<ReviewResu
   let llmError: string | null = null;
   let analysisCompleteness: AnalysisCompleteness | null = null;
   let findings: Finding[] = [];
+  let droppedBelowMinConfidence = 0;
 
   // Convert deterministic findings to Finding format
   for (const df of deterministicFindings) {
@@ -291,6 +292,7 @@ export async function runReview(options: ReviewOptions = {}): Promise<ReviewResu
     llmResult = llmStage.llmResult;
     llmError = llmStage.llmError;
     analysisCompleteness = llmStage.completeness;
+    droppedBelowMinConfidence = llmStage.droppedBelowMinConfidence;
     findings.push(...llmStage.llmFindings);
   }
 
@@ -446,7 +448,7 @@ export async function runReview(options: ReviewOptions = {}): Promise<ReviewResu
 
   // 8. Build the findings artifact
   progress("Building findings artifact...");
-  const artifact = buildArtifact(context, findings, config);
+  const artifact = buildArtifact(context, findings, config, droppedBelowMinConfidence);
   artifact.tools_executed = toolExecutions;
   artifact.test_inversion = testInversion;
   artifact.scope_creep = scopeCreepResult;
@@ -517,6 +519,7 @@ export interface LlmStageResult {
   llmError: string | null;
   /** Whether the LLM received the full change context or some was truncated to fit the prompt cap. Null is impossible here (the prompt is always built), but typed nullable for the caller's union with the skip-LLM path. */
   completeness: AnalysisCompleteness;
+  droppedBelowMinConfidence: number;
 }
 
 /**
@@ -598,6 +601,7 @@ export async function runLlmStage(input: LlmStageInput): Promise<LlmStageResult>
   let llmResult: LLMReviewResult | null = null;
   let llmError: string | null = null;
   let llmFindings: Finding[] = [];
+  let droppedBelowMinConfidence = 0;
 
   // ── LLM review ──
   // If the LLM call fails, we gracefully degrade: return no LLM findings;
@@ -605,6 +609,14 @@ export async function runLlmStage(input: LlmStageInput): Promise<LlmStageResult>
   try {
     llmResult = await provider.review(systemPrompt, fullUserPrompt);
     llmFindings = [...llmResult.findings];
+    if (config.llm.min_confidence > 0) {
+      // Intentionally apply the floor to raw confidence before the skeptic
+      // pass: low-confidence noise should not consume refute calls or affect
+      // skeptic result counts (adjusted_confidence is only set by that pass).
+      const before = llmFindings.length;
+      llmFindings = filterFindingsByConfidence(llmFindings, config.llm.min_confidence);
+      droppedBelowMinConfidence = before - llmFindings.length;
+    }
 
     if (llmResult.usage) {
       progress(`  Token usage: ${llmResult.usage.prompt_tokens.toLocaleString()} prompt + ${llmResult.usage.completion_tokens.toLocaleString()} completion = ${llmResult.usage.total_tokens.toLocaleString()} total`);
@@ -656,7 +668,7 @@ export async function runLlmStage(input: LlmStageInput): Promise<LlmStageResult>
     progress("No LLM findings to refute — skipping skeptic pass.");
   }
 
-  return { llmFindings, llmResult, llmError, completeness };
+  return { llmFindings, llmResult, llmError, completeness, droppedBelowMinConfidence };
 }
 
 // ─── Review bundle (context artifact for the fork-PR split) ──────────────────
@@ -935,6 +947,14 @@ export async function runReviewOnlyLlm(options: OnlyLlmOptions): Promise<ReviewR
   };
 }
 
+/** Apply the optional confidence floor to parsed findings and preserve deterministic findings. */
+export function filterFindingsByConfidence(findings: Finding[], minConfidence: number): Finding[] {
+  if (minConfidence <= 0) return findings;
+  return findings.filter((finding) =>
+    finding.source_type === "deterministic" || finding.confidence >= minConfidence,
+  );
+}
+
 // ─── Noise budget enforcement ───────────────────────────────────────────────
 
 function enforceNoiseBudget(findings: Finding[], config: FlaughtConfig): Finding[] {
@@ -979,6 +999,7 @@ function buildArtifact(
   context: ReviewContext,
   findings: Finding[],
   config: FlaughtConfig,
+  droppedBelowMinConfidence = 0,
 ): FindingsArtifact {
   const bySeverity: Record<Severity, number> = {
     critical: 0, high: 0, medium: 0, low: 0, info: 0,
@@ -1035,6 +1056,7 @@ function buildArtifact(
     test_inversion: null,
     scope_creep: null,
     noise_budget: noiseBudget,
+    dropped_below_min_confidence: droppedBelowMinConfidence,
     summary: {
       total_findings: findings.length,
       by_severity: bySeverity,

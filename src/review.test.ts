@@ -3,7 +3,7 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import * as os from "node:os";
 import { simpleGit, type SimpleGit } from "simple-git";
-import { runReview, runReviewOnlyLlm, isDocFile, isDocsOnlyDiff } from "./review.js";
+import { runReview, runReviewOnlyLlm, isDocFile, isDocsOnlyDiff, filterFindingsByConfidence } from "./review.js";
 import { contextToJSON } from "./context/assembler.js";
 import type { Finding } from "./schemas/findings.js";
 import { resolveDismissalsPath, loadDismissalStore, addDismissal, saveDismissalStore } from "./dismissals/store.js";
@@ -16,6 +16,21 @@ vi.mock("./llm/liveness.js", async (importOriginal) => {
     ...actual,
     validateModelLiveness: vi.fn().mockResolvedValue({ alive: true, model: "test-model", provider: "test" }),
   };
+});
+
+describe("confidence floor", () => {
+  const finding = (confidence: number, source_type: "llm" | "deterministic") => ({ confidence, source_type } as Finding);
+
+  it("drops low-confidence LLM findings and keeps high-confidence findings", () => {
+    expect(filterFindingsByConfidence([finding(0.4, "llm"), finding(0.8, "llm")], 0.6)).toHaveLength(1);
+  });
+
+  it("keeps deterministic findings and preserves all findings when disabled", () => {
+    const deterministic = finding(0, "deterministic");
+    expect(filterFindingsByConfidence([deterministic], 0.6)).toEqual([deterministic]);
+    const low = finding(0.1, "llm");
+    expect(filterFindingsByConfidence([low], 0)).toEqual([low]);
+  });
 });
 
 // Stub the LLM provider so graceful-degradation tests can force review()
@@ -554,6 +569,61 @@ describe("runReview (LLM graceful degradation)", () => {
     cleanup();
     mockReview.mockReset();
   });
+
+  it("filters low-confidence findings through the full review pipeline", async () => {
+    const repoPath = fs.mkdtempSync(path.join(os.tmpdir(), "flaught-confidence-floor-"));
+    tempDirs.push(repoPath);
+
+    const git = simpleGit(repoPath);
+    await git.init(["--initial-branch=main"]);
+    await git.addConfig("user.email", "test@flaught.dev");
+    await git.addConfig("user.name", "Flaught Test");
+
+    const config = [
+      "version: 1",
+      "llm:",
+      "  min_confidence: 0.6",
+      "refute:",
+      "  enabled: false",
+      "test_inversion:",
+      "  enabled: false",
+      "scope_creep:",
+      "  enabled: false",
+      "tools:",
+      "  semgrep:",
+      "    enabled: false",
+      "  linter:",
+      "    enabled: false",
+      "  vuln_scanner:",
+      "    enabled: false",
+      "",
+    ].join("\n");
+
+    await commitFiles(git, {
+      ".advreview.yml": config,
+      "src/index.ts": "console.log('hello');",
+    }, "initial");
+    await commitFiles(git, {
+      "src/index.ts": "console.log('hello world');",
+    }, "change");
+
+    const lowConfidence = makeFinding({ id: "L-0001", confidence: 0.4, title: "Low confidence" });
+    const highConfidence = makeFinding({ id: "L-0002", confidence: 0.8, title: "High confidence" });
+    mockReview.mockResolvedValue({ findings: [lowConfidence, highConfidence], raw: "{}" });
+
+    const result = await runReview({
+      repoPath,
+      baseRef: "HEAD~1",
+      headRef: "HEAD",
+      configPath: path.join(repoPath, ".advreview.yml"),
+    });
+
+    expect(result.artifact.findings).toHaveLength(1);
+    expect(result.artifact.findings[0]!.title).toBe("High confidence");
+    expect(result.artifact.dropped_below_min_confidence).toBe(1);
+    expect(result.artifact.summary.total_findings).toBe(1);
+    expect(mockReview).toHaveBeenCalledTimes(1);
+  }, 30_000);
 
   it("still writes an artifact with deterministic findings + error details when the LLM call fails", async () => {
     const repoPath = fs.mkdtempSync(path.join(os.tmpdir(), "flaught-llmfail-"));
