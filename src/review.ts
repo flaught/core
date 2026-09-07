@@ -606,6 +606,9 @@ export async function runLlmStage(input: LlmStageInput): Promise<LlmStageResult>
     llmResult = await provider.review(systemPrompt, fullUserPrompt);
     llmFindings = [...llmResult.findings];
     if (config.llm.min_confidence > 0) {
+      // Intentionally apply the floor to raw confidence before the skeptic
+      // pass: low-confidence noise should not consume refute calls or affect
+      // skeptic result counts (adjusted_confidence is only set by that pass).
       const before = llmFindings.length;
       llmFindings = filterFindingsByConfidence(llmFindings, config.llm.min_confidence);
       droppedBelowMinConfidence = before - llmFindings.length;

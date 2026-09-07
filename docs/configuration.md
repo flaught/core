@@ -24,6 +24,7 @@ llm:
   # base_url: null          # override for OpenAI-compatible endpoints
   temperature: 0.2           # 0.0–1.0 (lower = more deterministic)
   max_tokens: 4096           # max response length
+  min_confidence: 0.0         # drop LLM findings below this floor; 0 disables filtering
   timeout_seconds: 120       # timeout for LLM API calls
 
 # ── Deterministic tools ────────────────────────────────────
