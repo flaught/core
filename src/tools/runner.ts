@@ -15,6 +15,11 @@
 import { type FlaughtConfig } from "../schemas/config.js";
 import { type ToolExecuted } from "../schemas/findings.js";
 import { runDependencySanityCheck } from "./dependency-sanity.js";
+import { detectTestWeakening } from "./test-weakening.js";
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
+
+const execFileAsync = promisify(execFile);
 
 // ─── Tool result ────────────────────────────────────────────────────────────
 
@@ -79,18 +84,88 @@ export interface DeterministicFinding {
   vuln_urls?: string[];
 }
 
+export interface DeterministicToolsOptions {
+  /** Base ref used for every diff-based deterministic check. */
+  baseRef?: string;
+  /** Head ref used for every diff-based deterministic check. */
+  headRef?: string;
+  /** Progress callback for tool execution. */
+  onProgress?: (message: string) => void;
+}
+
 // ─── Run all enabled deterministic tools ───────────────────────────────────────
 
 export async function runDeterministicTools(
   config: FlaughtConfig,
   repoPath: string,
-  onProgress?: (message: string) => void,
-  diff: string = "",
+  optionsOrProgress: DeterministicToolsOptions | ((message: string) => void) = {},
 ): Promise<{ results: ToolResult[]; executions: ToolExecuted[]; findings: DeterministicFinding[] }> {
-  const progress = onProgress ?? (() => {});
+  const options = typeof optionsOrProgress === "function" ? { onProgress: optionsOrProgress } : optionsOrProgress ?? {};
+  const progress = options.onProgress ?? (() => {});
+  const baseRef = options.baseRef ?? "HEAD~1";
+  const headRef = options.headRef ?? "HEAD";
   const results: ToolResult[] = [];
   const executions: ToolExecuted[] = [];
   const allFindings: DeterministicFinding[] = [];
+
+  if (config.tools.test_weakening.enabled) {
+    progress("  Running test-weakening...");
+    const startTime = Date.now();
+    const diffCommand = `git diff --unified=0 ${baseRef} ${headRef}`;
+
+    try {
+      const { stdout } = await execFileAsync(
+        "git",
+        ["diff", "--unified=0", baseRef, headRef],
+        { cwd: repoPath, maxBuffer: 10 * 1024 * 1024 },
+      );
+      const { stdout: names } = await execFileAsync(
+        "git",
+        ["diff", "--name-only", "--diff-filter=D", baseRef, headRef],
+        { cwd: repoPath, maxBuffer: 10 * 1024 * 1024 },
+      );
+      const findings = detectTestWeakening(stdout, names.split(/\r?\n/).filter(Boolean));
+      const result: ToolResult = {
+        tool: "test_weakening",
+        success: true,
+        stdout,
+        stderr: "",
+        exitCode: 0,
+        findings,
+        durationMs: Date.now() - startTime,
+      };
+      results.push(result);
+      executions.push({
+        tool: "test_weakening",
+        version: "built-in",
+        exit_code: result.exitCode,
+        raw_findings_count: findings.length,
+        command: diffCommand,
+      });
+      allFindings.push(...findings);
+      progress(`    test-weakening: ${findings.length} findings (${result.durationMs}ms)`);
+    } catch (err) {
+      const e = err as ExecError;
+      const result: ToolResult = {
+        tool: "test_weakening",
+        success: false,
+        stdout: e.stdout ?? "",
+        stderr: e.stderr ?? (err instanceof Error ? err.message : String(err)),
+        exitCode: typeof e.code === "number" ? e.code : -1,
+        findings: [],
+        durationMs: Date.now() - startTime,
+      };
+      results.push(result);
+      executions.push({
+        tool: "test_weakening",
+        version: "built-in",
+        exit_code: result.exitCode,
+        raw_findings_count: 0,
+        command: diffCommand,
+      });
+      progress("    test-weakening: skipped (git diff unavailable)");
+    }
+  }
 
   // ── Semgrep ──
   if (config.tools.semgrep.enabled) {
@@ -145,7 +220,9 @@ export async function runDeterministicTools(
     progress("  Running dependency sanity...");
     const startTime = Date.now();
     const sanity = await runDependencySanityCheck({
-      diff,
+      repoPath,
+      baseRef,
+      headRef,
       minAgeDays: config.tools.dependency_sanity.min_age_days,
       minWeeklyDownloads: config.tools.dependency_sanity.min_weekly_downloads,
       typosquatMaxDistance: config.tools.dependency_sanity.typosquat_max_distance,

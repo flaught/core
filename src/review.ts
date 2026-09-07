@@ -165,16 +165,20 @@ export async function runReview(options: ReviewOptions = {}): Promise<ReviewResu
     }
   }
 
-  // 3. Run deterministic tools (semgrep, linter, vuln scanner)
+  // 3. Run deterministic tools (including the built-in test-weakening check)
   let toolExecutions: ToolExecuted[] = [];
   let deterministicFindings: DeterministicFinding[] = [];
   let scopeCreepHeuristic: FlaggedHunk[] = [];
 
   if (context.changedFiles.length > 0) {
-    const anyToolEnabled = config.tools.semgrep.enabled || config.tools.linter.enabled || config.tools.vuln_scanner.enabled || config.tools.dependency_sanity.enabled;
+    const anyToolEnabled = config.tools.semgrep.enabled || config.tools.linter.enabled || config.tools.vuln_scanner.enabled || config.tools.dependency_sanity.enabled || config.tools.test_weakening.enabled;
     if (anyToolEnabled) {
       progress("Running deterministic tools...");
-      const toolResult = await runDeterministicTools(config, context.repoRoot, progress, context.diff);
+      const toolResult = await runDeterministicTools(config, context.repoRoot, {
+        baseRef: context.baseSha,
+        headRef: context.headSha,
+        onProgress: progress,
+      });
       toolExecutions = toolResult.executions;
       deterministicFindings = toolResult.findings;
     } else {
@@ -1088,7 +1092,11 @@ function computeExitCode(artifact: FindingsArtifact, config: FlaughtConfig): num
     }
   }
 
-  // Registry outage (etc.) is a tool fault, not a verdict. CI should warn, not block.
+  // Registry outage (etc.) is a tool fault, not a verdict. CI should warn, not
+  // block. dependency_sanity is currently the only tool that reports faults
+  // this way - do not generalize to `exit_code === 2` (eslint uses 2 for
+  // config errors). This also means fail_on: "none" no longer guarantees
+  // exit 0: a tool fault still yields 2, because a fault is not a finding.
   const toolFault = artifact.tools_executed.some(
     (t) => t.tool === "dependency_sanity" && t.exit_code === 2,
   );

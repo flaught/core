@@ -1,5 +1,91 @@
-import { describe, it, expect } from "vitest";
-import { parseVulnJsonOutput } from "./runner.js";
+import { afterEach, describe, it, expect } from "vitest";
+import * as fs from "node:fs";
+import * as os from "node:os";
+import * as path from "node:path";
+import { simpleGit, type SimpleGit } from "simple-git";
+import { FlaughtConfigSchema } from "../schemas/config.js";
+import { parseVulnJsonOutput, runDeterministicTools } from "./runner.js";
+
+const tempDirs: string[] = [];
+
+afterEach(() => {
+  for (const dir of tempDirs.splice(0)) {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+async function commitFiles(git: SimpleGit, repoPath: string, files: Record<string, string>, message: string): Promise<string> {
+  for (const [file, contents] of Object.entries(files)) {
+    const filePath = path.join(repoPath, file);
+    fs.mkdirSync(path.dirname(filePath), { recursive: true });
+    fs.writeFileSync(filePath, contents, "utf-8");
+  }
+  await git.add(".");
+  await git.commit(message);
+  return (await git.revparse(["HEAD"])).trim();
+}
+
+describe("test weakening tool runner", () => {
+  it("uses the supplied base and head refs and honors its config toggle", async () => {
+    const repoPath = fs.mkdtempSync(path.join(os.tmpdir(), "flaught-tools-"));
+    tempDirs.push(repoPath);
+    const git = simpleGit(repoPath);
+    await git.init(["--initial-branch=main"]);
+    await git.addConfig("user.email", "test@flaught.dev");
+    await git.addConfig("user.name", "Flaught Test");
+
+    const baseSha = await commitFiles(git, repoPath, {
+      "src/example.test.ts": "expect(value).toBe(1);\nexpect(value).toBe(2);\n",
+      "README.md": "# Example\n",
+    }, "initial");
+    await commitFiles(git, repoPath, {
+      "src/example.test.ts": "expect(value).toBe(2);\n",
+    }, "unrelated history change");
+    await commitFiles(git, repoPath, {
+      "README.md": "# Example\n\nUpdated.\n",
+    }, "change docs");
+
+    const config = FlaughtConfigSchema.parse({
+      tools: {
+        semgrep: { enabled: false },
+        linter: { enabled: false },
+        vuln_scanner: { enabled: false },
+        dependency_sanity: { enabled: false },
+        test_weakening: { enabled: true },
+      },
+    });
+    const result = await runDeterministicTools(config, repoPath, {
+      baseRef: baseSha,
+      headRef: "HEAD",
+    });
+
+    expect(result.findings).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        ruleId: "deleted-assertion",
+        file: "src/example.test.ts",
+        line: 1,
+      }),
+    ]));
+    expect(result.executions.map((execution) => execution.tool)).toEqual(["test_weakening"]);
+    expect(result.executions[0]?.command).toContain(`${baseSha} HEAD`);
+
+    const disabled = await runDeterministicTools(
+      FlaughtConfigSchema.parse({
+        tools: {
+          semgrep: { enabled: false },
+          linter: { enabled: false },
+          vuln_scanner: { enabled: false },
+          dependency_sanity: { enabled: false },
+          test_weakening: { enabled: false },
+        },
+      }),
+      repoPath,
+      { baseRef: baseSha, headRef: "HEAD" },
+    );
+    expect(disabled.findings).toEqual([]);
+    expect(disabled.executions).toEqual([]);
+  });
+});
 
 describe("npm audit parser enrichment", () => {
   it("extracts advisory title, fix info, and dependency path from npm audit JSON", () => {

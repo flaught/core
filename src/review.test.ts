@@ -367,6 +367,10 @@ describe("runReview (dismissals)", () => {
       "    enabled: false",
       "  vuln_scanner:",
       "    enabled: false",
+      "  dependency_sanity:",
+      "    enabled: false",
+      "  test_weakening:",
+      "    enabled: false",
       "severity_gate:",
       "  fail_on: medium", // test-inversion findings are severity "medium" — gates until dismissed
       "",
@@ -454,6 +458,10 @@ describe("runReview (test inversion — docs-only diffs)", () => {
     "    enabled: false",
     "  vuln_scanner:",
     "    enabled: false",
+    "  dependency_sanity:",
+    "    enabled: false",
+    "  test_weakening:",
+    "    enabled: false",
     "",
   ].join("\n");
 
@@ -534,6 +542,10 @@ describe("runReview (LLM graceful degradation)", () => {
     "  linter:",
     "    enabled: false",
     "  vuln_scanner:",
+    "    enabled: false",
+    "  dependency_sanity:",
+    "    enabled: false",
+    "  test_weakening:",
     "    enabled: false",
     "",
   ].join("\n");
@@ -654,6 +666,10 @@ describe("runReviewOnlyLlm (context-artifact split)", () => {
     "  linter:",
     "    enabled: false",
     "  vuln_scanner:",
+    "    enabled: false",
+    "  dependency_sanity:",
+    "    enabled: false",
+    "  test_weakening:",
     "    enabled: false",
     "",
   ].join("\n");
@@ -793,4 +809,78 @@ describe("runReviewOnlyLlm (untrusted-artifact guards)", () => {
     await expect(runReviewOnlyLlm({ contextPath: bundlePath, findingsPath, skipRefute: true }))
       .rejects.toThrow(/diff exceeds/);
   }, 10_000);
+});
+
+describe("runReview (dependency sanity tool fault)", () => {
+  afterEach(() => {
+    cleanup();
+    vi.restoreAllMocks();
+  });
+
+  it("exits 2 on a registry outage without leaking nonexistent findings, even with fail_on none", async () => {
+    const repoPath = fs.mkdtempSync(path.join(os.tmpdir(), "flaught-depsan-fault-"));
+    tempDirs.push(repoPath);
+
+    const git = simpleGit(repoPath);
+    await git.init(["--initial-branch=main"]);
+    await git.addConfig("user.email", "test@flaught.dev");
+    await git.addConfig("user.name", "Flaught Test");
+
+    const yml = [
+      "version: 1",
+      "test_inversion:",
+      "  enabled: false",
+      "scope_creep:",
+      "  enabled: false",
+      "tools:",
+      "  semgrep:",
+      "    enabled: false",
+      "  linter:",
+      "    enabled: false",
+      "  vuln_scanner:",
+      "    enabled: false",
+      "  test_weakening:",
+      "    enabled: false",
+      "  dependency_sanity:",
+      "    enabled: true",
+      "severity_gate:",
+      "  fail_on: none",
+      "",
+    ].join("\n");
+
+    await commitFiles(git, {
+      ".advreview.yml": yml,
+      "package.json": JSON.stringify({ name: "demo", dependencies: { react: "^18.0.0" } }, null, 2) + "\n",
+      "src/index.ts": "export const x = 1;\n",
+    }, "initial");
+
+    await commitFiles(git, {
+      "package.json": JSON.stringify({ name: "demo", dependencies: { react: "^18.0.0", "unknown-package-xyz": "^1.0.0" } }, null, 2) + "\n",
+    }, "add unknown package");
+
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockRejectedValue(
+      new Error("getaddrinfo ENOTFOUND registry.npmjs.org"),
+    );
+
+    const result = await runReview({
+      repoPath,
+      baseRef: "HEAD~1",
+      headRef: "HEAD",
+      configPath: path.join(repoPath, ".advreview.yml"),
+      skipLlm: true,
+    });
+
+    fetchSpy.mockRestore();
+
+    expect(result.exitCode).toBe(2);
+    expect(result.artifact.findings.filter((f) => f.evidence.rule_id === "dependency-nonexistent")).toEqual([]);
+    expect(result.artifact.findings.some((f) => f.source === "dependency_sanity")).toBe(false);
+    const executed = result.artifact.tools_executed.find((t) => t.tool === "dependency_sanity");
+    expect(executed).toEqual(expect.objectContaining({
+      tool: "dependency_sanity",
+      exit_code: 2,
+      raw_findings_count: 0,
+      command: "(failed)",
+    }));
+  }, 30_000);
 });

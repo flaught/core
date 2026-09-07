@@ -1,37 +1,41 @@
 /**
- * Dependency sanity check — flags newly added npm packages that look
+ * Dependency sanity check - flags newly added npm packages that look
  * hallucinated, typosquatted, brand-new, or unused.
  *
+ * Compares parsed package.json manifests (git show base vs head) so
+ * reformatting / key reorder does not cancel genuine additions.
  * Queries the npm registry for existence / age / weekly downloads, and
  * compares names against a curated popular-package list with Levenshtein
  * distance. Network failures are warnings, never "this package is malicious."
  */
 
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
 import type { DeterministicFinding } from "./runner.js";
 
+const execFileAsync = promisify(execFile);
+
 const REQUEST_TIMEOUT_MS = 10_000;
+/** Bounded parallelism across packages. Each package still does metadata then downloads sequentially. */
+export const REGISTRY_CONCURRENCY = 5;
 const USER_AGENT = "flaught-dependency-sanity (https://github.com/flaught/core)";
 const REGISTRY_URL = "https://registry.npmjs.org";
 const DOWNLOADS_URL = "https://api.npmjs.org/downloads/point/last-week";
 
-const DEP_SECTIONS = new Set([
+const DEP_KEYS = [
   "dependencies",
   "devDependencies",
   "peerDependencies",
   "optionalDependencies",
-]);
-
-const FILE_HEADER = /^diff --git a\/(.+) b\/(.+)$/;
-const PLUS_FILE = /^\+\+\+ (?:b\/)?(.+)$/;
-const HUNK_HEADER = /^@@ -\d+(?:,\d+)? \+(\d+)(?:,\d+)? @@/;
-const SECTION_OPEN = /^([ +\-])(\s*)"([^"]+)":\s*\{/;
-const SECTION_CLOSE = /^([ +\-])(\s*)\}/;
-const PKG_ENTRY = /^([ +\-])(\s*)"((?:@[A-Za-z0-9._~-]+\/)?[A-Za-z0-9._~-]+)":\s*"([^"]*)"/;
+] as const;
 
 /**
  * Well-known npm packages that typosquatters impersonate. Exact matches are
- * never flagged. Includes common 1-edit neighbours (vuex, react-dom, …) so
+ * never flagged. Includes common 1-edit neighbours (vuex, react-dom, ...) so
  * legitimate related packages aren't treated as impersonations of a sibling.
+ *
+ * This list is a first-cut net (~90 names): only typos of *these* packages
+ * are detected. Unknown-but-popular names outside the list will not match.
  */
 export const POPULAR_PACKAGES: readonly string[] = [
   "react", "react-dom", "react-native", "react-router", "react-router-dom",
@@ -68,18 +72,24 @@ export type FetchLike = (
 ) => Promise<Response>;
 
 export interface DependencySanityOptions {
-  diff: string;
+  /** Repo root used to `git show` base/head package.json files. */
+  repoPath?: string;
+  baseRef?: string;
+  headRef?: string;
+  /** Test injection: skip git and check these packages directly. */
+  added?: AddedDependency[];
   minAgeDays?: number;
   minWeeklyDownloads?: number;
   typosquatMaxDistance?: number;
   fetch?: FetchLike;
   now?: Date;
   onWarn?: (message: string) => void;
+  concurrency?: number;
 }
 
 export interface DependencySanityResult {
   findings: DeterministicFinding[];
-  /** True when every registry metadata request failed — not a verdict. */
+  /** True when every registry metadata request failed - not a verdict. */
   fault: boolean;
   warnings: string[];
 }
@@ -93,7 +103,7 @@ function isPackageJsonPath(filePath: string): boolean {
   return normalized === "package.json" || normalized.endsWith("/package.json");
 }
 
-/** Local/VCS specs are not npm registry names — a 404 would be a false positive. */
+/** Local/VCS specs are not npm registry names: a 404 would be a false positive. */
 export function isRegistrySpecifier(version: string): boolean {
   const v = version.trim();
   if (
@@ -115,116 +125,130 @@ export function isRegistrySpecifier(version: string): boolean {
   return true;
 }
 
-export function extractAddedDependencies(diff: string): AddedDependency[] {
-  const addedByFile = new Map<string, Map<string, AddedDependency>>();
-  const removedByFile = new Map<string, Set<string>>();
-
-  let file: string | null = null;
-  let newLine = 0;
-  let section: string | null = null;
-  let sectionIndent = -1;
-
-  const ensureAdded = (path: string): Map<string, AddedDependency> => {
-    let map = addedByFile.get(path);
-    if (!map) {
-      map = new Map();
-      addedByFile.set(path, map);
-    }
-    return map;
-  };
-  const ensureRemoved = (path: string): Set<string> => {
-    let set = removedByFile.get(path);
-    if (!set) {
-      set = new Set();
-      removedByFile.set(path, set);
-    }
-    return set;
-  };
-
-  for (const line of diff.split(/\r?\n/)) {
-    const fileHeader = FILE_HEADER.exec(line);
-    if (fileHeader) {
-      file = isPackageJsonPath(fileHeader[2] ?? "") ? (fileHeader[2] ?? null) : null;
-      section = null;
-      sectionIndent = -1;
-      continue;
-    }
-
-    const plusFile = PLUS_FILE.exec(line);
-    if (plusFile) {
-      const candidate = plusFile[1] ?? "";
-      if (candidate !== "/dev/null" && isPackageJsonPath(candidate)) {
-        file = candidate;
-      } else if (candidate === "/dev/null") {
-        file = null;
-      }
-      continue;
-    }
-
-    const hunk = HUNK_HEADER.exec(line);
-    if (hunk) {
-      newLine = parseInt(hunk[1] ?? "0", 10);
-      continue;
-    }
-
-    if (!file) continue;
-    if (line.startsWith("diff ") || line.startsWith("index ") || line.startsWith("--- ")) continue;
-    if (line.startsWith("\\") || line.length === 0) continue;
-    const prefix = line[0];
-    if (prefix !== " " && prefix !== "+" && prefix !== "-") continue;
-
-    const sectionOpen = SECTION_OPEN.exec(line);
-    if (sectionOpen) {
-      const indent = (sectionOpen[2] ?? "").length;
-      const key = sectionOpen[3] ?? "";
-      if (section !== null && indent <= sectionIndent) {
-        section = null;
-        sectionIndent = -1;
-      }
-      if (DEP_SECTIONS.has(key)) {
-        section = key;
-        sectionIndent = indent;
-      } else if (section !== null && indent <= sectionIndent) {
-        section = null;
-        sectionIndent = -1;
-      }
-    } else {
-      const sectionClose = SECTION_CLOSE.exec(line);
-      if (sectionClose && section !== null) {
-        const indent = (sectionClose[2] ?? "").length;
-        if (indent <= sectionIndent) {
-          section = null;
-          sectionIndent = -1;
-        }
-      }
-    }
-
-    const pkg = PKG_ENTRY.exec(line);
-    if (pkg && section !== null && DEP_SECTIONS.has(section)) {
-      const name = pkg[3] ?? "";
-      const version = pkg[4] ?? "";
-      if (prefix === "+") {
-        ensureAdded(file).set(name, { name, version, file, line: newLine });
-      } else if (prefix === "-") {
-        ensureRemoved(file).add(name);
-      }
-    }
-
-    if (prefix === "+" || prefix === " ") {
-      newLine += 1;
-    }
-  }
-
-  const result: AddedDependency[] = [];
-  for (const [path, added] of addedByFile) {
-    const removed = removedByFile.get(path) ?? new Set();
-    for (const [name, dep] of added) {
-      if (!removed.has(name)) {
-        result.push(dep);
+function depMap(pkg: unknown): Map<string, string> {
+  const map = new Map<string, string>();
+  if (!pkg || typeof pkg !== "object") return map;
+  const record = pkg as Record<string, unknown>;
+  for (const key of DEP_KEYS) {
+    const section = record[key];
+    if (!section || typeof section !== "object") continue;
+    for (const [name, version] of Object.entries(section as Record<string, unknown>)) {
+      if (typeof version === "string" && !map.has(name)) {
+        map.set(name, version);
       }
     }
   }
-  return result;
+  return map;
+}
+
+function lineOfPackage(source: string, name: string): number {
+  const needle = `"${name}"`;
+  const lines = source.split(/\r?\n/);
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i] ?? "";
+    if (line.includes(needle) && /:\s*"/.test(line)) {
+      return i + 1;
+    }
+  }
+  return 0;
+}
+
+/**
+ * Diff parsed package.json objects. Names present on head but not in any
+ * dependency section on base are "added"; version bumps and key reorder
+ * are ignored.
+ */
+export function extractAddedDependencies(
+  headPkg: unknown,
+  basePkg: unknown,
+  file: string,
+  headSource: string = "",
+): AddedDependency[] {
+  const head = depMap(headPkg);
+  const base = depMap(basePkg);
+  const added: AddedDependency[] = [];
+  for (const [name, version] of head) {
+    if (!base.has(name)) {
+      added.push({ name, version, file, line: lineOfPackage(headSource, name) });
+    }
+  }
+  return added;
+}
+
+async function gitShow(repoPath: string, spec: string): Promise<string | null> {
+  try {
+    const { stdout } = await execFileAsync("git", ["show", spec], {
+      cwd: repoPath,
+      maxBuffer: 10 * 1024 * 1024,
+    });
+    return stdout;
+  } catch {
+    return null;
+  }
+}
+
+function parsePackageJson(raw: string | null): unknown {
+  if (!raw) return {};
+  try {
+    return JSON.parse(raw);
+  } catch {
+    return {};
+  }
+}
+
+/** List packages added between two git refs by comparing parsed manifests. */
+export async function collectAddedDependencies(
+  repoPath: string,
+  baseRef: string,
+  headRef: string,
+): Promise<AddedDependency[]> {
+  let names = "";
+  try {
+    const { stdout } = await execFileAsync(
+      "git",
+      ["diff", "--name-only", "--diff-filter=ACMR", baseRef, headRef],
+      { cwd: repoPath, maxBuffer: 10 * 1024 * 1024 },
+    );
+    names = stdout;
+  } catch {
+    return [];
+  }
+
+  const files = names.split(/\r?\n/).filter((f) => isPackageJsonPath(f));
+  const added: AddedDependency[] = [];
+  for (const file of files) {
+    const headSource = await gitShow(repoPath, `${headRef}:${file}`);
+    const baseSource = await gitShow(repoPath, `${baseRef}:${file}`);
+    added.push(
+      ...extractAddedDependencies(
+        parsePackageJson(headSource),
+        parsePackageJson(baseSource),
+        file,
+        headSource ?? "",
+      ),
+    );
+  }
+  return added;
+}
+
+export async function mapPool<T, R>(
+  items: readonly T[],
+  concurrency: number,
+  fn: (item: T, index: number) => Promise<R>,
+): Promise<R[]> {
+  const results = new Array<R>(items.length);
+  let next = 0;
+  async function worker(): Promise<void> {
+    while (true) {
+      const index = next;
+      next += 1;
+      if (index >= items.length) return;
+      results[index] = await fn(items[index]!, index);
+    }
+  }
+  const n = items.length === 0 ? 0 : Math.min(Math.max(concurrency, 1), items.length);
+  await Promise.all(Array.from({ length: n }, () => worker()));
+  return results;
 }
 
 export function levenshteinDistance(a: string, b: string): number {
@@ -308,7 +332,9 @@ export async function fetchWeeklyDownloads(
     headers: registryHeaders(),
     signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
   });
-  if (!response.ok) return null;
+  if (!response.ok) {
+    throw new Error(`npm downloads API returned HTTP ${response.status} for ${packageName}`);
+  }
   const body = (await response.json()) as { downloads?: unknown };
   return typeof body.downloads === "number" ? body.downloads : null;
 }
@@ -320,6 +346,7 @@ function npmPackageUrl(packageName: string): string {
 function finding(partial: {
   title: string;
   severity: "high" | "medium" | "low";
+  category?: "security" | "maintainability";
   file: string;
   line: number;
   snippet: string;
@@ -329,7 +356,7 @@ function finding(partial: {
   return {
     title: partial.title,
     severity: partial.severity,
-    category: "security",
+    category: partial.category ?? "security",
     file: partial.file,
     line: partial.line,
     snippet: partial.snippet,
@@ -345,6 +372,13 @@ function daysBetween(createdIso: string, now: Date): number | null {
   return (now.getTime() - created) / (1000 * 60 * 60 * 24);
 }
 
+interface PackageCheck {
+  findings: DeterministicFinding[];
+  metadataSuccess: boolean;
+  metadataFailure: boolean;
+  warnings: string[];
+}
+
 export async function runDependencySanityCheck(
   options: DependencySanityOptions,
 ): Promise<DependencySanityResult> {
@@ -353,21 +387,36 @@ export async function runDependencySanityCheck(
   const typosquatMaxDistance = options.typosquatMaxDistance ?? 1;
   const fetchFn = options.fetch ?? globalThis.fetch.bind(globalThis);
   const now = options.now ?? new Date();
+  const concurrency = options.concurrency ?? REGISTRY_CONCURRENCY;
   const warnings: string[] = [];
   const warn = (message: string): void => {
     warnings.push(message);
     options.onWarn?.(message);
   };
 
-  const added = extractAddedDependencies(options.diff);
-  const findings: DeterministicFinding[] = [];
-  let metadataSuccesses = 0;
-  let metadataFailures = 0;
+  const added = options.added
+    ?? (options.repoPath
+      ? await collectAddedDependencies(
+          options.repoPath,
+          options.baseRef ?? "HEAD~1",
+          options.headRef ?? "HEAD",
+        )
+      : []);
 
-  for (const dep of added) {
+  const checks = await mapPool(added, concurrency, async (dep): Promise<PackageCheck> => {
+    const localFindings: DeterministicFinding[] = [];
+    const localWarnings: string[] = [];
+    const localWarn = (message: string): void => {
+      localWarnings.push(message);
+    };
+
+    if (!isRegistrySpecifier(dep.version)) {
+      return { findings: localFindings, metadataSuccess: false, metadataFailure: false, warnings: localWarnings };
+    }
+
     const typosquat = findTyposquatMatch(dep.name, typosquatMaxDistance);
     if (typosquat) {
-      findings.push(finding({
+      localFindings.push(finding({
         title: `Possible typosquat: '${dep.name}' is similar to '${typosquat}'`,
         severity: "high",
         file: dep.file,
@@ -378,30 +427,27 @@ export async function runDependencySanityCheck(
       }));
     }
 
-    if (!isRegistrySpecifier(dep.version)) continue;
-
     try {
       const meta = await fetchPackageMetadata(dep.name, fetchFn);
-      metadataSuccesses += 1;
 
       if (meta.status === "not_found") {
-        findings.push(finding({
+        localFindings.push(finding({
           title: `Package '${dep.name}' does not exist on the npm registry`,
           severity: "high",
           file: dep.file,
           line: dep.line,
           snippet: dep.name,
           ruleId: "dependency-nonexistent",
-          reference: `${REGISTRY_URL}/${encodeURIComponent(dep.name)}`,
+          reference: npmPackageUrl(dep.name),
         }));
-        continue;
+        return { findings: localFindings, metadataSuccess: true, metadataFailure: false, warnings: localWarnings };
       }
 
       if (meta.created) {
         const ageDays = daysBetween(meta.created, now);
         if (ageDays !== null && ageDays < minAgeDays) {
           const rounded = Math.max(0, Math.floor(ageDays));
-          findings.push(finding({
+          localFindings.push(finding({
             title: `Package '${dep.name}' was published ${rounded} day${rounded === 1 ? "" : "s"} ago (minimum ${minAgeDays})`,
             severity: "medium",
             file: dep.file,
@@ -415,9 +461,10 @@ export async function runDependencySanityCheck(
       try {
         const downloads = await fetchWeeklyDownloads(dep.name, fetchFn);
         if (downloads !== null && downloads < minWeeklyDownloads) {
-          findings.push(finding({
+          localFindings.push(finding({
             title: `Package '${dep.name}' has ${downloads} weekly download${downloads === 1 ? "" : "s"} (minimum ${minWeeklyDownloads})`,
             severity: "low",
+            category: "maintainability",
             file: dep.file,
             line: dep.line,
             snippet: dep.name,
@@ -425,14 +472,27 @@ export async function runDependencySanityCheck(
           }));
         }
       } catch (err) {
-        warn(`Downloads check failed for '${dep.name}': ${err instanceof Error ? err.message : String(err)}`);
+        localWarn(`Downloads check failed for '${dep.name}': ${err instanceof Error ? err.message : String(err)}`);
       }
+
+      return { findings: localFindings, metadataSuccess: true, metadataFailure: false, warnings: localWarnings };
     } catch (err) {
-      metadataFailures += 1;
-      warn(`Registry lookup failed for '${dep.name}': ${err instanceof Error ? err.message : String(err)}`);
+      localWarn(`Registry lookup failed for '${dep.name}': ${err instanceof Error ? err.message : String(err)}`);
+      return { findings: localFindings, metadataSuccess: false, metadataFailure: true, warnings: localWarnings };
     }
+  });
+
+  const findings: DeterministicFinding[] = [];
+  let metadataSuccesses = 0;
+  let metadataFailures = 0;
+  for (const check of checks) {
+    findings.push(...check.findings);
+    if (check.metadataSuccess) metadataSuccesses += 1;
+    if (check.metadataFailure) metadataFailures += 1;
+    for (const message of check.warnings) warn(message);
   }
 
-  const fault = added.length > 0 && metadataSuccesses === 0 && metadataFailures > 0;
+  const registryLookups = added.filter((dep) => isRegistrySpecifier(dep.version)).length;
+  const fault = registryLookups > 0 && metadataSuccesses === 0 && metadataFailures > 0;
   return { findings, fault, warnings };
 }

@@ -80,11 +80,16 @@ const DependencySanityConfigSchema = z.object({
   typosquat_max_distance: z.number().int().positive().default(1),
 });
 
+const TestWeakeningConfigSchema = z.object({
+  enabled: z.boolean().default(true),
+});
+
 const ToolsSchema = z.object({
   semgrep: SemgrepConfigSchema.default({}),
   linter: LinterConfigSchema.default({}),
   vuln_scanner: VulnScannerConfigSchema.default({}),
   dependency_sanity: DependencySanityConfigSchema.default({}),
+  test_weakening: TestWeakeningConfigSchema.default({}),
 });
 
 // ─── Test inversion ────────────────────────────────────────────────────────

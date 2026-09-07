@@ -32,6 +32,10 @@ tools:
     enabled: true
   vuln_scanner:
     enabled: true
+  dependency_sanity:
+    enabled: true
+  test_weakening:
+    enabled: true
 
 # ── Test inversion ──────────────────────────────────────────
 test_inversion:

@@ -37,7 +37,7 @@ The schema is versioned from day one — currently `schema_version: 3` — and s
 
 | Prefix | Source | Confidence |
 |---|---|---|
-| `D-` | Deterministic tool finding (semgrep, linter, vuln scanner) | Always 1.0 |
+| `D-` | Deterministic tool finding (semgrep, linter, vuln scanner, dependency sanity, test weakening) | Always 1.0 |
 | `F-` | LLM-asserted finding, or a flagged test-inversion result | LLM findings: self-reported, typically 0.5–0.9. Test-inversion findings: always 1.0 |
 
 **Note:** `id` prefix tracks *when in the pipeline* a finding was assigned an id, not `source_type`. Test-inversion findings get an `F-` id even though their `source_type` is `"deterministic"` (confidence 1.0, no hallucination risk) — don't use the id prefix as a proxy for `source_type` when filtering; check `source_type` directly instead.
@@ -69,7 +69,7 @@ The schema is versioned from day one — currently `schema_version: 3` — and s
 
 | `source_type` | Meaning | How it got here |
 |---|---|---|
-| `deterministic` | Tool-asserted, reproducible | Semgrep, linter, vuln scanner, test inversion |
+| `deterministic` | Tool-asserted, reproducible | Semgrep, linter, vuln scanner, dependency sanity, test weakening, test inversion |
 | `llm` | Model-asserted, may hallucinate | LLM adversarial review |
 
 ## Dismissal fields
@@ -149,6 +149,13 @@ The JSON artifact (`--output findings.json`) is a complete, self-contained recor
       "exit_code": 1,
       "raw_findings_count": 5,
       "command": "npm audit --json"
+    },
+    {
+      "tool": "dependency_sanity",
+      "version": "builtin",
+      "exit_code": 0,
+      "raw_findings_count": 0,
+      "command": "npm-registry"
     }
   ],
 
@@ -262,6 +269,10 @@ The `analysis_completeness` field records the outcome so a consumer cannot mista
 `analysis_completeness` is `null` when the LLM pass did not run at all (`--no-llm`, no changes, or the unprivileged emit-bundle half of the fork-PR split). The Markdown PR comment also surfaces a `Partial analysis` warning whenever the state is `partial`.
 
 > **"Flaught completed" is not the same as "Flaught comprehensively reviewed this."** This field makes that distinction legible in the data, so a downstream consumer or merge gate cannot mistake a partial run for a full one.
+
+Built-in tools that are not an installed CLI use `version: "builtin"` (or `"built-in"`) and a descriptive `command` rather than a shell invocation. Dependency sanity records `command: "npm-registry"` on success and `command: "(failed)"` with `exit_code: 2` when every registry metadata request threw (an outage, not a 404).
+
+`severity_gate.fail_on: "none"` suppresses exit 1 for findings, but a `dependency_sanity` tool fault still yields process exit 2. A fault is not a finding.
 
 ## Schema versioning
 

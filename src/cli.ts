@@ -51,14 +51,16 @@ program
   .command("init")
   .description("Scaffold .advreview.yml with commented defaults")
   .option("-d, --dir <path>", "Target directory", process.cwd())
+  .option("--paranoid", "Write explicit review settings without prompting")
   .action((opts) => {
-    const filePath = initConfig(opts.dir);
+    const filePath = initConfig(opts.dir, { paranoid: opts.paranoid });
     console.log(`Created ${filePath}`);
 
     // Also scaffold .flaught-prompt/ with example template files
     const promptDir = initPromptTemplates(opts.dir);
     console.log(`Created ${promptDir}/ with example template files`);
     console.log(`\nEdit the .example files to customize prompts. Remove .example to activate a template.`);
+    console.log(`Note: dependency sanity is on by default and queries registry.npmjs.org / api.npmjs.org for packages added in package.json. Set tools.dependency_sanity.enabled: false to disable outbound network calls.`);
   });
 
 program
