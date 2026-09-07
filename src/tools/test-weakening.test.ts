@@ -77,7 +77,48 @@ describe("test weakening detection", () => {
     });
   });
 
-  it("does not flag a clean test diff", () => {
+it("does not flag a clean test diff", () => {
     expect(detectTestWeakening("+expect(value).toBe(1)")).toEqual([]);
+  });
+
+  it("does not fire commented-test-body across different files (regression)", () => {
+    // A removed `it()` in a test file plus an added `//` comment in an
+    // unrelated source file must NOT trip a cross-file false positive.
+    const diff = [
+      "diff --git a/src/foo.test.ts b/src/foo.test.ts",
+      "--- a/src/foo.test.ts",
+      "+++ b/src/foo.test.ts",
+      "@@ -5,1 +5,0 @@",
+      "-  it(\"old test\", () => {});",
+      "diff --git a/src/review.ts b/src/review.ts",
+      "--- a/src/review.ts",
+      "+++ b/src/review.ts",
+      "@@ -1090,1 +1090,2 @@",
+      "+  // Registry outage is a tool fault, not a verdict.",
+      "+  // CI should warn, not block.",
+    ].join("\n");
+
+    const findings = detectTestWeakening(diff, []);
+    expect(findings.some((f) => f.ruleId === "commented-test-body")).toBe(false);
+    expect(findings.some((f) => f.file === "src/review.ts")).toBe(false);
+  });
+
+  it("does not fire a loosened-matcher finding across different files (regression)", () => {
+    // A removed `.toBe(` in one test file plus an added `.toBeTruthy(` in a
+    // different test file must NOT trip a cross-file matcher finding.
+    const diff = [
+      "diff --git a/src/a.test.ts b/src/a.test.ts",
+      "--- a/src/a.test.ts",
+      "+++ b/src/a.test.ts",
+      "@@ -1,1 +1,1 @@",
+      "-  expect(x).toBe(1);",
+      "diff --git a/src/b.test.ts b/src/b.test.ts",
+      "--- a/src/b.test.ts",
+      "+++ b/src/b.test.ts",
+      "@@ -1,1 +1,1 @@",
+      "+  expect(y).toBeTruthy();",
+    ].join("\n");
+
+    expect(detectTestWeakening(diff, []).some((f) => f.ruleId === "exact-to-truthy")).toBe(false);
   });
 });

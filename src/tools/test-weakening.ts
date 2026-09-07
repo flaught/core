@@ -117,10 +117,34 @@ export function detectTestWeakening(diff: string, deletedFiles: string[] = []): 
     [/\.toEqual\(/, /\.toMatchObject\(/, "exact-to-partial"],
     [/\.toBeCloseTo\(/, /\.toBeGreaterThan\(/, "close-to-range"],
   ];
-  for (const [strict, loose, ruleId] of matcherPairs) {
-    if (removed.some((line) => strict.test(line.text)) && added.some((line) => loose.test(line.text))) {
-      const looseLine = added.find((line) => loose.test(line.text));
-      findings.push(finding("A test matcher was loosened", looseLine, looseLine?.text ?? "", ruleId));
+
+  // Correlation rules (loosened matcher, commented-out test body) must fire
+  // WITHIN A SINGLE FILE. Grouping changed lines by file prevents the
+  // cross-file false positive where a removed `it()` in one file and an
+  // added `//` comment in another file trip a HIGH "test body replaced with
+  // comments" finding pointing at the unrelated comment.
+  const byFile = new Map<string, { removed: DiffLine[]; added: DiffLine[] }>();
+  for (const line of changedLines) {
+    let bucket = byFile.get(line.file);
+    if (!bucket) {
+      bucket = { removed: [], added: [] };
+      byFile.set(line.file, bucket);
+    }
+    (line.kind === "removed" ? bucket.removed : bucket.added).push(line);
+  }
+
+  for (const { removed: rem, added: add } of byFile.values()) {
+    for (const [strict, loose, ruleId] of matcherPairs) {
+      if (rem.some((line) => strict.test(line.text)) && add.some((line) => loose.test(line.text))) {
+        const looseLine = add.find((line) => loose.test(line.text));
+        findings.push(finding("A test matcher was loosened", looseLine, looseLine?.text ?? "", ruleId));
+      }
+    }
+
+    const removedTest = rem.find((line) => /\b(?:it|test)\s*\(/.test(line.text));
+    const addedComment = add.find((line) => /^\s*\/\//.test(line.text));
+    if (removedTest && addedComment) {
+      findings.push(finding("A test body was replaced with comments", addedComment, addedComment.text, "commented-test-body"));
     }
   }
 
@@ -129,12 +153,6 @@ export function detectTestWeakening(diff: string, deletedFiles: string[] = []): 
       const location = removed.find((line) => line.file === file);
       findings.push(finding("A test file was removed", location, file, "deleted-test-file", "high", file));
     }
-  }
-
-  const removedTest = removed.find((line) => /\b(?:it|test)\s*\(/.test(line.text));
-  const addedComment = added.find((line) => /^\s*\/\//.test(line.text));
-  if (removedTest && addedComment) {
-    findings.push(finding("A test body was replaced with comments", addedComment, addedComment.text, "commented-test-body"));
   }
 
   return findings;

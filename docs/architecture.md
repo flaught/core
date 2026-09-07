@@ -1,6 +1,6 @@
 # Architecture
 
-Flaught runs an adversarial review pipeline: a deterministic-first pass (semgrep, linter, vuln scanner, test inversion, scope-creep heuristic) grounds an LLM adversarial review, which is then tested by a skeptic/refute pass. Findings are source-tagged (`deterministic` vs `llm`), pooled, run through a noise budget and a severity gate, and emitted as a Markdown PR comment plus a versioned JSON artifact.
+Flaught runs an adversarial review pipeline: a deterministic-first pass (semgrep, linter, vuln scanner, the built-in test-weakening check, test inversion, scope-creep heuristic) grounds an LLM adversarial review, which is then tested by a skeptic/refute pass. Findings are source-tagged (`deterministic` vs `llm`), pooled, run through a noise budget and a severity gate, and emitted as a Markdown PR comment plus a versioned JSON artifact.
 
 This page is the human-readable architecture reference: the pipeline, the component map, and a single-run sequence. For the CI trust-zone flow (fork-PR split, privileged/unprivileged workflows), see [`github-actions.md`](./github-actions.md) — it's not duplicated here.
 
@@ -18,7 +18,7 @@ flowchart TD
     CX --> DS[Load dismissals + prompt templates]
     DS --> CH{Changed files?}
     CH -- no --> ART
-    CH -- yes --> TOOLS[Deterministic tools<br/>semgrep / linter / vuln scanner]
+    CH -- yes --> TOOLS[Deterministic tools<br/>semgrep / linter / vuln scanner<br/>+ built-in test weakening]
     TOOLS --> DF[Deterministic findings<br/>confidence 1.0 · refute-exempt]
     CX --> SCH[Scope-creep heuristic pre-filter]
     SCH --> LG{LLM enabled & changes?}
@@ -81,6 +81,7 @@ flowchart LR
     end
     subgraph det[Deterministic]
       tr[tools/runner]
+      tw[tools/test-weakening<br/>built-in diff check]
     end
     subgraph llm[LLM + Refute]
       prov[llm/provider]
@@ -110,12 +111,24 @@ flowchart LR
     subgraph host[Host integration]
       gh[github/inline-comments]
     end
+    subgraph tmpl[Prompt templates]
+      pt[prompt/templates<br/>.flaught-prompt/ overrides]
+    end
+    subgraph dash[Dashboard (trends)]
+      dcmd[dashboard/command]
+      dld[dashboard/loader]
+      dtr[dashboard/trends]
+      dren[dashboard/render]
+    end
     rev[review.ts<br/>orchestrator]
     cli --> rev
     cli --> host
-    idx --> rev & context & det & llm & checks & dism & rep & sch
+    cli --> dash
+    cli --> tmpl
+    idx --> rev & context & det & llm & checks & dism & rep & sch & tmpl
     rev --> context & det & llm & checks & dism & rep
     rev -. reads .-> sch
+    rev -. reads .-> tmpl
 ```
 
 ```
@@ -134,6 +147,8 @@ Context assembly
 
 Deterministic tools
   tools/runner.ts          semgrep / linter / vuln scanner — source_type: deterministic
+  tools/test-weakening.ts  built-in: removed assertions, added skips, loosened matchers,
+                          deleted test files, commented-out test bodies (deterministic)
 
 LLM + Refute
   llm/provider.ts          OpenAI-compatible / Anthropic / Groq / Gemini / Ollama
@@ -141,6 +156,11 @@ LLM + Refute
   llm/liveness.ts          pre-flight model-exists check
   refute/runner.ts         skeptic pass — tries to refute LLM findings
   refute/prompt.ts         refute system/user prompt
+
+Prompt templates
+  prompt/templates.ts      .flaught-prompt/ override + append loader (system/posture/
+                          categories/severity/output-format/constraints, system-append);
+                          also initPromptTemplates() scaffolding for `flaught init`
 
 Agent-failure checks
   test-inversion/runner.ts  pre/post-change test sensitivity
@@ -162,6 +182,16 @@ Report
 
 Host integration
   github/inline-comments.ts inline PR comments (GitHub today; host adapters coming — roadmap Portability)
+
+Dashboard (trends) — separate CLI command, not part of the review pipeline
+  dashboard/command.ts     `flaught dashboard` handler (--input dir of findings.json → HTML)
+  dashboard/loader.ts      recursively finds/loads findings artifacts from disk
+  dashboard/trends.ts      turns artifacts into a time-ordered trend series
+  dashboard/render.ts      self-contained static HTML render (no external requests)
+
+Utilities
+  util/glob.ts             minimal `*`/`**`/`?` glob for exclude.paths / scope_creep.exclude_paths
+                          (length + complexity capped, ReDoS-safe)
 ```
 
 ---
@@ -240,7 +270,7 @@ See the [README exit-codes table](../README.md#exit-codes) and [exit-code handli
 
 ## 6. Design principles
 
-- **Deterministic-first.** Semgrep/linter/vuln-scanner run *before* the LLM, grounding the review in facts. Findings are tagged `source_type: "deterministic"` vs `"llm"` so provenance is always visible.
+- **Deterministic-first.** Semgrep/linter/vuln-scanner and the built-in test-weakening check run *before* the LLM, grounding the review in facts. Findings are tagged `source_type: "deterministic"` vs `"llm"` so provenance is always visible.
 - **Refute exemption is deliberate (and under review).** Deterministic findings get `confidence: 1.0` and skip the skeptic pass as "ground truth." The [Artifact honesty](./roadmap.md) theme revisits this — deterministic tools have false-positive rates too, and the skeptic should be able to *contextualize* (not dismiss) them.
 - **Honest caveat.** Every artifact carries `_caveat`: evidence that scrutiny *occurred*, not that findings are *correct*. `analysis_completeness` records whether the LLM saw the whole change.
 - **Gate is config, not prescription.** The noise budget and `fail_on` threshold are per-project config; whether the status check is *required* is repo branch-protection, not tool default behavior. See the roadmap's [Gate integrity](./roadmap.md) theme.
