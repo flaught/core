@@ -37,6 +37,8 @@ llm:
 #   vuln_scanner:
 #     enabled: true
 #     command: npm audit                     # override auto-detected scanner
+#   test_weakening:
+#     enabled: true
 
 # ── Test inversion ─────────────────────────────────────────
 # test_inversion:
@@ -309,6 +311,7 @@ Flaught auto-detects which tools to run based on your repo contents:
 | **Semgrep** | Always tries; skips gracefully if not installed | `tools.semgrep.enabled`, `tools.semgrep.config` |
 | **Linter** | `eslint` (JS/TS), `ruff`/`flake8` (Python), `go vet` (Go) | `tools.linter.enabled`, `tools.linter.command` |
 | **Vuln scanner** | `npm audit` (JS), `pip-audit` (Python), `govulncheck` (Go) | `tools.vuln_scanner.enabled`, `tools.vuln_scanner.command` |
+| **Test weakening** | Checks the diff for removed assertions, loosened matchers, skips, commented-out test bodies, and deleted test files | `tools.test_weakening.enabled` |
 
 All tools degrade gracefully — if a tool isn't installed, Flaught skips it and continues. Findings from deterministic tools are tagged `source_type: "deterministic"` with confidence 1.0.
 

@@ -125,11 +125,13 @@ describe("initConfig", () => {
     expect(tools.semgrep?.enabled).toBe(true);
     expect(tools.linter?.enabled).toBe(true);
     expect(tools.vuln_scanner?.enabled).toBe(true);
+    expect(tools.test_weakening?.enabled).toBe(true);
 
     const config = await loadConfig(filePathFor(dir));
     expect(config.tools.semgrep.enabled).toBe(true);
     expect(config.tools.linter.enabled).toBe(true);
     expect(config.tools.vuln_scanner.enabled).toBe(true);
+    expect(config.tools.test_weakening.enabled).toBe(true);
   });
 });
 

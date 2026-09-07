@@ -165,16 +165,20 @@ export async function runReview(options: ReviewOptions = {}): Promise<ReviewResu
     }
   }
 
-  // 3. Run deterministic tools (semgrep, linter, vuln scanner)
+  // 3. Run deterministic tools (including the built-in test-weakening check)
   let toolExecutions: ToolExecuted[] = [];
   let deterministicFindings: DeterministicFinding[] = [];
   let scopeCreepHeuristic: FlaggedHunk[] = [];
 
   if (context.changedFiles.length > 0) {
-    const anyToolEnabled = config.tools.semgrep.enabled || config.tools.linter.enabled || config.tools.vuln_scanner.enabled;
+    const anyToolEnabled = config.tools.semgrep.enabled || config.tools.linter.enabled || config.tools.vuln_scanner.enabled || config.tools.test_weakening.enabled;
     if (anyToolEnabled) {
       progress("Running deterministic tools...");
-      const toolResult = await runDeterministicTools(config, context.repoRoot, progress);
+      const toolResult = await runDeterministicTools(config, context.repoRoot, {
+        baseRef: context.baseSha,
+        headRef: context.headSha,
+        onProgress: progress,
+      });
       toolExecutions = toolResult.executions;
       deterministicFindings = toolResult.findings;
     } else {

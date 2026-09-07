@@ -17,6 +17,7 @@ describe("FlaughtConfigSchema", () => {
     expect(config.tools.semgrep.enabled).toBe(true);
     expect(config.tools.linter.enabled).toBe(true);
     expect(config.tools.vuln_scanner.enabled).toBe(true);
+    expect(config.tools.test_weakening.enabled).toBe(true);
     expect(config.test_inversion.enabled).toBe(true);
     expect(config.test_inversion.scope_to_blast_radius).toBe(true);
     expect(config.test_inversion.skip_docs_only_diffs).toBe(true);
@@ -60,6 +61,7 @@ describe("FlaughtConfigSchema", () => {
         semgrep: { enabled: false },
         linter: { enabled: true, command: "ruff check" },
         vuln_scanner: { enabled: true, command: "pip-audit" },
+        test_weakening: { enabled: false },
       },
       test_inversion: {
         enabled: true,
@@ -99,6 +101,7 @@ describe("FlaughtConfigSchema", () => {
     expect(config.llm.model).toBe("llama-3.1-70b");
     expect(config.tools.semgrep.enabled).toBe(false);
     expect(config.tools.linter.command).toBe("ruff check");
+    expect(config.tools.test_weakening.enabled).toBe(false);
     expect(config.test_inversion.scope_to_blast_radius).toBe(false);
     expect(config.test_inversion.skip_docs_only_diffs).toBe(false);
     expect(config.lighthouse.preview_url).toBe("https://deploy-preview.example.com");

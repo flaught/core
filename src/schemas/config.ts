@@ -70,10 +70,15 @@ const VulnScannerConfigSchema = z.object({
   command: z.string().nullable().default(null),
 });
 
+const TestWeakeningConfigSchema = z.object({
+  enabled: z.boolean().default(true),
+});
+
 const ToolsSchema = z.object({
   semgrep: SemgrepConfigSchema.default({}),
   linter: LinterConfigSchema.default({}),
   vuln_scanner: VulnScannerConfigSchema.default({}),
+  test_weakening: TestWeakeningConfigSchema.default({}),
 });
 
 // ─── Test inversion ────────────────────────────────────────────────────────

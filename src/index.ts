@@ -30,7 +30,7 @@ export {
 export { runReview, type ReviewResult, type ReviewOptions, type ProgressCallback } from "./review.js";
 export { renderMarkdownReport } from "./report/markdown.js";
 export { renderJsonArtifact } from "./report/json.js";
-export { runDeterministicTools, formatToolFindingsForPrompt, type ToolResult, type DeterministicFinding } from "./tools/runner.js";
+export { runDeterministicTools, formatToolFindingsForPrompt, type ToolResult, type DeterministicFinding, type DeterministicToolsOptions } from "./tools/runner.js";
 export { runTestInversion } from "./test-inversion/runner.js";
 export { detectScopeCreepHeuristic, extractScopeCreepFromFindings, formatScopeCreepForPrompt } from "./scope-creep/detector.js";
 export { DismissalEntrySchema, DismissalStoreSchema, type DismissalEntry, type DismissalStore, DISMISSAL_STORE_VERSION } from "./schemas/dismissals.js";
