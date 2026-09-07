@@ -70,6 +70,12 @@ flaught review --output findings.json --quiet   # CI mode
 flaught dismiss D-0002 --artifact findings.json --reason "..." # suppress a false positive, persisted across runs
 ```
 
+For zero-question setup, use `flaught init --paranoid` instead of plain `init`.
+It writes explicit settings for all deterministic tools, test inversion,
+scope-creep detection, a high-severity gate, and persistent dismissals, with
+links explaining each setting. See the [paranoid preset](docs/configuration.md#paranoid-preset)
+for prerequisites and how it relates to the normal defaults.
+
 ### API key
 
 `flaught init` defaults to Groq. Generate a free key at [console.groq.com/keys](https://console.groq.com/keys), then:
@@ -143,6 +149,7 @@ Any OpenAI-compatible endpoint works via `base_url`. Anthropic has its own nativ
 
 ## Documentation
 
+- **[Architecture](https://github.com/flaught/core/blob/main/docs/architecture.md)**: the review pipeline, component map, and single-run sequence (mermaid + ASCII)
 - **[Configuration](https://github.com/flaught/core/blob/main/docs/configuration.md)**: full `.advreview.yml` reference, LLM providers, noise budget, severity gate, tools, test inversion, scope-creep
 - **[Prompt Templates](https://github.com/flaught/core/blob/main/docs/prompt-templates.md)**: override or extend the LLM reviewer's posture, categories, rules, and context via `.flaught-prompt/`
 - **[Trends dashboard](https://github.com/flaught/core/blob/main/docs/dashboard.md)**: download historical findings artifacts and render a self-contained HTML trends report
@@ -152,6 +159,7 @@ Any OpenAI-compatible endpoint works via `base_url`. Anthropic has its own nativ
 - **[GitHub Actions](https://github.com/flaught/core/blob/main/docs/github-actions.md)**: three ready-to-use workflows (minimal, full, Ollama) plus exit code handling
 - **[Programmatic API](https://github.com/flaught/core/blob/main/docs/api.md)**: use Flaught as a library in Node.js
 - **[Troubleshooting](https://github.com/flaught/core/blob/main/docs/troubleshooting.md)**: every error message, what it means, how to fix it
+- **[Website](https://flaught.github.io)**: the Flaught project site
 
 ## Honest caveat
 

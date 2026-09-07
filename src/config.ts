@@ -9,6 +9,52 @@ import { FlaughtConfigSchema, type FlaughtConfig, mergeWithDefaults } from "./sc
 
 const CONFIG_FILENAMES = [".advreview.yml", ".advreview.yaml"];
 
+const PARANOID_CONFIG_TEMPLATE = `# Flaught adversarial review configuration — paranoid preset
+# Explicit review settings; all other options use the schema defaults.
+# See https://github.com/flaught/core/blob/main/docs/configuration.md#full-reference
+version: 1
+
+# LLM provider, model, and API-key environment variable:
+# https://github.com/flaught/core/blob/main/docs/configuration.md#llm-providers
+llm:
+  provider: groq
+  model: openai/gpt-oss-20b
+  api_key_env: GROQ_API_KEY
+
+# Enable Semgrep, the linter, and the vulnerability scanner.
+# Tools must be installed separately; enabling them does not install them.
+# https://github.com/flaught/core/blob/main/docs/configuration.md#deterministic-tools
+tools:
+  semgrep:
+    enabled: true
+  linter:
+    enabled: true
+  vuln_scanner:
+    enabled: true
+
+# Run tests against pre-change code to detect missing coverage.
+# https://github.com/flaught/core/blob/main/docs/configuration.md#test-inversion
+test_inversion:
+  enabled: true
+
+# Check changes against the stated PR intent.
+# https://github.com/flaught/core/blob/main/docs/configuration.md#scope-creep-detection
+scope_creep:
+  enabled: true
+
+# Fail on non-dismissed high or critical findings.
+# https://github.com/flaught/core/blob/main/docs/configuration.md#severity-gate
+severity_gate:
+  fail_on: high
+
+# Persist dismissals in the configured store.
+# https://github.com/flaught/core/blob/main/docs/configuration.md#dismissals
+# TODO: Enable --strict-dismissals when it is available (not implemented yet).
+dismissals:
+  enabled: true
+  path: .flaught-dismissals.json
+`;
+
 /**
  * Search for the config file starting from cwd and walking up to repo root.
  */
@@ -63,11 +109,11 @@ export async function loadConfig(
 }
 
 /**
- * Initialize a new .advreview.yml with commented defaults.
+ * Initialize a new .advreview.yml with commented defaults or an explicit paranoid preset.
  */
-export function initConfig(targetDir: string): string {
+export function initConfig(targetDir: string, options: { paranoid?: boolean } = {}): string {
   const filePath = path.join(targetDir, ".advreview.yml");
-  const template = `# Flaught adversarial review configuration
+  const template = options.paranoid ? PARANOID_CONFIG_TEMPLATE : `# Flaught adversarial review configuration
 # See https://github.com/flaught/core for full documentation
 #
 # IMPORTANT: every commented-out block below (tools, test_inversion,

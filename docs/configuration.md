@@ -4,6 +4,24 @@ Flaught is configured via `.advreview.yml` in your repo root. Run `flaught init`
 
 Everything has sensible defaults — a repo can run with zero config. Override only what you need.
 
+## Paranoid preset
+
+Run `flaught init --paranoid` for zero-question setup, or
+`flaught init --paranoid --dir /path/to/repo` to choose the target directory.
+The generated `.advreview.yml` explicitly enables Semgrep, the linter, the
+vulnerability scanner, test inversion, scope-creep detection, and dismissals
+stored in `.flaught-dismissals.json`. It sets `severity_gate.fail_on: high` and
+uses Groq with `openai/gpt-oss-20b` and `api_key_env: GROQ_API_KEY`.
+
+These are the current effective defaults; the preset makes them explicit and
+links each section to this reference. Plain `flaught init` retains its existing
+commented template. Both commands also scaffold example prompt templates.
+Initialization only writes files: it does not install tools, run a review, or
+validate an API key. Install the [deterministic tools](#deterministic-tools) you
+want to run, and set `GROQ_API_KEY` before an LLM review (or use `--no-llm`).
+Strict human-attributed dismissals are not implemented yet; the generated
+config includes a reminder to enable them when available.
+
 ## Full reference
 
 ```yaml
