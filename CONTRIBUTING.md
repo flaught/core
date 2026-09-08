@@ -64,6 +64,8 @@ See the [Dismissals docs](docs/dismissals.md) for how fingerprints stay stable.
 4. CI runs the **Adversarial Review** workflow on your PR. Flaught builds from your branch source (so changes to its own review logic are reflected in its own run), posts a comment, and uploads a `findings.json` artifact.
 5. Exit code `1` (findings exceed the severity gate) blocks merge. Exit code `2` (config/API/LLM fault) does **not** block merge — a tool outage is not evidence of a code problem. See the [exit codes](README.md#exit-codes) table.
 
+For the non-negotiable process discipline (branch hygiene, working-tree state, signed commits, force-push rules) — which applies to the maintainer too — see [Git Hygiene](docs/git-hygiene.md).
+
 You don't have to get to zero findings to merge, but each non-dismissed finding above the gate needs to be either fixed or dismissed with a real reason. "I disagree" is not a reason.
 
 ## Commit conventions
