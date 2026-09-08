@@ -13,6 +13,18 @@ npm ci            # install dependencies
 npm run build     # compile TypeScript → dist/
 ```
 
+**Configure commit signing (required).** `main` enforces verified commit
+signatures, so every PR's commits must be signed. The simplest path is SSH
+signing with an existing SSH key — full one-time setup in
+[Git Hygiene](docs/git-hygiene.md#commits). In short: add your public key to
+GitHub as a *Signing Key*, then:
+
+```bash
+git config --global gpg.format ssh
+git config --global user.signingkey ~/.ssh/id_ed25519
+git config --global commit.gpgsign true
+```
+
 Sanity check that everything is green before you start:
 
 ```bash

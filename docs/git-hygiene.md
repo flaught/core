@@ -80,10 +80,29 @@ one commits straight to `main`.
   type, no trailing period, summary under ~72 chars; detail in the wrapped
   body. Scope is optional but useful: `prompt(test-scrutiny): …`.
 - **Signed commits are required on `main`.** GitHub enforces verified
-  signatures on `main`. Configure commit signing (SSH or GPG) once and set
-  `commit.gpgsign`/`gpg.format` so commits are signed by default — an unsigned
-  commit can only land on `main` via an admin override, which skips the very
-  review this project exists to provide. See GitHub's docs on signing commits.
+  signatures on `main`, so every contributor — including the maintainer —
+  must sign commits. The lowest-friction path is SSH signing (no GPG
+  install; reuses an existing SSH key). Set it up once:
+
+  1. Add your public key to GitHub as a **Signing Key** (Settings → SSH and
+     GPG keys → New SSH key → Key type: *Signing Key*). This is separate
+     from your auth key — GitHub distinguishes them. (CLI: `gh ssh-key add
+     --type signing ~/.ssh/id_ed25519.pub` after `gh auth refresh -h
+     github.com -s admin:ssh_signing_key`.)
+  2. Tell git to sign with it, globally:
+     ```
+     git config --global gpg.format ssh
+     git config --global user.signingkey ~/.ssh/id_ed25519
+     git config --global commit.gpgsign true
+     ```
+  3. Verify: make a test commit and check `git log --show-signature` shows
+     a `Good "git" signature`, and that GitHub renders the commit as
+     **Verified**.
+
+  An unsigned commit can only land on `main` via an admin override, which
+  skips the very review this project exists to provide. If your key is
+  passphrase-protected, load it into `ssh-agent` (`ssh-add`) so signing
+  doesn't prompt on every commit. See GitHub's docs on SSH commit signing.
 - **Stage intentionally.** Prefer naming paths over `git add -A`. Never commit
   `dist/` (build output), secrets, `.env`, or scratch files — check
   `git status` first.
