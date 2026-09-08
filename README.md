@@ -159,6 +159,7 @@ Any OpenAI-compatible endpoint works via `base_url`. Anthropic has its own nativ
 - **[GitHub Actions](https://github.com/flaught/core/blob/main/docs/github-actions.md)**: three ready-to-use workflows (minimal, full, Ollama) plus exit code handling
 - **[Programmatic API](https://github.com/flaught/core/blob/main/docs/api.md)**: use Flaught as a library in Node.js
 - **[Troubleshooting](https://github.com/flaught/core/blob/main/docs/troubleshooting.md)**: every error message, what it means, how to fix it
+- **[Git hygiene](https://github.com/flaught/core/blob/main/docs/git-hygiene.md)**: non-negotiable branch/commit/PR discipline (applies to the maintainer too)
 - **[Website](https://flaught.github.io)**: the Flaught project site
 
 ## Honest caveat
