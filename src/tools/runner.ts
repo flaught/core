@@ -822,6 +822,8 @@ interface ExecError {
   stdout?: string;
   stderr?: string;
   code?: number | string;
+  killed?: boolean;
+  message?: string;
 }
 
 /**
@@ -883,6 +885,17 @@ async function execCommandSafe(args: string[], cwd: string, timeoutMs: number = 
     };
   } catch (err) {
     const e = err as ExecError;
+    // A missing executable or killed/timed-out process is a real failure,
+    // not a tool finding — surface it instead of silently treating stderr as
+    // tool output.
+    if (e.code === "ENOENT" || e.killed) {
+      return {
+        success: false,
+        stdout: e.stdout ?? "",
+        stderr: e.stderr ?? String(e.message ?? err),
+        exitCode: typeof e.code === "number" ? e.code : 127,
+      };
+    }
     // Many linters/vuln scanners exit non-zero when they find issues
     // This is not necessarily an error — the output may still be valid
     return {
@@ -906,11 +919,18 @@ async function execCommandShell(command: string, cwd: string, timeoutMs: number 
   const { promisify } = await import("node:util");
   const execAsync = promisify(exec);
 
+  // SECURITY: This function is ONLY called for user-configured command strings
+  // (linter.command, vuln_scanner.command) — see the `isUserCommand` gates at
+  // the call sites. A malicious PR can edit .advreview.yml to set these, so we
+  // strip secret-bearing env vars before spawning. See src/util/env.ts.
+  const { sanitizedSpawnEnv } = await import("../util/env.js");
+
   try {
     const { stdout, stderr } = await execAsync(command, {
       cwd,
       maxBuffer: 10 * 1024 * 1024, // 10MB buffer for large outputs
       timeout: timeoutMs,
+      env: sanitizedSpawnEnv(),
     });
 
     return {
@@ -921,6 +941,17 @@ async function execCommandShell(command: string, cwd: string, timeoutMs: number 
     };
   } catch (err) {
     const e = err as ExecError;
+    // A missing executable or killed/timed-out process is a real failure,
+    // not a tool finding — surface it instead of silently treating stderr as
+    // tool output.
+    if (e.code === "ENOENT" || e.killed) {
+      return {
+        success: false,
+        stdout: e.stdout ?? "",
+        stderr: e.stderr ?? String(e.message ?? err),
+        exitCode: typeof e.code === "number" ? e.code : 127,
+      };
+    }
     // Many linters/vuln scanners exit non-zero when they find issues
     // This is not necessarily an error — the output may still be valid
     return {

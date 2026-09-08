@@ -10,7 +10,7 @@ const pkgVersion: string = require("../package.json").version;
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { assembleContext, contextFromJSON, type ReviewContext, type ReviewContextJSON, type ChangedFile } from "./context/assembler.js";
-import { loadConfig } from "./config.js";
+import { loadConfig, loadConfigFromRef } from "./config.js";
 import type { FlaughtConfig } from "./schemas/config.js";
 import { createProvider, type LLMReviewResult } from "./llm/provider.js";
 import { buildSystemPrompt, buildUserPromptWithCompleteness } from "./llm/prompt.js";
@@ -104,6 +104,14 @@ export interface ReviewOptions {
    * + --emit-context.
    */
   emitBundle?: boolean;
+  /**
+   * Resolve `.advreview.yml` from the PR base ref (`baseRef`) instead of the
+   * working tree, so a malicious PR cannot inject shell commands by editing
+   * the config (e.g. setting `linter.command`). Requires `baseRef`. If the
+   * ref can't be read, fails loudly rather than silently trusting PR-head
+   * config. See `loadConfigFromRef`.
+   */
+  configFromBase?: boolean;
   /** Progress callback for logging */
   onProgress?: ProgressCallback;
 }
@@ -114,7 +122,15 @@ export async function runReview(options: ReviewOptions = {}): Promise<ReviewResu
 
   // 1. Load config
   progress("Loading config...");
-  const config = await loadConfig(options.configPath, options.repoPath);
+  if (options.configFromBase && !options.baseRef) {
+    throw new Error(
+      "--config-from-base requires --base <ref> (or a base ref detectable from the repo). " +
+        "Refusing to load working-tree config when base-ref config was requested.",
+    );
+  }
+  const config = options.configFromBase && options.baseRef
+    ? await loadConfigFromRef(options.repoPath ?? process.cwd(), options.baseRef, options.configPath)
+    : await loadConfig(options.configPath, options.repoPath);
   progress(`  Provider: ${config.llm.provider}/${config.llm.model}`);
 
   // 2. Assemble context

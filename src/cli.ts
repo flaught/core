@@ -78,6 +78,7 @@ program
   .option("--context <path>", "Path to a context bundle from `flaught review --emit-context` (used with --only-llm)")
   .option("--findings <path>", "Path to a partial findings artifact from `flaught review --output` (used with --only-llm)")
   .option("--no-refute", "Skip the skeptic/refute pass even if LLM review is enabled")
+  .option("--config-from-base", "Load .advreview.yml from the --base ref instead of the working tree, so a malicious PR can't inject shell commands via config edits (requires --base)")
   .option("--pr-description <text>", "PR description for scope-creep detection")
   .option("--quiet", "Only output the final report, no progress messages")
   .option("--github-inline", "Post findings as inline PR comments on diff lines (requires GITHUB_TOKEN)")
@@ -180,6 +181,7 @@ async function runCliReview(opts: {
   onlyLlm?: boolean;
   context?: string;
   findings?: string;
+  configFromBase?: boolean;
 }): Promise<void> {
   const progress: ProgressCallback = opts.quiet
     ? () => {}
@@ -239,6 +241,7 @@ async function runCliReview(opts: {
     skipLlm: !opts.llm,
     skipRefute: (opts as Record<string, unknown>).refute === false, // --no-refute sets refute to false
     emitBundle: !!opts.emitContext, // unprivileged half: don't budget (the privileged half budgets the full set)
+    configFromBase: opts.configFromBase ?? Boolean(process.env.FLAUGHT_CONFIG_FROM_BASE),
     onProgress: progress,
   });
 

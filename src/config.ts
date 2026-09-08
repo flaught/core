@@ -4,8 +4,12 @@
 
 import * as fs from "node:fs";
 import * as path from "node:path";
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
 import * as yaml from "js-yaml";
 import { FlaughtConfigSchema, type FlaughtConfig, mergeWithDefaults } from "./schemas/config.js";
+
+const execFileAsync = promisify(execFile);
 
 const CONFIG_FILENAMES = [".advreview.yml", ".advreview.yaml"];
 
@@ -110,6 +114,66 @@ export async function loadConfig(
   const raw = yaml.load(content, { schema: yaml.JSON_SCHEMA }) as Record<string, unknown>;
 
   return mergeWithDefaults(raw);
+}
+
+/**
+ * Load and validate the config file **as it exists at a given git ref**
+ * (typically the PR base branch), rather than from the working tree.
+ *
+ * SECURITY: When reviewing a PR, config should be resolved from the base ref
+ * so that a malicious PR cannot inject shell commands by editing
+ * `.advreview.yml` (e.g. setting `linter.command` to an exfiltration string).
+ * See `src/util/env.ts` for the companion mitigation that strips secrets from
+ * the spawned process's environment.
+ *
+ * Behavior:
+ * - If no config file exists in the working tree (and none is given), returns
+ *   defaults — same as `loadConfig`.
+ * - If a config file exists but cannot be read from `ref` (ref not fetched,
+ *   file absent at that ref, not a git repo), **throws** rather than silently
+ *   falling back to the working-tree copy, so the operator knows the trusted
+ *   config wasn't loaded. To recover, make the base ref available (e.g.
+ *   `fetch-depth: 0` or `git fetch origin <ref>`).
+ * - `execFile` (no shell) is used to invoke git; `ref` and the path are not
+ *   PR-controlled when `ref` is the trusted base.
+ */
+export async function loadConfigFromRef(
+  repoPath: string,
+  ref: string,
+  configPath?: string,
+): Promise<FlaughtConfig> {
+  const root = path.resolve(repoPath);
+  const workingTreeConfig = configPath ? path.resolve(configPath) : findConfigFile(root);
+
+  // No config anywhere → behave like loadConfig and return defaults.
+  if (!workingTreeConfig) {
+    return FlaughtConfigSchema.parse({});
+  }
+
+  const relPath = path.relative(root, workingTreeConfig);
+  // Config lives outside the repo (e.g. an explicit --config path elsewhere):
+  // can't read it from a ref — fall back to the working-tree file.
+  if (relPath.startsWith("..") || path.isAbsolute(relPath)) {
+    return loadConfig(configPath, repoPath);
+  }
+
+  try {
+    const { stdout } = await execFileAsync(
+      "git",
+      ["show", `${ref}:${relPath}`],
+      { cwd: root, maxBuffer: 10 * 1024 * 1024 },
+    );
+    const raw = yaml.load(stdout, { schema: yaml.JSON_SCHEMA }) as Record<string, unknown>;
+    return mergeWithDefaults(raw);
+  } catch (err) {
+    throw new Error(
+      `Could not load config from git ref "${ref}" at path "${relPath}". ` +
+        `When --config-from-base is set, the base ref must be available in this checkout ` +
+        `(e.g. fetch-depth: 0, or "git fetch origin ${ref}"). ` +
+        `Refusing to fall back to the working-tree config to avoid trusting PR-controlled config. ` +
+        `Underlying error: ${err instanceof Error ? err.message : String(err)}`,
+    );
+  }
 }
 
 /**

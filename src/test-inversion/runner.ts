@@ -21,6 +21,7 @@ import * as path from "node:path";
 import { simpleGit } from "simple-git";
 import type { FlaughtConfig } from "../schemas/config.js";
 import type { FlaggedTest, TestInversion } from "../schemas/findings.js";
+import { sanitizedSpawnEnv } from "../util/env.js";
 
 // ─── Test result parsing ──────────────────────────────────────────────────────
 
@@ -76,7 +77,8 @@ export async function runTestInversion(
   }
 
   // Detect the test command
-  const testCommand = config.test_inversion.command ?? await detectTestCommand(repoPath);
+  const userTestCommand = config.test_inversion.command;
+  const testCommand = userTestCommand ?? await detectTestCommand(repoPath);
   if (!testCommand) {
     progress("  No test command detected — skipping test inversion.");
     return null;
@@ -86,7 +88,7 @@ export async function runTestInversion(
   progress("  Running tests on HEAD (post-change)...");
 
   // 1. Run tests on HEAD
-  const headResult = await runTests(testCommand, repoPath);
+  const headResult = await runTests(testCommand, repoPath, Boolean(userTestCommand));
   progress(`    HEAD: ${headResult.passed.length} passed, ${headResult.failed.length} failed (${headResult.durationMs}ms)`);
 
   // 2. Create a worktree at the base SHA and run tests there
@@ -99,7 +101,7 @@ export async function runTestInversion(
     }
 
     progress("  Running tests on BASE (pre-change)...");
-    const baseResult = await runTests(testCommand, worktreePath);
+    const baseResult = await runTests(testCommand, worktreePath, Boolean(userTestCommand));
     progress(`    BASE: ${baseResult.passed.length} passed, ${baseResult.failed.length} failed (${baseResult.durationMs}ms)`);
 
     // 3. Compare: tests that pass on BOTH sides don't test the change
@@ -225,12 +227,23 @@ async function detectTestCommand(repoPath: string): Promise<string | null> {
 
 // ─── Test execution ──────────────────────────────────────────────────────────
 
-async function runTests(command: string, cwd: string): Promise<TestRunResult> {
+async function runTests(command: string, cwd: string, userConfigured = false): Promise<TestRunResult> {
   // Test commands may be user-configured or auto-detected strings.
   // Commands that contain shell metacharacters (quotes, pipes, redirects,
   // semicolons, etc.) need shell interpretation. Simple commands (like
   // "npm test" or "pytest") can be safely split and executed without a shell.
   const needsShell = /["'`|&;$<>\\]/.test(command) || /\b\w+\s+-e\s+/.test(command);
+
+  // SECURITY: A user-configured test command (config.test_inversion.command)
+  // can be edited by a malicious PR to exfiltrate CI secrets. Strip
+  // secret-bearing env vars before spawning. Auto-detected commands are
+  // fixed strings and keep the full environment. See src/util/env.ts.
+  const spawnEnv = userConfigured ? sanitizedSpawnEnv() : {
+    ...process.env,
+    CI: "true",
+    FORCE_COLOR: "0",
+    NO_COLOR: "1",
+  };
 
   const startTime = Date.now();
 
@@ -246,12 +259,7 @@ async function runTests(command: string, cwd: string): Promise<TestRunResult> {
         cwd,
         maxBuffer: 10 * 1024 * 1024,
         timeout: 300_000, // 5 minute timeout for tests
-        env: {
-          ...process.env,
-          CI: "true",
-          FORCE_COLOR: "0",
-          NO_COLOR: "1",
-        },
+        env: spawnEnv,
       });
       stdout = result.stdout;
       stderr = result.stderr;
@@ -265,12 +273,7 @@ async function runTests(command: string, cwd: string): Promise<TestRunResult> {
         maxBuffer: 10 * 1024 * 1024,
         timeout: 300_000,
         shell: false,
-        env: {
-          ...process.env,
-          CI: "true",
-          FORCE_COLOR: "0",
-          NO_COLOR: "1",
-        },
+        env: spawnEnv,
       });
       stdout = result.stdout;
       stderr = result.stderr;
