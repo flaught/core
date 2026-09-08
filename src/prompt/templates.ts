@@ -57,7 +57,7 @@ export const DEFAULT_CATEGORIES = `CATEGORIES (use exactly these):
 - security: Vulnerabilities, injection, auth issues, data exposure
 - architecture: Coupling, abstraction problems, separation of concerns violations
 - scope-creep: Changes that don't serve the stated PR intent
-- test-quality: Missing tests, tests that don't verify the change, insufficient coverage
+- test-quality: Missing tests, tests that don't verify the change, insufficient coverage. Scrutinize the tests in the diff for the common failure modes: symmetric/palindromic inputs that cannot distinguish a bug from its fix; assertions that bake in the implementation's current output as the expected result (overfitting to the very bug the change introduces); and tests that exercise only the trivial/no-error path while skipping the change's hard or boundary cases.
 - performance: Algorithmic concerns, N+1 queries, memory leaks
 - maintainability: Naming, documentation debt, confusing logic, dead code`;
 
@@ -91,6 +91,7 @@ export const DEFAULT_CONSTRAINTS = `IMPORTANT:
 - Every finding MUST have file, line_start, line_end, and snippet — no exceptions.
 - confidence is 0.0-1.0 — be honest. If you're guessing, say 0.4-0.5. If you're certain, say 0.9+.
 - Never fabricate code, line numbers, or file paths that don't exist in the provided context.
+- A test that passes is not evidence the change is correct. When the diff adds or modifies tests, judge whether those tests CAN FAIL: look for symmetric inputs where a bug and its fix produce identical output, assertions copied from the code's own current behavior (encoding the bug as "correct"), and tests that only check the happy/no-panic path of the changed logic. A test that cannot fail is not coverage — flag it as test-quality even if the suite is green.
 - Always flag an actual secret (a credential, API key, or token) committed in the clear — that never gets a pass. Separately: a committed *non-secret* config value (provider name, model name, tool choice, version pin, etc.) is not "hard-coded" merely because it's checked into version control — deliberately committed config is often a feature, not a bug, since it's reviewable via diff and deterministic across environments, unlike an env var or .env file that can silently drift per machine. Before flagging a config value as bad hard-coding, check whether it's actually a secret (and whether the secret itself is externalized — e.g. only an env-var *name* is configured, not its value); if it's provably not a secret, don't raise it.
 - If the code you're about to flag has an adjacent comment, or references a decision record (ADR, RFC, design doc) by name, that already explains why this is a deliberate, accepted tradeoff, don't raise it as a new finding — a human already made and documented that call. Only raise it if the comment's own stated reasoning is flawed on its face, or the code no longer matches what the comment claims it does.
 - You are reviewing a repo that uses Flaught (this tool) itself. Flaught's own config keys — including \`dismissals\`, \`prompt\`, and \`severity_gate\` — have sane defaults (e.g. \`dismissals.enabled: true\`, \`dismissals.path: ".flaught-dismissals.json"\`) that apply even when \`.advreview.yml\` never mentions them, commented-out or otherwise. Don't flag a Flaught-related file (\`.flaught-dismissals.json\`, \`.flaught-prompt/\`, etc.) as "added but not referenced/wired up in config" just because \`.advreview.yml\` is silent about it — silence means the default applies, not that the feature is inert.`;
@@ -404,7 +405,7 @@ export function initPromptTemplates(targetDir: string): string {
 # - security: Vulnerabilities, injection, auth issues, data exposure
 # - architecture: Coupling, abstraction problems, separation of concerns violations
 # - scope-creep: Changes that don't serve the stated PR intent
-# - test-quality: Missing tests, tests that don't verify the change, insufficient coverage
+# - test-quality: Missing tests, tests that don't verify the change, insufficient coverage. Scrutinize tests for symmetric/palindromic inputs, assertions that encode the implementation's output as correct, and tests that skip the change's hard or boundary cases.
 # - performance: Algorithmic concerns, N+1 queries, memory leaks
 # - maintainability: Naming, documentation debt, confusing logic, dead code
 # - compliance: HIPAA, PCI-DSS, SOC2, or regulatory violations

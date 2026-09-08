@@ -332,6 +332,15 @@ describe("buildTemplateVariables", () => {
     expect(vars.categories).toContain("architecture");
   });
 
+  it("directs the reviewer to scrutinize tests for the failure modes they commonly can't catch", () => {
+    // Grounded in the finding that agents write tests that can't fail
+    // (symmetric inputs, assertions encoding the bug as correct, happy-path-only).
+    const config = makeConfig({});
+    const prompt = assembleSystemPrompt(config, NO_TEMPLATES);
+    expect(prompt).toContain("symmetric/palindromic");
+    expect(prompt).toContain("A test that cannot fail is not coverage");
+  });
+
   it("includes default severities", () => {
     const config = makeConfig({});
     const vars = buildTemplateVariables(config);

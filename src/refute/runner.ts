@@ -107,6 +107,7 @@ export async function runRefutePass(
   config: FlaughtConfig,
   _templates: PromptTemplates = NO_TEMPLATES,
   onProgress: RefuteProgressCallback = noopProgress,
+  prDescription?: string,
 ): Promise<RunRefuteResult> {
   // Separate deterministic from LLM findings
   const deterministicFindings = findings.filter((f) => f.source_type === "deterministic");
@@ -150,6 +151,7 @@ export async function runRefutePass(
       context.diff,
       context.changedFileContents,
       context.neighborhoodFileContents,
+      prDescription,
     );
 
     // Call the skeptic

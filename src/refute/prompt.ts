@@ -26,10 +26,12 @@ Your posture:
 - If you can identify a concrete reason the finding is wrong, mark it "refuted".
 - Only mark a finding "confirmed" if you can verify it from the code provided.
 
+Do not merely check whether the finding's literal claim is visible in the code. Where a finding concerns correctness or behavior, independently reason about what the code SHOULD do — deriving it from the stated intent (the PR description, if provided) or, failing that, from the evident purpose of the change in the diff — and compare that to what the code actually does. A finding is confirmed when your independent derivation agrees the code is wrong as described; a finding is refuted when your independent derivation shows the code is actually correct; and it is uncertain when you cannot derive the intended behavior well enough to decide. The goal is an independent check, not a restatement of the reviewer's reasoning.
+
 Be specific in your reasoning. Vague agreement ("this seems right") is not confirmation. Reference specific lines, variables, or logic from the provided context.
 
 IMPORTANT CONSTRAINTS:
-- Do not confirm a finding just because it sounds plausible. You must be able to point to the specific code that makes it true.
+- Do not confirm a finding just because it sounds plausible. You must be able to point to the specific code that makes it true, or to an independent derivation that shows it.
 - Do not refute a finding just because you're being skeptical. You must have a concrete reason: the code doesn't exist, the logic is correct, the risk is overstated, or the finding is a false positive.
 - When in genuine doubt, mark "uncertain" — this is honest and actionable.`;
 
@@ -46,8 +48,18 @@ export function buildRefuteUserPrompt(
   diff: string | null,
   changedFileContents: Map<string, string>,
   neighborhoodFileContents: Map<string, string>,
+  prDescription?: string,
 ): string {
   const sections: string[] = [];
+
+  // ── Stated intent (the spec to re-derive against) ──
+  // The skeptic independently reasons about what the code SHOULD do from this,
+  // rather than only checking whether a finding's claim is visible in the code.
+  if (prDescription) {
+    sections.push(
+      `## Stated Intent (PR description — the spec to check against)\n\n${prDescription}\n\nTreat this as the intended behavior. Where a finding concerns correctness, derive what the code should do from this intent and compare to what the code actually does.`,
+    );
+  }
 
   // ── Changed files context ──
   if (changedFileContents.size > 0) {
@@ -101,9 +113,8 @@ export function buildRefuteUserPrompt(
     `## Your Task\n\n` +
     `For each finding, determine:\n\n` +
     `1. **Can you verify this finding from the code and diff provided?**\n` +
-    `   - If the code clearly shows the bug/vulnerability/issue described: **confirmed**\n` +
-    `   - If you can identify a concrete reason the finding is wrong: **refuted**\n` +
-    `   - If you cannot verify or refute from the available context: **uncertain**\n\n` +
+    `   - First, independently derive what the code SHOULD do from the Stated Intent (if provided) or the change's evident purpose — do not just restate the reviewer's claim.\n` +
+    `   - Then compare your derivation to the actual code: if the code is wrong as the finding describes: **confirmed**; if you can identify a concrete reason the finding is wrong: **refuted**; if you cannot verify or refute from the available context: **uncertain**.\n\n` +
     `2. **What is your adjusted confidence?**\n` +
     `   - Confirmed: keep the original confidence or slightly increase it\n` +
     `   - Refuted: reduce to 0.0–0.2\n` +
