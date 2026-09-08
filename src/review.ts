@@ -666,6 +666,7 @@ export async function runLlmStage(input: LlmStageInput): Promise<LlmStageResult>
         config,
         templates,
         progress,
+        prDescription,
       );
       llmFindings = refuteResult.findings.filter((f) => f.source_type === "llm");
       progress(`  Refute model: ${refuteResult.model}`);

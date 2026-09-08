@@ -880,6 +880,39 @@
         "file": ""
       },
       "expires_at": null
+    },
+    {
+      "fingerprint": "sha256:55728166ebb48efe75f27af859bda1a0",
+      "dismissed_by": "dgabriel@gmail.com",
+      "dismissed_at": "2026-09-08T20:29:21.696Z",
+      "reason": "The refute pass already receives the full diff and changed-file contents; the PR description is not additional sensitive data beyond what is already transmitted to the configured LLM providers. The review pass already sends the PR description. No incremental secret exposure; the only nuance is provider plurality (refute may use a different provider), an inherent property of flaught anti-correlation design, not a regression introduced here. Skeptic confirmed the data-flow fact but the severity is overstated in context.",
+      "context": {
+        "title": "Potential leakage of PR description to LLM",
+        "file": "src/refute/prompt.ts"
+      },
+      "expires_at": null
+    },
+    {
+      "fingerprint": "sha256:038f5b775f7643289e686a1d117a90e8",
+      "dismissed_by": "dgabriel@gmail.com",
+      "dismissed_at": "2026-09-08T20:29:30.662Z",
+      "reason": "Intended design, not coupling to remove. The refute pass re-derives what the code should do from the PR stated intent (per the Dan Luu agentic-testing research grounding this PR) rather than only critiquing the finding claim. Passing prDescription to the refute pass is the feature. Skeptic refuted (conf 0.1).",
+      "context": {
+        "title": "Unnecessary coupling of refute logic to PR description",
+        "file": "src/refute/runner.ts"
+      },
+      "expires_at": null
+    },
+    {
+      "fingerprint": "sha256:24120504b443eb9e07414e3333786c2f",
+      "dismissed_by": "dgabriel@gmail.com",
+      "dismissed_at": "2026-09-08T20:29:34.460Z",
+      "reason": "The README and docs/configuration.md changes (Acknowledgments citing the research, test-inversion rationale) are part of this PR explicit stated scope. Research attribution was a stated goal of the change, not unrelated scope creep. Skeptic refuted (conf 0.1).",
+      "context": {
+        "title": "Documentation changes unrelated to test inversion",
+        "file": "docs/configuration.md"
+      },
+      "expires_at": null
     }
   ]
 }

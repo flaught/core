@@ -13,6 +13,18 @@ npm ci            # install dependencies
 npm run build     # compile TypeScript → dist/
 ```
 
+**Configure commit signing (required).** `main` enforces verified commit
+signatures, so every PR's commits must be signed. The simplest path is SSH
+signing with an existing SSH key — full one-time setup in
+[Git Hygiene](docs/git-hygiene.md#commits). In short: add your public key to
+GitHub as a *Signing Key*, then:
+
+```bash
+git config --global gpg.format ssh
+git config --global user.signingkey ~/.ssh/id_ed25519
+git config --global commit.gpgsign true
+```
+
 Sanity check that everything is green before you start:
 
 ```bash
@@ -63,6 +75,8 @@ See the [Dismissals docs](docs/dismissals.md) for how fingerprints stay stable.
 3. Open the PR against `main`.
 4. CI runs the **Adversarial Review** workflow on your PR. Flaught builds from your branch source (so changes to its own review logic are reflected in its own run), posts a comment, and uploads a `findings.json` artifact.
 5. Exit code `1` (findings exceed the severity gate) blocks merge. Exit code `2` (config/API/LLM fault) does **not** block merge — a tool outage is not evidence of a code problem. See the [exit codes](README.md#exit-codes) table.
+
+For the non-negotiable process discipline (branch hygiene, working-tree state, signed commits, force-push rules) — which applies to the maintainer too — see [Git Hygiene](docs/git-hygiene.md).
 
 You don't have to get to zero findings to merge, but each non-dismissed finding above the gate needs to be either fixed or dismissed with a real reason. "I disagree" is not a reason.
 

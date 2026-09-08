@@ -152,6 +152,27 @@ describe("buildRefuteUserPrompt", () => {
     expect(prompt).toContain("Finding 2");
     expect(prompt).toContain("2 finding");
   });
+
+  it("includes the stated intent as the spec to re-derive against when a PR description is provided", () => {
+    const findings = [makeFinding({ id: "F-001", title: "Off-by-one" })];
+    const prompt = buildRefuteUserPrompt(
+      findings,
+      "diff",
+      new Map(),
+      new Map(),
+      "This PR adds bounds checking so index lookups never return -1.",
+    );
+
+    expect(prompt).toContain("Stated Intent (PR description");
+    expect(prompt).toContain("never return -1");
+    expect(prompt).toContain("derive what the code should do from this intent");
+  });
+
+  it("omits the stated intent section when no PR description is provided", () => {
+    const findings = [makeFinding({ id: "F-001", title: "Off-by-one" })];
+    const prompt = buildRefuteUserPrompt(findings, "diff", new Map(), new Map());
+    expect(prompt).not.toContain("## Stated Intent");
+  });
 });
 
 // ─── Parse refute response ─────────────────────────────────────────────────────

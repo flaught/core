@@ -25,7 +25,7 @@ Config → Context assembly → Deterministic tools → LLM adversarial pass →
 | **Context assembly**      | Diff, changed files, one-hop dependency neighborhood (blast radius)              |
 | **Deterministic tools**   | Semgrep, linter, vuln scanner, plus the built-in test-weakening check: findings tagged `source_type: "deterministic"`    |
 | **LLM adversarial pass**  | Structured skeptical review: security, architecture, scope-creep, test quality   |
-| **Test inversion**        | Runs tests on pre-change code; flags tests passing on both sides                 |
+| **Test inversion**        | Runs the changed tests against pre- and post-change code; flags tests that pass on *both* sides — i.e., tests that can't fail and therefore don't actually verify the change                 |
 | **Scope-creep detection** | Heuristic plus LLM: flags hunks unrelated to the PR's stated intent              |
 
 Output: **Markdown PR comment** plus a **versioned JSON artifact** for trend tracking.
@@ -159,6 +159,7 @@ Any OpenAI-compatible endpoint works via `base_url`. Anthropic has its own nativ
 - **[GitHub Actions](https://github.com/flaught/core/blob/main/docs/github-actions.md)**: three ready-to-use workflows (minimal, full, Ollama) plus exit code handling
 - **[Programmatic API](https://github.com/flaught/core/blob/main/docs/api.md)**: use Flaught as a library in Node.js
 - **[Troubleshooting](https://github.com/flaught/core/blob/main/docs/troubleshooting.md)**: every error message, what it means, how to fix it
+- **[Git hygiene](https://github.com/flaught/core/blob/main/docs/git-hygiene.md)**: non-negotiable branch/commit/PR discipline (applies to the maintainer too)
 - **[Website](https://flaught.github.io)**: the Flaught project site
 
 ## Honest caveat
@@ -166,6 +167,27 @@ Any OpenAI-compatible endpoint works via `base_url`. Anthropic has its own nativ
 The JSON artifact is evidence that *scrutiny occurred*, not evidence that findings are *correct*. LLM-asserted findings may include hallucinations. Deterministic-tool findings have their own false-positive rates. Treat this as a prompt for human review, not audit-truth.
 
 On a large PR the LLM prompt may be truncated to fit a size cap; every artifact carries an `analysis_completeness` field recording what the LLM actually saw (`full` vs `partial`, and what was dropped) — so "Flaught completed" is never mistaken for "Flaught comprehensively reviewed this." See the [findings schema](docs/findings-schema.md#analysis-completeness).
+
+## Acknowledgments
+
+Flaught's design draws on observed practice in adversarial code review and
+agent-assisted testing. In particular, the **test-inversion** stage, the
+**test-quality scrutiny** guidance in the default review prompt, and the
+**skeptic re-derivation** instruction are grounded in [Dan Luu's research on how
+well agents use test and verification techniques](https://danluu.com/agentic-testing/).
+
+That work documents that agents routinely write tests that *cannot fail* —
+symmetric/palindromic inputs that can't distinguish a bug from its fix,
+assertions that bake in the implementation's current (buggy) output as
+"correct," and tests that exercise only the happy/no-panic path. Test
+inversion catches the structural version of this failure (a test that passes
+identically before and after a change is not testing the change); the default
+review prompt now directs the reviewer to look for the semantic version. The
+skeptic/refute pass is similarly instructed to independently re-derive what
+the code *should* do from the PR's stated intent, rather than only checking
+whether a finding's claim is visible in the code — reflecting the finding that
+an independent, fresh-context re-derivation beats re-stating the original
+reasoning.
 
 ## License
 
