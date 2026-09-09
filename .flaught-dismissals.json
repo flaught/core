@@ -913,6 +913,39 @@
         "file": "docs/configuration.md"
       },
       "expires_at": null
+    },
+    {
+      "fingerprint": "sha256:2067685138aa04deabf9e7ec456b05e0",
+      "dismissed_by": "dgabriel@gmail.com",
+      "dismissed_at": "2026-09-09T16:00:57.798Z",
+      "reason": "Pre-existing dependency advisory (js-yaml maxTotalMergeKeys CVE). Not introduced by this PR — the diff touches no dependency files (package-lock.json unchanged). Belongs in a separate dependency-update change.",
+      "context": {
+        "title": "js-yaml: js-yaml: maxTotalMergeKeys does not limit CPU use for empty merge sources",
+        "file": "js-yaml"
+      },
+      "expires_at": null
+    },
+    {
+      "fingerprint": "sha256:1f20069dabd90cbd3cb45481ffe4081f",
+      "dismissed_by": "dgabriel@gmail.com",
+      "dismissed_at": "2026-09-09T16:01:03.972Z",
+      "reason": "Provider adapters (src/llm/provider.ts) already normalize every provider's usage to the TokenUsage shape {prompt_tokens, completion_tokens, total_tokens} before it reaches buildUsageSummary. The coupling is intentional and the shape is guaranteed by the TypeScript type, not ad-hoc — there is no unvalidated provider data path into the artifact.",
+      "context": {
+        "title": "Coupling of token usage logic to artifact schema",
+        "file": "src/review.ts"
+      },
+      "expires_at": null
+    },
+    {
+      "fingerprint": "sha256:fce46ead15b64ca768e21d7b5f6f68b2",
+      "dismissed_by": "dgabriel@gmail.com",
+      "dismissed_at": "2026-09-09T16:01:10.679Z",
+      "reason": "Exporting both TokenUsage and TokenUsageSummary from the public API (src/index.ts) is correct and standard — they are distinct public types (a single call's counts vs. the review+refute breakdown). Consumers need both. A single-type export would be the actual deficiency.",
+      "context": {
+        "title": "Inconsistent naming of usage export in index",
+        "file": "src/index.ts"
+      },
+      "expires_at": null
     }
   ]
 }

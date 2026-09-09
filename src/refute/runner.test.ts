@@ -415,4 +415,42 @@ describe("runRefutePass — token usage", () => {
       total_tokens: 4600,
     });
   });
+
+  it("aggregates usage when only some batches report usage (mixed)", async () => {
+    // Two findings, batch size 1 => two skeptic calls. Batch 1 returns
+    // usage; batch 2 returns none. The runner must sum only the batches that
+    // reported usage and still return a summary (sawUsage flips on the first
+    // batch), rather than dropping the whole thing or crashing on undefined.
+    const config = FlaughtConfigSchema.parse({
+      llm: { provider: "groq", model: "m" },
+      refute: { max_batch_size: 1 },
+    });
+    const findings = [
+      makeFinding({ id: "F-001", title: "Finding 1" }),
+      makeFinding({ id: "F-002", title: "Finding 2" }),
+    ];
+
+    mockReview
+      .mockResolvedValueOnce({
+        findings: [],
+        raw: JSON.stringify({ evaluations: [{ finding_index: 0, verdict: "confirmed", reasoning: "ok", adjusted_confidence: 0.9 }] }),
+        model: "test",
+        usage: { prompt_tokens: 1000, completion_tokens: 200, total_tokens: 1200 },
+      })
+      .mockResolvedValueOnce({
+        findings: [],
+        raw: JSON.stringify({ evaluations: [{ finding_index: 0, verdict: "uncertain", reasoning: "dunno", adjusted_confidence: 0.5 }] }),
+        model: "test",
+        // no usage field on this batch
+      });
+
+    const result = await runRefutePass(findings, mockContext(), config);
+
+    expect(mockReview).toHaveBeenCalledTimes(2);
+    expect(result.usage).toEqual({
+      prompt_tokens: 1000,
+      completion_tokens: 200,
+      total_tokens: 1200,
+    });
+  });
 });

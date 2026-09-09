@@ -83,4 +83,21 @@ describe("renderDashboardHtml", () => {
     expect(html).toContain("8,550");
     expect(html).toContain("Total tokens");
   });
+
+  it("renders just the review total when refute usage is omitted", () => {
+    // A run where the refute pass was skipped/disabled/failed: usage.review
+    // present, no usage.refute. The cell must show the review total alone
+    // (not NaN, not blank), and the Total tokens stat must reflect only review.
+    const html = renderDashboardHtml([
+      makePoint({
+        usage: {
+          review: { prompt_tokens: 4200, completion_tokens: 850, total_tokens: 5050 },
+        },
+      }),
+    ]);
+    expect(html).toContain("5,050");
+    expect(html).toContain("Total tokens");
+    // Must not render the "(review ... + refute ...)" breakdown form.
+    expect(html).not.toContain("refute");
+  });
 });
