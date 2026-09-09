@@ -67,22 +67,15 @@ This runs Semgrep, your linter, the vuln scanner, test inversion, and scope-cree
 **Prompt:**
 
 ```
-Enable the full LLM review on this branch:
-  export GROQ_API_KEY=gsk_...   # free key from https://console.groq.com/keys
-  flaught review --base main --output findings.json --quiet
+Install and run Flaught (adversarial code review) on this project:
+npm install -g @flaught/core, then `flaught init` to scaffold config,
+then `flaught review --no-llm` to run deterministic checks — no API
+key needed.
 
-Read the new findings with source_type "llm" and the skeptic/refute
-verdicts. Note the token-usage line in the report so you know what the
-pass cost. Same discipline as stage 1: fix only mechanical, real
-findings; re-run to confirm; STOP after two passes and report the rest
-verbatim. Do not dismiss anything.
-```
-
-Now the full five-stage pipeline runs: deterministic tools plus a separate LLM reviewer that scrutinizes security, architecture, scope, and test quality, then a skeptic pass that independently re-derives what the change should do. Using OpenAI, Gemini, Anthropic, or Ollama instead of Groq? See [LLM providers](#llm-providers-review-with-a-different-model-than-the-one-that-wrote-the-code) below.
-
-### 3. Review and manage findings
-
-**Prompt:**
+When Flaught reports findings:
+- Fix findings you're confident are real.
+- Report the rest verbatim.
+- Never dismiss a finding; dismissal is a human action.
 
 ```
 Help me triage the findings from the last review:

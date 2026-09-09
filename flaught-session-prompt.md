@@ -2,6 +2,12 @@
 
 Read the attached brief (`adversarial-review-getting-started-prompt.md`) in full before doing anything else. It covers positioning, core requirements, what's out of scope for v1, the build sequence, and the technical decisions already locked (TypeScript/Node, `@flaught/core`, repo `flaught/core`).
 
+When you run Flaught as a coding agent:
+
+- Fix findings you're confident are real.
+- Report the rest verbatim.
+- Never dismiss a finding; dismissal is a human action.
+
 Three decisions are still open. For each, give me: **your recommendation, the alternatives you considered and rejected, and the key tradeoffs** — then stop. Don't start building until I confirm.
 
 1. **Distribution mechanism.** CLI/library installable via npm vs. Docker-based GitHub Action vs. composite Action. The brief has my lean (`@flaught/core` as a standalone package, with a thin `flaught/action` wrapper later) but it's not locked. Convince me or push back.

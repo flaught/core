@@ -14,6 +14,14 @@ Flaught is **adversarial governance tooling for AI-assisted development**, not a
 
 **Scope discipline:** the positioning is broad; the v1 build is not. Do not build a dashboard, multi-model consensus scoring, or any hosted/aggregated data service for v1 — see Explicitly Out of Scope below. The governance story should be true by construction of a well-designed, versioned findings schema (see requirement 8 and the JSON schema decision below), not by building analytics on top of it. Let the README narrate the roadmap; let the MVP stay narrow.
 
+## Agent-safe Flaught workflow
+
+When you run Flaught as a coding agent:
+
+- Fix findings you're confident are real.
+- Report the rest verbatim.
+- Never dismiss a finding; dismissal is a human action.
+
 ## What we're building
 
 A standalone, pluggable adversarial code review tool that runs in CI against any PR/branch. It uses a **swappable LLM provider** to perform a skeptical architecture and security review, combined with deterministic static analysis, and produces a structured findings report. It should be repo-agnostic — configured per-project via a single YAML file — so it can be dropped into multiple unrelated repos (a Python/FastAPI + React PWA, a Python MCP server, etc.) without rewrites.
