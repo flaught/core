@@ -10,6 +10,7 @@
 
 import type { FindingsArtifact, Finding, Severity } from "../schemas/findings.js";
 import { CAVEAT, FINDING_ID_CAVEAT } from "../schemas/findings.js";
+import { formatTokenUsage } from "./usage.js";
 
 const SEVERITY_ORDER: Severity[] = ["critical", "high", "medium", "low", "info"];
 
@@ -182,7 +183,15 @@ function renderSummary(artifact: FindingsArtifact): string {
     refuteLines.push(`🔍 Skeptic: ${confirmed} confirmed, ${refuted} refuted, ${uncertain} uncertain`);
   }
 
-  return `### Summary\n\n${lines.join("\n")}\n\n${sourceLines.join(" · ")}${refuteLines.length > 0 ? "\n" + refuteLines.join(" · ") : ""}`;
+  // Token usage (null when the LLM pass did not run — nothing to render)
+  const usageLine = formatTokenUsage(artifact.run?.usage ?? null);
+
+  // Skeptic + usage are run-level meta, on a second line beneath the
+  // source-type breakdown.
+  const metaLines = [...refuteLines];
+  if (usageLine) metaLines.push(usageLine);
+
+  return `### Summary\n\n${lines.join("\n")}\n\n${sourceLines.join(" · ")}${metaLines.length > 0 ? "\n" + metaLines.join(" · ") : ""}`;
 }
 
 function renderSeveritySection(

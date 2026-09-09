@@ -122,6 +122,34 @@ describe("renderMarkdownReport", () => {
     expect(md).toContain("Budget");
   });
 
+  it("omits the token line when usage is null (no-llm run)", () => {
+    const artifact = makeArtifact(); // default run.usage is null
+    const md = renderMarkdownReport(artifact);
+    expect(md).not.toContain("🪙");
+    expect(md).not.toContain("Tokens:");
+  });
+
+  it("renders total tokens in the summary when usage is present", () => {
+    const artifact = makeArtifact({
+      run: { id: "r", ci_url: null, duration_seconds: 5, llm_error: null,
+        usage: { review: { prompt_tokens: 4200, completion_tokens: 850, total_tokens: 5050 } } },
+    });
+    const md = renderMarkdownReport(artifact);
+    expect(md).toContain("🪙 Tokens: 5,050");
+  });
+
+  it("breaks down review and refute tokens when both are present", () => {
+    const artifact = makeArtifact({
+      run: { id: "r", ci_url: null, duration_seconds: 5, llm_error: null,
+        usage: {
+          review: { prompt_tokens: 4200, completion_tokens: 850, total_tokens: 5050 },
+          refute: { prompt_tokens: 3100, completion_tokens: 400, total_tokens: 3500 },
+        } },
+    });
+    const md = renderMarkdownReport(artifact);
+    expect(md).toContain("🪙 Tokens: 8,550 (review 5,050 + refute 3,500)");
+  });
+
   it("shows source type badges", () => {
     const artifact = makeArtifact({ findings: [makeFinding({ source_type: "llm" })] });
     const md = renderMarkdownReport(artifact);

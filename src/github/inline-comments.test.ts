@@ -183,6 +183,26 @@ describe("buildInlineSummaryHeader", () => {
     expect(header).toContain("Skeptic");
     expect(header).toContain("confirmed");
   });
+
+  it("omits the token line when usage is null", () => {
+    const header = buildInlineSummaryHeader({ ...minimalArtifact });
+    expect(header).not.toContain("🪙");
+    expect(header).not.toContain("Tokens:");
+  });
+
+  it("renders token usage in the summary header when present", () => {
+    const artifact = {
+      ...minimalArtifact,
+      run: { ...minimalArtifact.run,
+        usage: {
+          review: { prompt_tokens: 4200, completion_tokens: 850, total_tokens: 5050 },
+          refute: { prompt_tokens: 3100, completion_tokens: 400, total_tokens: 3500 },
+        },
+      },
+    };
+    const header = buildInlineSummaryHeader(artifact);
+    expect(header).toContain("🪙 Tokens: 8,550 (review 5,050 + refute 3,500)");
+  });
 });
 
 // ─── postInlineReview ───────────────────────────────────────────────────────

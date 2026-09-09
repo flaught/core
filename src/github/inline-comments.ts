@@ -14,6 +14,7 @@
  */
 
 import type { Finding, FindingsArtifact } from "../schemas/findings.js";
+import { formatTokenUsage } from "../report/usage.js";
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
@@ -380,6 +381,13 @@ export function buildInlineSummaryHeader(artifact: FindingsArtifact): string {
   if (confirmed + refuted + uncertain > 0) {
     lines.push("");
     lines.push(`🔍 Skeptic: ${confirmed} confirmed, ${refuted} refuted, ${uncertain} uncertain`);
+  }
+
+  // Token usage (null when the LLM pass did not run — nothing to render)
+  const usageLine = formatTokenUsage(artifact.run?.usage ?? null);
+  if (usageLine) {
+    lines.push("");
+    lines.push(usageLine);
   }
 
   lines.push("");
