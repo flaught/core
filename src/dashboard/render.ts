@@ -98,18 +98,35 @@ function renderLegend(): string {
     .join("")}</div>`;
 }
 
+/** Format a token usage summary as a compact string for the dashboard table. */
+function formatTokens(usage: TrendPoint["usage"]): string {
+  if (!usage) return "—";
+  const review = usage.review.total_tokens;
+  const refute = usage.refute?.total_tokens ?? 0;
+  const total = review + refute;
+  if (refute === 0) return total.toLocaleString();
+  return `${total.toLocaleString()} (${review.toLocaleString()}+${refute.toLocaleString()})`;
+}
+
 function renderStats(points: TrendPoint[]): string {
   const latest = points[points.length - 1];
   const avg = points.length > 0
     ? (points.reduce((sum, p) => sum + p.total_findings, 0) / points.length).toFixed(1)
     : "0";
   const llmFailures = points.filter((p) => p.llm_error).length;
+  const usagePoints = points.filter((p) => p.usage);
+  const totalTokens = usagePoints.reduce((sum, p) => {
+    const r = p.usage!.review.total_tokens;
+    const f = p.usage!.refute?.total_tokens ?? 0;
+    return sum + r + f;
+  }, 0);
 
   const stats = [
     { label: "Runs", value: String(points.length) },
     { label: "Latest run findings", value: latest ? String(latest.total_findings) : "—" },
     { label: "Avg findings / run", value: avg },
     { label: "Runs with LLM failure", value: String(llmFailures) },
+    { label: "Total tokens", value: totalTokens > 0 ? totalTokens.toLocaleString() : "—" },
   ];
 
   return `<div class="stats">${stats
@@ -131,6 +148,7 @@ function renderTable(points: TrendPoint[]): string {
         ${sevCells}
         <td>${p.by_source_type.llm} / ${p.by_source_type.deterministic}</td>
         <td>${p.refute.confirmed} / ${p.refute.refuted} / ${p.refute.uncertain}</td>
+        <td>${formatTokens(p.usage)}</td>
         <td>${p.dismissed_count}</td>
         <td>${p.llm_error ? "⚠️" : ""}</td>
       </tr>`;
@@ -142,7 +160,7 @@ function renderTable(points: TrendPoint[]): string {
       <tr>
         <th>Date</th><th>Repo</th><th>PR</th><th>Total</th>
         ${SEVERITIES.map((s) => `<th>${s}</th>`).join("")}
-        <th>LLM/Det</th><th>Skeptic C/R/U</th><th>Dismissed</th><th>LLM error</th>
+        <th>LLM/Det</th><th>Skeptic C/R/U</th><th>Tokens</th><th>Dismissed</th><th>LLM error</th>
       </tr>
     </thead>
     <tbody>${rows}</tbody>

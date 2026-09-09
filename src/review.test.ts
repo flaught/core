@@ -242,7 +242,7 @@ describe("runReview (no-llm mode)", () => {
 
     expect(result.context.changedFiles.length).toBeGreaterThanOrEqual(1);
     expect(result.artifact.findings).toHaveLength(0);
-    expect(result.artifact.schema_version).toBe(3);
+    expect(result.artifact.schema_version).toBe(4);
     expect(result.artifact._caveat).toContain("evidence that adversarial scrutiny occurred");
     // The LLM pass was skipped, so completeness is null — the artifact must not
     // claim the LLM saw anything (it never ran).
@@ -316,7 +316,7 @@ describe("runReview (no-llm mode)", () => {
     });
 
     const parsed = JSON.parse(result.json);
-    expect(parsed.schema_version).toBe(3);
+    expect(parsed.schema_version).toBe(4);
     expect(parsed.findings).toEqual([]);
     expect(parsed.noise_budget).toBeTruthy();
     expect(parsed._caveat).toBeTruthy();

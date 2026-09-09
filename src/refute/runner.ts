@@ -137,6 +137,10 @@ export async function runRefutePass(
   onProgress(`  Skeptic model: ${refuteTarget.provider}/${refuteTarget.model}`);
 
   const allEvaluations: Array<{ findingIndex: number; verdict: RefuteVerdict; reasoning: string; adjustedConfidence: number }> = [];
+  let totalPrompt = 0;
+  let totalCompletion = 0;
+  let totalTotal = 0;
+  let sawUsage = false;
 
   for (let batchIdx = 0; batchIdx < batches.length; batchIdx++) {
     const batch = batches[batchIdx]!;
@@ -177,6 +181,10 @@ export async function runRefutePass(
     }
 
     if (result.usage) {
+      sawUsage = true;
+      totalPrompt += result.usage.prompt_tokens;
+      totalCompletion += result.usage.completion_tokens;
+      totalTotal += result.usage.total_tokens;
       onProgress(`  Skeptic tokens: ${result.usage.prompt_tokens.toLocaleString()} prompt + ${result.usage.completion_tokens.toLocaleString()} completion`);
     }
   }
@@ -250,5 +258,8 @@ export async function runRefutePass(
   return {
     findings: allFindings,
     model: `refute:${refuteTarget.provider}/${refuteTarget.model}`,
+    usage: sawUsage
+      ? { prompt_tokens: totalPrompt, completion_tokens: totalCompletion, total_tokens: totalTotal }
+      : undefined,
   };
 }

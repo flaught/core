@@ -167,6 +167,28 @@ export interface AnalysisCompleteness {
   note: string;
 }
 
+// ─── Token usage ───────────────────────────────────────────────────────────
+
+/** Token counts for a single LLM call, normalized across all providers. */
+export interface TokenUsage {
+  prompt_tokens: number;
+  completion_tokens: number;
+  total_tokens: number;
+}
+
+/**
+ * Token usage broken down by LLM stage. The initial adversarial review and
+ * the skeptic/refute pass are separate calls (possibly on different models),
+ * so their counts are kept distinct rather than summed — a consumer can see
+ * how much of the spend was review vs. refutation.
+ */
+export interface TokenUsageSummary {
+  /** The initial adversarial review call. */
+  review: TokenUsage;
+  /** The skeptic/refute pass. Omitted when the refute pass was skipped, disabled, failed, or produced no usage. */
+  refute?: TokenUsage;
+}
+
 // ─── Top-level artifact ────────────────────────────────────────────────────
 
 export interface FindingsArtifact {
@@ -200,6 +222,8 @@ export interface FindingsArtifact {
     duration_seconds: number;
     /** Error message if the LLM call failed (review still completed with deterministic findings) */
     llm_error: string | null;
+    /** Token usage from the LLM calls. Null when the LLM pass did not run (--no-llm, no changes, the unprivileged emit-bundle half) or the provider returned no usage. */
+    usage: TokenUsageSummary | null;
   };
 
   /** Was the LLM given the full change context, or was part truncated to fit the prompt cap? Null when the LLM pass did not run (--no-llm, no changes, or the unprivileged emit-bundle half). */
@@ -222,9 +246,9 @@ export interface FindingsArtifact {
 
 // ─── Constants ─────────────────────────────────────────────────────────────
 
-export const SCHEMA_VERSION = 3;
+export const SCHEMA_VERSION = 4;
 
-export const FINDINGS_SCHEMA_URL = "https://flaught.dev/schemas/findings/v3.schema.json";
+export const FINDINGS_SCHEMA_URL = "https://flaught.dev/schemas/findings/v4.schema.json";
 
 export const CAVEAT =
   "This artifact is evidence that adversarial scrutiny occurred on this PR. " +

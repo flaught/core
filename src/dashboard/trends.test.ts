@@ -27,14 +27,14 @@ function makeFinding(overrides: Partial<Finding> = {}): Finding {
 function makeArtifact(overrides: Partial<FindingsArtifact> = {}): FindingsArtifact {
   const findings = overrides.findings ?? [makeFinding()];
   return {
-    $schema: "https://flaught.dev/schemas/findings/v3.schema.json",
-    schema_version: 3,
+    $schema: "https://flaught.dev/schemas/findings/v4.schema.json",
+    schema_version: 4,
     _caveat: "caveat",
     generated_at: "2026-01-01T00:00:00Z",
     flaught_version: "0.8.0",
     repository: { name: "flaught/core", url: "https://github.com/flaught/core", branch: "main" },
     pull_request: { number: 1, url: null, title: "Test PR", description: null, base_sha: "a", head_sha: "b" },
-    run: { id: "run-1", ci_url: null, duration_seconds: 5, llm_error: null },
+    run: { id: "run-1", ci_url: null, duration_seconds: 5, llm_error: null, usage: null },
     analysis_completeness: null,
     tools_executed: [],
     findings,
@@ -84,8 +84,8 @@ describe("computeTrends", () => {
   });
 
   it("sorts points chronologically by generated_at regardless of input order", () => {
-    const early = makeArtifact({ generated_at: "2026-01-01T00:00:00Z", run: { id: "early", ci_url: null, duration_seconds: 1, llm_error: null } });
-    const late = makeArtifact({ generated_at: "2026-02-01T00:00:00Z", run: { id: "late", ci_url: null, duration_seconds: 1, llm_error: null } });
+    const early = makeArtifact({ generated_at: "2026-01-01T00:00:00Z", run: { id: "early", ci_url: null, duration_seconds: 1, llm_error: null, usage: null } });
+    const late = makeArtifact({ generated_at: "2026-02-01T00:00:00Z", run: { id: "late", ci_url: null, duration_seconds: 1, llm_error: null, usage: null } });
 
     const points = computeTrends([late, early]);
     expect(points.map((p) => p.run_id)).toEqual(["early", "late"]);
@@ -117,11 +117,61 @@ describe("computeTrends", () => {
   });
 
   it("flags llm_error as a boolean", () => {
-    const failed = makeArtifact({ run: { id: "r", ci_url: null, duration_seconds: 1, llm_error: "Groq API error" } });
-    const ok = makeArtifact({ run: { id: "r2", ci_url: null, duration_seconds: 1, llm_error: null } });
+    const failed = makeArtifact({ run: { id: "r", ci_url: null, duration_seconds: 1, llm_error: "Groq API error", usage: null } });
+    const ok = makeArtifact({ run: { id: "r2", ci_url: null, duration_seconds: 1, llm_error: null, usage: null } });
 
     const points = computeTrends([failed, ok]);
     expect(points.find((p) => p.run_id === "r")!.llm_error).toBe(true);
     expect(points.find((p) => p.run_id === "r2")!.llm_error).toBe(false);
+  });
+
+  it("extracts token usage from run.usage", () => {
+    const withUsage = makeArtifact({
+      run: {
+        id: "u1", ci_url: null, duration_seconds: 1, llm_error: null,
+        usage: {
+          review: { prompt_tokens: 4200, completion_tokens: 850, total_tokens: 5050 },
+          refute: { prompt_tokens: 3100, completion_tokens: 400, total_tokens: 3500 },
+        },
+      },
+    });
+    const [point] = computeTrends([withUsage]);
+    expect(point!.usage).toEqual({
+      review: { prompt_tokens: 4200, completion_tokens: 850, total_tokens: 5050 },
+      refute: { prompt_tokens: 3100, completion_tokens: 400, total_tokens: 3500 },
+    });
+  });
+
+  it("defaults usage to null for older artifacts missing the field", () => {
+    // Simulate a v3 artifact written before run.usage existed. Built as a
+    // plain object (no usage key) that isFindingsArtifact accepts; toTrendPoint
+    // must fall back to null rather than throwing.
+    const oldArtifact = {
+      $schema: "https://flaught.dev/schemas/findings/v3.schema.json",
+      schema_version: 3,
+      _caveat: "caveat",
+      generated_at: "2026-01-01T00:00:00Z",
+      flaught_version: "0.9.0",
+      repository: { name: "flaught/core", url: "", branch: "main" },
+      pull_request: { number: null, url: null, title: null, description: null, base_sha: "a", head_sha: "b" },
+      run: { id: "old", ci_url: null, duration_seconds: 1, llm_error: null },
+      analysis_completeness: null,
+      tools_executed: [],
+      findings: [],
+      test_inversion: null,
+      scope_creep: null,
+      noise_budget: {
+        critical: { limit: 5, used: 0 }, high: { limit: 10, used: 0 },
+        medium: { limit: 15, used: 0 }, low: { limit: 20, used: 0 }, info: { limit: 25, used: 0 },
+      },
+      summary: {
+        total_findings: 0,
+        by_severity: { critical: 0, high: 0, medium: 0, low: 0, info: 0 },
+        by_source_type: { llm: 0, deterministic: 0 },
+        by_category: {}, dismissed_count: 0,
+      },
+    };
+    const [point] = computeTrends([oldArtifact]);
+    expect(point!.usage).toBeNull();
   });
 });

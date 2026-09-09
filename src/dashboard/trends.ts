@@ -8,7 +8,7 @@
  * directory of downloaded CI artifacts or anywhere else.
  */
 
-import type { FindingsArtifact, Severity, RefuteVerdict } from "../schemas/findings.js";
+import type { FindingsArtifact, Severity, RefuteVerdict, TokenUsageSummary } from "../schemas/findings.js";
 
 export interface TrendPoint {
   generated_at: string;
@@ -22,6 +22,8 @@ export interface TrendPoint {
   refute: Record<RefuteVerdict, number>;
   dismissed_count: number;
   llm_error: boolean;
+  /** Token usage from the LLM calls. Null for older artifacts or runs without an LLM pass. */
+  usage: TokenUsageSummary | null;
 }
 
 const SEVERITIES: Severity[] = ["critical", "high", "medium", "low", "info"];
@@ -74,6 +76,7 @@ function toTrendPoint(artifact: FindingsArtifact): TrendPoint {
     refute: countRefuteVerdicts(artifact),
     dismissed_count: artifact.summary?.dismissed_count ?? 0,
     llm_error: Boolean(artifact.run?.llm_error),
+    usage: artifact.run?.usage ?? null,
   };
 }
 

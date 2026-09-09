@@ -364,3 +364,55 @@ describe("runRefutePass — provider/model resolution", () => {
     expect(result.model).toBe("refute:groq/openai/gpt-oss-120b");
   });
 });
+
+// ─── Token usage aggregation ──────────────────────────────────────────────────
+
+describe("runRefutePass — token usage", () => {
+  afterEach(() => {
+    mockCreateProvider.mockClear();
+    mockReview.mockClear();
+    capturedConfigs.length = 0;
+  });
+
+  it("returns undefined usage when the provider reports no usage", async () => {
+    const config = FlaughtConfigSchema.parse({ llm: { provider: "groq", model: "m" } });
+    const result = await runRefutePass([makeFinding()], mockContext(), config);
+    expect(result.usage).toBeUndefined();
+  });
+
+  it("returns aggregated usage across multiple batches", async () => {
+    // Two findings, batch size 1 => two skeptic calls. Each returns usage;
+    // the runner must sum prompt/completion/total across batches.
+    const config = FlaughtConfigSchema.parse({
+      llm: { provider: "groq", model: "m" },
+      refute: { max_batch_size: 1 },
+    });
+    const findings = [
+      makeFinding({ id: "F-001", title: "Finding 1" }),
+      makeFinding({ id: "F-002", title: "Finding 2" }),
+    ];
+
+    mockReview
+      .mockResolvedValueOnce({
+        findings: [],
+        raw: JSON.stringify({ evaluations: [{ finding_index: 0, verdict: "confirmed", reasoning: "ok", adjusted_confidence: 0.9 }] }),
+        model: "test",
+        usage: { prompt_tokens: 1000, completion_tokens: 200, total_tokens: 1200 },
+      })
+      .mockResolvedValueOnce({
+        findings: [],
+        raw: JSON.stringify({ evaluations: [{ finding_index: 0, verdict: "refuted", reasoning: "no", adjusted_confidence: 0.1 }] }),
+        model: "test",
+        usage: { prompt_tokens: 3000, completion_tokens: 400, total_tokens: 3400 },
+      });
+
+    const result = await runRefutePass(findings, mockContext(), config);
+
+    expect(mockReview).toHaveBeenCalledTimes(2);
+    expect(result.usage).toEqual({
+      prompt_tokens: 4000,
+      completion_tokens: 600,
+      total_tokens: 4600,
+    });
+  });
+});

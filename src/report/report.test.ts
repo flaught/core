@@ -68,7 +68,7 @@ function makeArtifact(overrides: Partial<FindingsArtifact> = {}): FindingsArtifa
     flaught_version: "0.4.1",
     repository: { name: "flaught/core", url: "https://github.com/flaught/core", branch: "main" },
     pull_request: { number: 42, url: "https://github.com/flaught/core/pull/42", title: "Add auth", description: "Adds JWT auth", base_sha: "abc123", head_sha: "def456" },
-    run: { id: "flaught-1234567890-abc123", ci_url: null, duration_seconds: 47, llm_error: null },
+    run: { id: "flaught-1234567890-abc123", ci_url: null, duration_seconds: 47, llm_error: null, usage: null },
     analysis_completeness: null,
     tools_executed: [],
     findings,
@@ -194,7 +194,7 @@ describe("renderMarkdownReport", () => {
     const artifact = makeArtifact();
     const md = renderMarkdownReport(artifact);
     expect(md).toContain("Flaught v0.4.1");
-    expect(md).toContain("Schema v3");
+    expect(md).toContain("Schema v4");
   });
 
   it("includes the run-local finding ID caveat in the footer", () => {
@@ -208,7 +208,7 @@ describe("renderMarkdownReport", () => {
 
   it("warns when the LLM review failed", () => {
     const artifact = makeArtifact({
-      run: { id: "flaught-1", ci_url: null, duration_seconds: 5, llm_error: "Groq API error: 400 Bad Request" },
+      run: { id: "flaught-1", ci_url: null, duration_seconds: 5, llm_error: "Groq API error: 400 Bad Request", usage: null },
     });
     const md = renderMarkdownReport(artifact);
     expect(md).toContain("LLM adversarial review failed");
@@ -218,7 +218,7 @@ describe("renderMarkdownReport", () => {
 
   it("does not warn about the LLM when llm_error is null", () => {
     const artifact = makeArtifact({
-      run: { id: "flaught-1", ci_url: null, duration_seconds: 5, llm_error: null },
+      run: { id: "flaught-1", ci_url: null, duration_seconds: 5, llm_error: null, usage: null },
     });
     const md = renderMarkdownReport(artifact);
     expect(md).not.toContain("LLM adversarial review failed");
@@ -301,7 +301,7 @@ describe("renderJsonArtifact", () => {
     const json = renderJsonArtifact(artifact);
     const parsed = JSON.parse(json);
     expect(parsed).toBeTruthy();
-    expect(parsed.schema_version).toBe(3);
+    expect(parsed.schema_version).toBe(4);
   });
 
   it("includes the caveat", () => {

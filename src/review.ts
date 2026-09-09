@@ -25,6 +25,8 @@ import {
   type ScopeCreep,
   type FlaggedHunk,
   type AnalysisCompleteness,
+  type TokenUsage,
+  type TokenUsageSummary,
   SCHEMA_VERSION,
   FINDINGS_SCHEMA_URL,
   CAVEAT,
@@ -213,6 +215,7 @@ export async function runReview(options: ReviewOptions = {}): Promise<ReviewResu
   let analysisCompleteness: AnalysisCompleteness | null = null;
   let findings: Finding[] = [];
   let droppedBelowMinConfidence = 0;
+  let refuteUsage: TokenUsage | null = null;
 
   // Convert deterministic findings to Finding format
   for (const df of deterministicFindings) {
@@ -309,6 +312,7 @@ export async function runReview(options: ReviewOptions = {}): Promise<ReviewResu
     llmError = llmStage.llmError;
     analysisCompleteness = llmStage.completeness;
     droppedBelowMinConfidence = llmStage.droppedBelowMinConfidence;
+    refuteUsage = llmStage.refuteUsage;
     findings.push(...llmStage.llmFindings);
   }
 
@@ -480,6 +484,10 @@ export async function runReview(options: ReviewOptions = {}): Promise<ReviewResu
     artifact.run.llm_error = llmError;
   }
 
+  // Record token usage from the LLM review + refute calls. Null when the
+  // LLM pass did not run (--no-llm) or the provider returned no usage.
+  artifact.run.usage = buildUsageSummary(llmResult?.usage, refuteUsage);
+
   // 9. Render reports
   progress("Rendering reports...");
   const markdown = renderMarkdownReport(artifact);
@@ -536,6 +544,8 @@ export interface LlmStageResult {
   /** Whether the LLM received the full change context or some was truncated to fit the prompt cap. Null is impossible here (the prompt is always built), but typed nullable for the caller's union with the skip-LLM path. */
   completeness: AnalysisCompleteness;
   droppedBelowMinConfidence: number;
+  /** Token usage from the skeptic/refute pass, or null when the pass was skipped/disabled/failed or returned no usage. */
+  refuteUsage: TokenUsage | null;
 }
 
 /**
@@ -618,6 +628,7 @@ export async function runLlmStage(input: LlmStageInput): Promise<LlmStageResult>
   let llmError: string | null = null;
   let llmFindings: Finding[] = [];
   let droppedBelowMinConfidence = 0;
+  let refuteUsage: TokenUsage | null = null;
 
   // ── LLM review ──
   // If the LLM call fails, we gracefully degrade: return no LLM findings;
@@ -671,6 +682,7 @@ export async function runLlmStage(input: LlmStageInput): Promise<LlmStageResult>
       llmFindings = refuteResult.findings.filter((f) => f.source_type === "llm");
       progress(`  Refute model: ${refuteResult.model}`);
       if (refuteResult.usage) {
+        refuteUsage = refuteResult.usage;
         progress(`  Refute tokens: ${refuteResult.usage.prompt_tokens.toLocaleString()} prompt + ${refuteResult.usage.completion_tokens.toLocaleString()} completion = ${refuteResult.usage.total_tokens.toLocaleString()} total`);
       }
     } catch (err) {
@@ -685,7 +697,7 @@ export async function runLlmStage(input: LlmStageInput): Promise<LlmStageResult>
     progress("No LLM findings to refute — skipping skeptic pass.");
   }
 
-  return { llmFindings, llmResult, llmError, completeness, droppedBelowMinConfidence };
+  return { llmFindings, llmResult, llmError, completeness, droppedBelowMinConfidence, refuteUsage };
 }
 
 // ─── Review bundle (context artifact for the fork-PR split) ──────────────────
@@ -939,6 +951,7 @@ export async function runReviewOnlyLlm(options: OnlyLlmOptions): Promise<ReviewR
   if (llmStage.llmError) {
     artifact.run.llm_error = llmStage.llmError;
   }
+  artifact.run.usage = buildUsageSummary(llmStage.llmResult?.usage, llmStage.refuteUsage);
 
   // 14. Render reports + exit code.
   progress("Rendering reports...");
@@ -1066,6 +1079,7 @@ function buildArtifact(
       ci_url: null,
       duration_seconds: 0,
       llm_error: null,
+      usage: null,
     },
     analysis_completeness: null,
     tools_executed: [],
@@ -1088,6 +1102,22 @@ function buildArtifact(
 
 function generateRunId(): string {
   return `flaught-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
+/**
+ * Assemble the per-run token usage summary from the review and refute calls.
+ * Returns null when the LLM pass did not run (no review usage) — the dashboard
+ * and any cost computation treat null as "no data" rather than zero, so a
+ * --no-llm run is not mistaken for a free LLM run.
+ */
+function buildUsageSummary(
+  reviewUsage: TokenUsage | undefined,
+  refuteUsage: TokenUsage | null,
+): TokenUsageSummary | null {
+  if (!reviewUsage) return null;
+  const summary: TokenUsageSummary = { review: reviewUsage };
+  if (refuteUsage) summary.refute = refuteUsage;
+  return summary;
 }
 
 // ─── Docs-only diff detection ───────────────────────────────────────────────

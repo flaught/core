@@ -2,7 +2,7 @@
 
 Every finding carries a `source_type` field that distinguishes **deterministic** (tool-asserted) from **LLM-asserted** evidence. This is the governance-critical field — it tells you whether a finding came from a tool that always produces the same output, or from an LLM that may hallucinate.
 
-The schema is versioned from day one — currently `schema_version: 3` — and self-describing (`$schema` URL). Every artifact includes the `_caveat` field — an honest disclaimer about what the data represents.
+The schema is versioned from day one — currently `schema_version: 4` — and self-describing (`$schema` URL). Every artifact includes the `_caveat` field — an honest disclaimer about what the data represents.
 
 ## Finding structure
 
@@ -93,8 +93,8 @@ The JSON artifact (`--output findings.json`) is a complete, self-contained recor
 
 ```json
 {
-  "$schema": "https://flaught.dev/schemas/findings/v3.schema.json",
-  "schema_version": 3,
+  "$schema": "https://flaught.dev/schemas/findings/v4.schema.json",
+  "schema_version": 4,
   "_caveat": "This artifact is evidence that adversarial scrutiny occurred on this PR. It is NOT evidence that findings are correct. LLM-asserted findings may include hallucinations. Deterministic-tool findings have their own false-positive rates. Treat this as a prompt for human review, not as audit-truth.",
   "generated_at": "2025-01-15T10:25:00Z",
   "flaught_version": "0.2.0",
@@ -117,7 +117,11 @@ The JSON artifact (`--output findings.json`) is a complete, self-contained recor
   "run": {
     "id": "flaught-1705315500-a3b2c1",
     "ci_url": null,
-    "duration_seconds": 45
+    "duration_seconds": 45,
+    "usage": {
+      "review": { "prompt_tokens": 4200, "completion_tokens": 850, "total_tokens": 5050 },
+      "refute": { "prompt_tokens": 3100, "completion_tokens": 400, "total_tokens": 3500 }
+    }
   },
 
   "analysis_completeness": {
@@ -274,8 +278,19 @@ Built-in tools that are not an installed CLI use `version: "builtin"` (or `"buil
 
 `severity_gate.fail_on: "none"` suppresses exit 1 for findings, but a `dependency_sanity` tool fault still yields process exit 2. A fault is not a finding.
 
+## Token usage
+
+The `run.usage` field records token counts from the LLM calls, normalized across all providers (OpenAI, Groq, Anthropic, Gemini, Ollama). It is `null` when the LLM pass did not run (`--no-llm`, no changes, or the unprivileged emit-bundle half of the fork-PR split) or when the provider returned no usage — `null` means "no data", not "zero tokens", so a `--no-llm` run is not mistaken for a free LLM run.
+
+| Field | Meaning |
+| --- | --- |
+| `review` | Token counts for the initial adversarial review call |
+| `refute` | Token counts for the skeptic/refute pass; omitted when the pass was skipped, disabled, failed, or produced no usage |
+
+Each entry carries `prompt_tokens`, `completion_tokens`, and `total_tokens`. The review and refute counts are kept distinct rather than summed because they are separate calls, possibly on different models — a consumer can see how much of the spend was review vs. refutation. Dollar cost is not included; providers do not return cost inline, so cost would be computed by multiplying these counts by the provider's published per-million-token pricing for the model used.
+
 ## Schema versioning
 
-The schema uses integer versioning. The current version is `3` (bumped from `2` when `analysis_completeness` was added so consumers can distinguish "Flaught completed" from "Flaught comprehensively reviewed this"; `2` bumped from `1` when `fingerprint` and `evidence.rule_id` were added — see [dismissals](dismissals.md)). Breaking changes will increment the version. The `$schema` URL points to a JSON Schema document for validation.
+The schema uses integer versioning. The current version is `4` (`4` bumped from `3` when `run.usage` was added so consumers can see token spend per run without a separate billing query; `3` bumped from `2` when `analysis_completeness` was added so consumers can distinguish "Flaught completed" from "Flaught comprehensively reviewed this"; `2` bumped from `1` when `fingerprint` and `evidence.rule_id` were added — see [dismissals](dismissals.md)). Breaking changes will increment the version. The `$schema` URL points to a JSON Schema document for validation.
 
 The `_caveat` field is always present and never stripped — it's an honest disclaimer about what the artifact represents and what it doesn't.
