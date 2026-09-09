@@ -38,24 +38,107 @@ npm install -g @flaught/core
 
 ## Quick start
 
-Pick your environment and paste:
+A progression of prompts to paste into your AI coding agent (Claude Code, Codex, Cursor, pi). Each stage produces meaningful data before you move to the next. Run them in order on a branch with changes you want reviewed.
 
-### Any AI coding agent (Claude Code, Codex, Cursor, pi, etc.)
+The discipline is the same at every stage: fix only findings that are real and mechanical, re-run to confirm, **stop after two passes**, and report whatever is still open verbatim. **Never run `flaught dismiss` from a prompt** — suppressing a false positive is a human decision.
+
+### 1. Run it locally — deterministic checks first (no API key)
 
 **Prompt:**
 
 ```
-Install and run Flaught (adversarial code review) on this project:
-npm install -g @flaught/core, then `flaught init` to scaffold config,
-then `flaught review --no-llm` to run deterministic checks — no API
-key needed. Fix anything it flags and re-run until clean.
+Install Flaught and run its deterministic review on this branch:
+  npm install -g @flaught/core
+  flaught init                       # scaffold .advreview.yml + .flaught-prompt/
+  flaught review --base main --no-llm --output findings.json --quiet
 
-For the full LLM adversarial pass, set an API key (GROQ_API_KEY by
-default; for another provider, also set llm.provider/api_key_env in
-.advreview.yml) and drop --no-llm.
+Then read findings.json. Fix only findings that are real and mechanical
+(a lint failure, a missing null check, an obvious off-by-one); leave
+anything involving auth, architecture, or ambiguous intent for a human.
+Re-run the same command to confirm each fix. Repeat fix-and-rerun at most
+twice, then STOP and report every finding still open, verbatim.
+Do not run `flaught dismiss`.
 ```
 
-### Manual
+This runs Semgrep, your linter, the vuln scanner, test inversion, and scope-creep heuristics against your branch — zero LLM cost, no API key. You get a `findings.json` artifact and a markdown report immediately.
+
+### 2. Add the LLM adversarial pass
+
+**Prompt:**
+
+```
+Enable the full LLM review on this branch:
+  export GROQ_API_KEY=gsk_...   # free key from https://console.groq.com/keys
+  flaught review --base main --output findings.json --quiet
+
+Read the new findings with source_type "llm" and the skeptic/refute
+verdicts. Note the token-usage line in the report so you know what the
+pass cost. Same discipline as stage 1: fix only mechanical, real
+findings; re-run to confirm; STOP after two passes and report the rest
+verbatim. Do not dismiss anything.
+```
+
+Now the full five-stage pipeline runs: deterministic tools plus a separate LLM reviewer that scrutinizes security, architecture, scope, and test quality, then a skeptic pass that independently re-derives what the change should do. Using OpenAI, Gemini, Anthropic, or Ollama instead of Groq? See [LLM providers](#llm-providers-review-with-a-different-model-than-the-one-that-wrote-the-code) below.
+
+### 3. Review and manage findings
+
+**Prompt:**
+
+```
+Help me triage the findings from the last review:
+  - Summarize findings.json: group by severity and source_type
+    (deterministic vs llm), and list the skeptic verdicts
+    (confirm / refute / uncertain).
+  - For each finding I decide is a false positive, run (only when I tell
+    you to, and I supply the reason):
+        flaught dismiss <finding-id> --artifact findings.json \
+          --reason "..." --expires 90d
+    (finding-id is the run-local id, e.g. D-0001)
+  - Re-run: flaught review --base main --output findings.json --quiet
+    to confirm the gate is clean and the dismissal persisted.
+  - Run `flaught dismissals list` so I can see what's suppressed, and
+    `flaught dismissals audit` to flag any that expired.
+```
+
+Dismissals persist across runs via stable fingerprints, so a suppressed false positive stays suppressed without re-triaging it every time. `flaught dismissals audit` flags expired dismissals so nothing stays hidden forever. See [Dismissals](docs/dismissals.md) for the full store.
+
+### 4. Block merge in CI
+
+**Prompt:**
+
+```
+Add a GitHub Actions workflow that runs Flaught on every PR and blocks
+merge on real findings, without blocking on a provider outage:
+  - Create .github/workflows/adversarial-review.yml using the "Full"
+    workflow from docs/github-actions.md. It branches on the exit code:
+    exit 1 (findings exceed the gate) fails the job; exit 2
+    (config/API/LLM error) warns but does not block.
+  - Add GROQ_API_KEY to the repo secrets
+    (Settings → Secrets and variables → Actions).
+  - Commit the workflow, push, open a PR, and show me the review job
+    output and the posted PR comment.
+```
+
+Then enable branch protection: require the "Adversarial Review" status check before merge. The [GitHub Actions guide](docs/github-actions.md) has the full workflow YAML, fork-PR handling, and the exit-code split that fails open on `2`.
+
+### 5. Track trends with the dashboard
+
+**Prompt:**
+
+```
+Build a trends dashboard from this repo's CI review artifacts:
+  - Download recent findings artifacts from GitHub Actions runs into
+    ./ci-artifacts (use `gh run download` targeting the flaught-findings
+    artifact from the Adversarial Review workflow).
+  - Run: flaught dashboard --input ./ci-artifacts --output dashboard.html
+  - Open dashboard.html and summarize what it shows: findings over time
+    by severity, the per-run LLM/deterministic split, skeptic
+    confirm/refute/uncertain counts, dismissals, and token usage.
+```
+
+Each CI run's `findings.json` is a snapshot; the dashboard stitches them into a self-contained HTML page so you can see whether review is getting cleaner or noisier over time. See [Trends dashboard](#trends-dashboard) below.
+
+### Not using an agent?
 
 ```
 flaught init                    # scaffold .advreview.yml + .flaught-prompt/
@@ -64,6 +147,9 @@ flaught review --base main      # review against main
 flaught review --no-llm         # deterministic tools only (no API key)
 flaught review --output findings.json --quiet   # CI mode
 flaught dismiss D-0002 --artifact findings.json --reason "..." # suppress a false positive, persisted across runs
+flaught dismissals list         # show suppressed findings
+flaught dismissals audit        # flag expired dismissals
+flaught dashboard --input ./ci-artifacts --output dashboard.html
 ```
 
 `--no-llm` still runs dependency sanity on newly added `package.json` packages.
@@ -75,21 +161,6 @@ It writes explicit settings for all deterministic tools, test inversion,
 scope-creep detection, a high-severity gate, and persistent dismissals, with
 links explaining each setting. See the [paranoid preset](docs/configuration.md#paranoid-preset)
 for prerequisites and how it relates to the normal defaults.
-
-### API key
-
-`flaught init` defaults to Groq. Generate a free key at [console.groq.com/keys](https://console.groq.com/keys), then:
-
-```bash
-export GROQ_API_KEY=gsk_...
-flaught review
-```
-
-Using OpenAI, Gemini, Anthropic (Claude), or Ollama instead? See [LLM providers](https://github.com/flaught/core/blob/main/docs/configuration.md#llm-providers) for the full config reference.
-
-### GitHub Actions
-
-Add `.github/workflows/adversarial-review.yml`. See the [GitHub Actions docs](https://github.com/flaught/core/blob/main/docs/github-actions.md) for the full workflow, or start with the minimal version.
 
 ### Customize the reviewer
 
