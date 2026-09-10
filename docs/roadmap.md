@@ -39,7 +39,8 @@ An agent's loop currently terminates when the author is satisfied with itself. F
 - Issue to be opened — `agent_fixable` / `human_required` finding partition + gate routing. This is the honest resolution of the gaming problem — the agent may satisfy the skeptic only where satisfying the check and fixing the problem coincide.
 - Issue to be opened — fingerprint-based fix verification: when a finding disappears between runs, classify *resolved* vs *evaded*. An `evaded` classification is itself a high-severity finding.
 - Issue to be opened — `flaught review --session`: diff against the branch point + cumulative intent-drift detection. Scope drift compounds across iterations; no single commit looks wrong, the sum does.
-- Issue to be opened — latency tiers: a fast deterministic inner-loop mode, full pass at loop exit, everything at CI.
+- Issue to be opened — latency tiers: a fast deterministic inner-loop mode, full pass at loop exit, everything at CI. Built on the per-file review cache ([core-l69](https://github.com/flaught/core/issues/56) / [core-14e](https://github.com/flaught/core/issues/76)): a "full pass at loop exit" reuses cached findings for files unchanged since the last pass, making it cheap enough to run every loop exit instead of only at PR time.
+  - Revisit: per-file decomposition can't surface findings about the *interaction* of two files' changes (a known limitation accepted for v1 of core-14e). A cross-cutting pass — or a whole-diff fallback when >N files change — is the likely follow-up once dogfood shows whether interaction findings are being missed.
 
 ### Agent-failure check library — checks aimed at how agents actually fail
 
