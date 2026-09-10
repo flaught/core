@@ -5,11 +5,9 @@ All notable changes to **@flaught/core** are documented here. The format is base
 [Semantic Versioning](https://semver.org/). For 0.x releases, a backwards-compatible
 feature bumps the minor version and a fix bumps the patch.
 
-## [Unreleased]
+## [0.12.0] - 2026-09-10
 
-### Fixed
-
-- **Refuted-by-skeptic findings no longer trip the severity gate** (#77, core-22f) — `computeExitCode` excluded only `dismissed` findings, so a finding the skeptic pass had REFUTED (determined fabricated / false) still blocked merge. That made the refute pass cosmetic for gating: it filtered the report display (refuted findings show `❌ Skeptic: Refuted`) but not the verdict. Now `refute_result.verdict === "refuted"` is also excluded from the gate; `confirmed` and `uncertain` still gate (`uncertain` is treated as potentially real — conservative). Surfaced by this repo's own dogfooding: PR #77 was blocked by a refuted hallucination ("missing import of `path`" — the import exists at the top of `src/cli.ts`), 5% confidence, that the skeptic correctly refuted yet still tripped `fail_on: high`. The gate decision is extracted to an exported `gateTripped(findings, failOn)` helper for direct unit testing. Not configurable — a finding determined false blocking merge is a defect, not a policy knob.
+One backwards-compatible feature and one gate-logic fix since `0.11.0`. No findings-schema change (still v4). ⚠️ **Behavior change for all consumers:** the gate fix means a finding the skeptic refuted no longer blocks merge where it previously did — a defect fix (a finding determined false should never have gated), not a policy change.
 
 ### Added
 
@@ -18,6 +16,10 @@ feature bumps the minor version and a fix bumps the patch.
 ### Changed
 
 - **Documented that every push re-reviews the full PR diff** (#76, core-14e) — `flaught review --base <ref> --head HEAD` always reviews the entire cumulative PR diff, re-rolling the LLM on unchanged code every push. A new note in `docs/github-actions.md` sets expectations and points to dismissal TTLs as the current mitigation; incremental review (diff-delta scoping / per-region caching) is on the roadmap but not yet shipped.
+
+### Fixed
+
+- **Refuted-by-skeptic findings no longer trip the severity gate** (#77, core-22f) — `computeExitCode` excluded only `dismissed` findings, so a finding the skeptic pass had REFUTED (determined fabricated / false) still blocked merge. That made the refute pass cosmetic for gating: it filtered the report display (refuted findings show `❌ Skeptic: Refuted`) but not the verdict. Now `refute_result.verdict === "refuted"` is also excluded from the gate; `confirmed` and `uncertain` still gate (`uncertain` is treated as potentially real — conservative). Surfaced by this repo's own dogfooding: PR #77 was blocked by a refuted hallucination ("missing import of `path`" — the import exists at the top of `src/cli.ts`), 5% confidence, that the skeptic correctly refuted yet still tripped `fail_on: high`. The gate decision is extracted to an exported `gateTripped(findings, failOn)` helper for direct unit testing. Not configurable — a finding determined false blocking merge is a defect, not a policy knob.
 
 ## [0.11.0] - 2026-09-09
 
