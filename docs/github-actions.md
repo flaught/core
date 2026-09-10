@@ -171,17 +171,10 @@ jobs:
         if: always()
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          PR_BASE_REF: ${{ github.base_ref }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
-          PR_TITLE: ${{ github.event.pull_request.title }}
         run: |
           if [ -f findings.json ]; then
-            BODY=$(flaught review \
-              --base "origin/${PR_BASE_REF}" \
-              --head HEAD \
-              --no-llm \
-              --pr-description "${PR_TITLE}" \
-              --quiet 2>/dev/null)
+            BODY=$(flaught report --from findings.json)
             echo "$BODY" | gh pr comment "${PR_NUMBER}" --body-file -
           fi
 ```
@@ -255,17 +248,10 @@ jobs:
         if: always()
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          PR_BASE_REF: ${{ github.base_ref }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
-          PR_TITLE: ${{ github.event.pull_request.title }}
         run: |
           if [ -f findings.json ]; then
-            BODY=$(flaught review \
-              --base "origin/${PR_BASE_REF}" \
-              --head HEAD \
-              --no-llm \
-              --pr-description "${PR_TITLE}" \
-              --quiet 2>/dev/null)
+            BODY=$(flaught report --from findings.json)
             echo "$BODY" | gh pr comment "${PR_NUMBER}" --body-file -
           fi
 
@@ -283,9 +269,11 @@ jobs:
 
 Add `GROQ_API_KEY` to your repository secrets (Settings → Secrets and variables → Actions). This matches the default `.advreview.yml` that `flaught init` generates (`provider: groq`, `api_key_env: GROQ_API_KEY`) — no config changes needed.
 
-**Note on the "Comment on PR" step:** it re-runs `flaught review` a second time to get markdown for the comment body, since `--output` only writes the JSON artifact — there's no "render markdown from an existing artifact" command yet. That second run uses `--no-llm` deliberately: running it *without* `--no-llm` would call the LLM API a second time per PR (doubling cost/latency) just to reproduce a report. The tradeoff is that the posted comment only reflects deterministic/test-inversion/scope-creep findings, not the LLM pass — the uploaded `findings.json` artifact from the first (full) run is the source of truth for LLM findings.
+**Note on the "Comment on PR" step:** it renders the comment body with `flaught report --from findings.json` — a pure artifact → markdown pipe, no LLM call, no second diff assembly. Because it reads the *same* `findings.json` the review run wrote (which carries the LLM findings), the posted comment reflects the full review, deterministic **and** LLM — unlike re-running `flaught review --no-llm`, which silently dropped every LLM finding from the comment. `flaught report` exits 0 unconditionally: it's a renderer, not a verdict, so it never gates the job.
 
 **Reading the artifact programmatically:** check `analysis_completeness` before treating findings as complete. On a large PR the LLM prompt may be truncated (`state: "partial"`), meaning the LLM saw less than the whole change — "Flaught completed" ≠ "comprehensively reviewed." See the [findings schema](findings-schema.md#analysis-completeness).
+
+> **Every push re-reviews the full PR diff.** `flaught review --base <ref> --head HEAD` always reviews the *entire* cumulative PR diff (`base..head`), not just what changed since the last review. So every push — even one that doesn't touch previously-flagged code — gives the LLM another full pass and, with `temperature > 0`, another roll of the same non-deterministic judgment on unchanged code. This can surface a *different, still-plausible* critique of already-reviewed, already-dismissed code (two genuinely different claims about the same code aren't merged by any fingerprint scheme — see [Dismissals](dismissals.md)). Set expectations accordingly: tune dismissal TTLs (`flaught dismiss --expires 90d`) so stale re-rolls expire, and prefer fewer, larger pushes over many small ones on hot PRs. Incremental review (scope the LLM to the diff delta since the last reviewed commit, or cache per-region findings across pushes) is on the roadmap but not yet shipped.
 
 ### Comments on fork PRs need a second workflow
 
