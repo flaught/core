@@ -27,7 +27,7 @@ export {
   type PromptTemplates,
   type TemplateVariables,
 } from "./prompt/templates.js";
-export { runReview, type ReviewResult, type ReviewOptions, type ProgressCallback } from "./review.js";
+export { runReview, type ReviewResult, type ReviewOptions, type ProgressCallback, gateTripped } from "./review.js";
 export { renderMarkdownReport } from "./report/markdown.js";
 export { renderJsonArtifact } from "./report/json.js";
 export { runDeterministicTools, formatToolFindingsForPrompt, type ToolResult, type DeterministicFinding, type DeterministicToolsOptions } from "./tools/runner.js";

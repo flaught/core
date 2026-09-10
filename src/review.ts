@@ -1146,19 +1146,37 @@ export function isDocsOnlyDiff(changedFiles: ChangedFile[]): boolean {
 
 // ─── Exit code computation ──────────────────────────────────────────────────
 
-function computeExitCode(artifact: FindingsArtifact, config: FlaughtConfig): number {
+/**
+ * Whether any undismissed, non-refuted finding is at or above the severity
+ * gate threshold. Extracted from computeExitCode so the gate logic is
+ * directly unit-testable (mirroring filterFindingsByConfidence).
+ *
+ * A finding the skeptic REFUTED (determined fabricated / false) does NOT trip
+ * the gate — the refute pass exists to catch hallucinations, and letting a
+ * refuted finding block merge makes the skeptic cosmetic for gating (it would
+ * filter the report display but not the verdict). 'confirmed' and 'uncertain'
+ * still gate; 'uncertain' is treated as potentially real (conservative — the
+ * skeptic couldn't determine, so don't assume it's safe). Dismissed findings
+ * are excluded as before (they're a human-recorded disposition, not noise).
+ */
+export function gateTripped(
+  findings: Finding[],
+  failOn: Severity | "none",
+): boolean {
+  if (failOn === "none") return false;
   const severityOrder: Severity[] = ["critical", "high", "medium", "low", "info"];
+  const threshold = severityOrder.indexOf(failOn);
+  for (const finding of findings) {
+    if (finding.dismissed) continue;
+    if (finding.refute_result?.verdict === "refuted") continue;
+    if (severityOrder.indexOf(finding.severity) <= threshold) return true;
+  }
+  return false;
+}
 
-  if (config.severity_gate.fail_on !== "none") {
-    const threshold = severityOrder.indexOf(config.severity_gate.fail_on);
-
-    for (const finding of artifact.findings) {
-      if (finding.dismissed) continue;
-      const findingLevel = severityOrder.indexOf(finding.severity);
-      if (findingLevel <= threshold) {
-        return 1;
-      }
-    }
+function computeExitCode(artifact: FindingsArtifact, config: FlaughtConfig): number {
+  if (gateTripped(artifact.findings, config.severity_gate.fail_on)) {
+    return 1;
   }
 
   // Registry outage (etc.) is a tool fault, not a verdict. CI should warn, not
