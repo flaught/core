@@ -170,6 +170,23 @@ describe("flaught report", () => {
     await expect(runReportCli(["--from", artifactPath])).rejects.toThrow("process.exit(2)");
   });
 
+  it("exits 2 with a clear message when the artifact passes the light check but is missing fields the renderer needs (e.g. noise_budget)", async () => {
+    // parseArtifactFile only verifies `findings` is an array; renderMarkdownReport
+    // also reads noise_budget/summary/run/etc. A corrupted or hand-edited artifact
+    // that has findings but is missing those fields must fail gracefully (exit 2,
+    // clear message) rather than throwing a raw TypeError mid-render.
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "flaught-cli-report-"));
+    tempDirs.push(dir);
+    const artifactPath = path.join(dir, "findings.json");
+    fs.writeFileSync(
+      artifactPath,
+      JSON.stringify({ findings: [] }), // has findings array, missing everything else
+      "utf-8",
+    );
+
+    await expect(runReportCli(["--from", artifactPath])).rejects.toThrow("process.exit(2)");
+  });
+
   it("renders the finding-ID caveat footer", async () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), "flaught-cli-report-"));
     tempDirs.push(dir);

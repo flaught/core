@@ -552,7 +552,27 @@ function runReport(argPath: string | undefined, opts: { from?: string }): void {
     process.exit(2);
   }
   const artifact = parseArtifactFile(path.resolve(artifactPath));
-  console.log(renderMarkdownReport(artifact));
+
+  // parseArtifactFile only checks the structural minimum (an object with a
+  // `findings` array) — by design, since `flaught dismiss` only touches findings
+  // entries. `report` runs the artifact through renderMarkdownReport, which
+  // reads noise_budget / summary / run / repository / etc., so a corrupted or
+  // hand-edited artifact that passes the light check could still throw a
+  // TypeError mid-render. Catch it and exit 2 with a clear, actionable message
+  // instead of a raw stack trace — well-formed artifacts come from
+  // `flaught review --output` and never hit this path.
+  try {
+    console.log(renderMarkdownReport(artifact));
+  } catch (err) {
+    const reason = err instanceof Error ? err.message : String(err);
+    console.error(
+      `\n❌ Could not render a report from ${path.resolve(artifactPath)}: the artifact is missing or has malformed required fields (${reason}).`,
+    );
+    console.error(
+      "   `flaught report` renders a findings artifact produced by `flaught review --output`. Re-run the review to regenerate a well-formed artifact.",
+    );
+    process.exit(2);
+  }
 }
 
 // ─── Artifact file parsing with schema validation ───────────────────────────
