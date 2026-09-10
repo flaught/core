@@ -946,6 +946,50 @@
         "file": "src/index.ts"
       },
       "expires_at": null
+    },
+    {
+      "fingerprint": "sha256:4de7ab029f4b1b73e21023ea7f96981d",
+      "dismissed_by": "dgabriel@gmail.com",
+      "dismissed_at": "2026-09-10T16:49:02.050Z",
+      "reason": "Intended CLI behavior: the report subcommand emits markdown to stdout for piping into gh pr comment, exactly like 'flaught review' prints its report. Not a defect — opinion-based finding, skeptic Uncertain.",
+      "context": {
+        "title": "Direct console logging in report command",
+        "file": "src/cli.ts"
+      },
+      "expires_at": null
+    },
+    {
+      "fingerprint": "sha256:ffec3d3e70ee79aebadaf71808bb2df4",
+      "dismissed_by": "dgabriel@gmail.com",
+      "dismissed_at": "2026-09-10T16:49:10.805Z",
+      "reason": "The docs/github-actions.md updates ARE the point of this PR — replacing the lossy second --no-llm review run with 'flaught report --from' and documenting the full-diff re-review behavior (#76). Not scope creep; skeptic Uncertain, 25% confidence.",
+      "context": {
+        "title": "Unnecessary documentation updates for CI recipe changes",
+        "file": "docs/github-actions.md"
+      },
+      "expires_at": null
+    },
+    {
+      "fingerprint": "sha256:7673a096e344ee60d8a57559b22e8b37",
+      "dismissed_by": "dgabriel@gmail.com",
+      "dismissed_at": "2026-09-10T16:49:10.875Z",
+      "reason": "Speculative: fs.mkdtempSync(path.join(os.tmpdir(), ...)) is the standard, safe way to get a unique temp dir and is used identically in the existing src/cli-dismiss.test.ts. Skeptic Uncertain, 20% confidence — not demonstrated by the code.",
+      "context": {
+        "title": "Hard‑coded artifact path in test fixture",
+        "file": "src/cli-report.test.ts"
+      },
+      "expires_at": null
+    },
+    {
+      "fingerprint": "sha256:72bf5f0cbae9207604c92e5f7e051f21",
+      "dismissed_by": "dgabriel@gmail.com",
+      "dismissed_at": "2026-09-10T16:49:10.944Z",
+      "reason": "Not a finding — it is a positive observation ('no secret exposure in new code') dressed as a finding. Nothing to fix; recording as dismissed so it doesn't crowd the report. Skeptic Confirmed the absence of an issue.",
+      "context": {
+        "title": "No secret exposure in new code",
+        "file": "src/cli.ts"
+      },
+      "expires_at": null
     }
   ]
 }

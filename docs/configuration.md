@@ -300,6 +300,8 @@ Controls whether Flaught exits with code 1 (findings exceed threshold) or 0 (cle
 
 Default: `high`. Dismissed findings (see below) are always excluded, regardless of severity.
 
+**Findings the skeptic refuted are also excluded.** A finding with `refute_result.verdict === "refuted"` — one the skeptic pass determined is fabricated or false — does not trip the gate, regardless of severity. The refute pass exists to catch LLM hallucinations; letting a refuted finding block merge would make the skeptic cosmetic for gating (it filters the report display but not the verdict). `confirmed` and `uncertain` findings still gate; `uncertain` is treated as potentially real (the skeptic couldn't determine, so the conservative choice is to keep gating). This matters most under LLM non-determinism (see [GitHub Actions: every push re-reviews the full PR diff](github-actions.md)), where a re-run can raise a fresh hallucination — the skeptic is what stops a refuted hallucination from holding a PR hostage.
+
 ## Dismissals
 
 Findings are matched against a persisted, git-tracked dismissal store (`.flaught-dismissals.json` by default) by a stable content-based fingerprint — not the run-local `id`. A finding whose fingerprint has an active (non-expired) entry in the store is automatically marked `dismissed` on every run and excluded from the severity gate.
