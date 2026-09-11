@@ -87,6 +87,71 @@ describe("test weakening tool runner", () => {
   });
 });
 
+describe("semgrep diff-scoping (#79)", () => {
+  it("skips semgrep cleanly when the diff has no changed files (records a skip, not a 0-finding clean scan)", async () => {
+    const repoPath = fs.mkdtempSync(path.join(os.tmpdir(), "flaught-tools-semgrep-skip-"));
+    tempDirs.push(repoPath);
+    const git = simpleGit(repoPath);
+    await git.init(["--initial-branch=main"]);
+    await git.addConfig("user.email", "test@flaught.dev");
+    await git.addConfig("user.name", "Flaught Test");
+    const sha = await commitFiles(git, repoPath, { "src/a.ts": "console.log(1);\n" }, "initial");
+
+    // base == head -> empty diff -> zero changed files -> semgrep is skipped.
+    const config = FlaughtConfigSchema.parse({
+      tools: {
+        semgrep: { enabled: true },
+        linter: { enabled: false },
+        vuln_scanner: { enabled: false },
+        dependency_sanity: { enabled: false },
+        test_weakening: { enabled: false },
+      },
+    });
+    const result = await runDeterministicTools(config, repoPath, { baseRef: sha, headRef: sha });
+
+    const semgrep = result.executions.find((e) => e.tool === "semgrep");
+    expect(semgrep).toBeTruthy();
+    expect(semgrep!.command).toBe("(skipped: no changed files in the diff)");
+    expect(semgrep!.raw_findings_count).toBe(0);
+    expect(semgrep!.exit_code).toBe(0);
+    expect(result.findings).toEqual([]); // skipped, not a scan
+  });
+
+  it("scopes semgrep to the changed files when the diff is non-empty (command summary names the count)", async () => {
+    const repoPath = fs.mkdtempSync(path.join(os.tmpdir(), "flaught-tools-semgrep-scope-"));
+    tempDirs.push(repoPath);
+    const git = simpleGit(repoPath);
+    await git.init(["--initial-branch=main"]);
+    await git.addConfig("user.email", "test@flaught.dev");
+    await git.addConfig("user.name", "Flaught Test");
+    const base = await commitFiles(git, repoPath, { "src/a.ts": "console.log(1);\n" }, "initial");
+    await commitFiles(git, repoPath, { "src/a.ts": "console.log(2);\n", "src/b.py": "print(2)\n" }, "change");
+
+    const config = FlaughtConfigSchema.parse({
+      tools: {
+        semgrep: { enabled: true },
+        linter: { enabled: false },
+        vuln_scanner: { enabled: false },
+        dependency_sanity: { enabled: false },
+        test_weakening: { enabled: false },
+      },
+    });
+    const result = await runDeterministicTools(config, repoPath, { baseRef: base, headRef: "HEAD" });
+
+    const semgrep = result.executions.find((e) => e.tool === "semgrep");
+    expect(semgrep).toBeTruthy();
+    // Either a real scan ran (command summary with <N changed files>) or semgrep
+    // isn't installed and the tool faulted ("(failed)") — both prove the scoping
+    // path was taken rather than the skip path. Assert it did NOT take the skip.
+    expect(semgrep!.command).not.toBe("(skipped: no changed files in the diff)");
+    // If semgrep is installed and ran clean, the command summary reflects scoping.
+    if (semgrep!.command !== "(failed)") {
+      expect(semgrep!.command).toContain("changed file");
+      expect(semgrep!.command).not.toContain(" -- ."); // not the whole-repo fallback
+    }
+  });
+});
+
 describe("npm audit parser enrichment", () => {
   it("extracts advisory title, fix info, and dependency path from npm audit JSON", () => {
     const npmAuditJson = JSON.stringify({
