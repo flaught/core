@@ -151,7 +151,7 @@ describe("runSemgrep no-silent-zero wiring (F-0001)", () => {
       stdout: "Semgrep requires login to use this rule.\n{not valid json",
       stderr: "",
     });
-    const result = await runSemgrep(config, process.cwd(), fakeExec);
+    const result = await runSemgrep(config, process.cwd(), ["a.ts", "b.py"], fakeExec);
 
     expect(result.success).toBe(false); // fault, not clean
     expect(result.findings).toEqual([]); // 0 findings, but NOT reported as clean
@@ -174,7 +174,7 @@ describe("runSemgrep no-silent-zero wiring (F-0001)", () => {
       }),
       stderr: "",
     });
-    const result = await runSemgrep(config, process.cwd(), fakeExec);
+    const result = await runSemgrep(config, process.cwd(), ["a.ts", "b.py"], fakeExec);
     expect(result.success).toBe(true);
     expect(result.findings).toHaveLength(1);
     expect(result.findings[0]!.snippet).toBe("eval(x)"); // real lines, not gated
@@ -182,7 +182,7 @@ describe("runSemgrep no-silent-zero wiring (F-0001)", () => {
 
   it("returns success:true with 0 findings for a genuinely clean scan (valid JSON, no results)", async () => {
     const fakeExec = async () => ({ success: true, exitCode: 0, stdout: JSON.stringify({ results: [] }), stderr: "" });
-    const result = await runSemgrep(config, process.cwd(), fakeExec);
+    const result = await runSemgrep(config, process.cwd(), ["a.ts", "b.py"], fakeExec);
     expect(result.success).toBe(true);
     expect(result.findings).toEqual([]);
   });
@@ -197,7 +197,7 @@ describe("runSemgrep no-silent-zero wiring (F-0001)", () => {
       stdout: "semgrep: rule load failed (not even reached)",
       stderr: "Error: invalid rule",
     });
-    const result = await runSemgrep(config, process.cwd(), fakeExec);
+    const result = await runSemgrep(config, process.cwd(), ["a.ts", "b.py"], fakeExec);
     expect(result.success).toBe(false);
     expect(result.findings).toEqual([]);
     expect(result.exitCode).toBe(1);
@@ -208,10 +208,52 @@ describe("runSemgrep no-silent-zero wiring (F-0001)", () => {
   // and not a clean 0-finding scan.
   it("surfaces a thrown exec as a tool fault (timeout/spawn error)", async () => {
     const fakeExec = async () => { throw new Error("spawn EAGAIN"); };
-    const result = await runSemgrep(config, process.cwd(), fakeExec);
+    const result = await runSemgrep(config, process.cwd(), ["a.ts", "b.py"], fakeExec);
     expect(result.success).toBe(false);
     expect(result.findings).toEqual([]);
     expect(result.exitCode).toBe(-1);
     expect(result.stderr).toContain("spawn EAGAIN");
+  });
+});
+
+import { getSemgrepArgs, semgrepCommandSummary } from "./runner.js";
+
+// #79 (core-0vy): semgrep must scan only the diff's changed files, not the
+// whole repo ("."). Verify the arg construction + the artifact command summary.
+describe("semgrep diff-scoping (#79)", () => {
+  const config = FlaughtConfigSchema.parse({});
+
+  it("getSemgrepArgs targets the changed files (not '.') with a '--' guard", () => {
+    const args = getSemgrepArgs(config, ["src/a.ts", "src/b.py"]);
+    expect(args).toEqual(["semgrep", "--config", "auto", "--json", "--", "src/a.ts", "src/b.py"]);
+    expect(args).not.toContain(".");
+    // the '--' separates flags from filenames (protects files starting with '-')
+    expect(args).toContain("--");
+  });
+
+  it("getSemgrepArgs honors a user-configured ruleset and still scopes to targets", () => {
+    const cfg = FlaughtConfigSchema.parse({ tools: { semgrep: { config: "./security/baseline.yml" } } });
+    expect(getSemgrepArgs(cfg, ["a.ts"])).toEqual([
+      "semgrep", "--config", "./security/baseline.yml", "--json", "--", "a.ts",
+    ]);
+  });
+
+  it("semgrepCommandSummary is concise for a scoped scan (no per-file dump)", () => {
+    expect(semgrepCommandSummary(config, ["a.ts", "b.py", "c.go"], true))
+      .toBe("semgrep --config auto --json -- <3 changed files>");
+    expect(semgrepCommandSummary(config, ["a.ts"], true)).toBe("semgrep --config auto --json -- <1 changed file>");
+  });
+
+  it("semgrepCommandSummary shows '.' for a whole-repo fallback (diff uncomputable)", () => {
+    expect(semgrepCommandSummary(config, ["."], false)).toBe("semgrep --config auto --json -- .");
+  });
+
+  it("runSemgrep passes the scoped targets to the exec call (wiring)", async () => {
+    let received: string[] = [];
+    const fakeExec = async (args: string[]) => { received = args; return { success: true, exitCode: 0, stdout: JSON.stringify({ results: [] }), stderr: "" }; };
+    await runSemgrep(config, process.cwd(), ["src/changed.ts"], fakeExec);
+    expect(received).toContain("src/changed.ts");
+    expect(received).toContain("--");
+    expect(received).not.toContain(".");
   });
 });

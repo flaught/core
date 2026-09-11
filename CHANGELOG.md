@@ -5,6 +5,12 @@ All notable changes to **@flaught/core** are documented here. The format is base
 [Semantic Versioning](https://semver.org/). For 0.x releases, a backwards-compatible
 feature bumps the minor version and a fix bumps the patch.
 
+## [Unreleased]
+
+### Fixed
+
+- **semgrep now scans only the PR's changed files, not the whole repository** (#79, core-0vy) — `semgrep` was invoked as `semgrep --config auto --json .`, scanning the entire repo every run. Since semgrep is stateless (no memory of dismissals), every PR re-detected the same historical findings in files that PR never touched — on a frontend-only PR, 20 semgrep findings in unrelated backend/migration files, all already dismissed weeks earlier. Flaught now scopes semgrep to the diff's added/modified/renamed files (`git diff --name-only --diff-filter=AMRC <base>..<head>`); when the diff has no changed files, semgrep is skipped cleanly (not reported as a 0-finding clean scan); if the diff can't be computed, it falls back to a whole-repo scan and announces it. This is the deterministic-tools analog of #76 (the LLM re-reviews the whole PR diff), and — unlike #76 — it's a self-contained fix: the changed-file list was already computed for test-weakening, just not passed to semgrep.
+
 ## [0.12.1] - 2026-09-11
 
 Two semgrep correctness/honesty fixes since `0.12.0`. No findings-schema or public-API change.
