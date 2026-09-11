@@ -314,6 +314,17 @@ dismissals:
 
 See [`docs/dismissals.md`](dismissals.md) for the full workflow, the `flaught dismiss`/`dismissals` CLI, and the fingerprint/store format.
 
+## Report rendering
+
+By default the markdown report shows every finding it's given, dismissed or not (dismissed findings appear struck-through with the dismissal note) — a full audit trail. On a repo with a large, actively-maintained dismissal store, that pads every PR comment with the same historical dismissed findings. Set `report.hide_dismissed: true` to omit dismissed findings from the report and render only active ones:
+
+```yaml
+report:
+  hide_dismissed: false   # default — show everything (full audit trail)
+```
+
+When hiding, the report adds a one-line note (`N dismissed findings not shown in this report — see the findings.json artifact for the full audit trail`) and recomputes the summary/noise-budget counts so the report is internally consistent. The JSON artifact (`findings.json`) always carries the full set, dismissed included. `--hide-dismissed` on `flaught review` and `flaught report` overrides the config for one run. (`flaught review --summary` already shows only active findings.)
+
 ## Noise budget
 
 Each severity tier has a maximum number of findings. When a tier's budget is exceeded, the lowest-confidence findings in that tier are dropped. This prevents alert fatigue:

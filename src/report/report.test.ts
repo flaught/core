@@ -532,3 +532,56 @@ describe("renderMarkdownReport (analysis completeness)", () => {
     expect(md).not.toContain("Partial analysis");
   });
 });
+
+// #80 / core-uks: --hide-dismissed / report.hide_dismissed omits dismissed
+// findings from the rendered report (recomputing summary/noise-budget counts so
+// the report is internally consistent) and adds a "N dismissed not shown — see
+// findings.json" note. The JSON artifact keeps the full audit trail.
+describe("renderMarkdownReport hideDismissed (#80)", () => {
+  const activeFinding = makeFinding({ id: "F-001", severity: "high", title: "Active SQL injection" });
+  const dismissedFinding = makeFinding({
+    id: "F-002", severity: "high", title: "Already-fixed dependency advisory",
+    dismissed: true, dismissed_by: "alice", dismissed_at: "2026-09-11T09:00:00Z",
+    dismissal_reason: "Pre-existing, unrelated to this PR",
+  });
+
+  it("default (no opts): shows dismissed findings struck through, no hide-note", () => {
+    const artifact = makeArtifact({ findings: [activeFinding, dismissedFinding] });
+    const md = renderMarkdownReport(artifact);
+    expect(md).toContain("DISMISSED");
+    expect(md).toContain("Already-fixed dependency advisory");
+    expect(md).not.toContain("not shown in this report");
+  });
+
+  it("hideDismissed=true: omits dismissed from sections, shows the note, summary counts only undismissed", () => {
+    const artifact = makeArtifact({ findings: [activeFinding, dismissedFinding] });
+    const md = renderMarkdownReport(artifact, { hideDismissed: true });
+
+    // The dismissed finding's title is gone from the sections...
+    expect(md).not.toContain("Already-fixed dependency advisory");
+    expect(md).not.toContain("DISMISSED");
+    // ...but the active finding is still shown.
+    expect(md).toContain("Active SQL injection");
+    // The note explains the hidden dismissed.
+    expect(md).toContain("1 dismissed finding not shown in this report");
+    expect(md).toContain("findings.json");
+    // Summary reflects undismissed only: total 1, HIGH 1 (not 2).
+    expect(md).toContain("| **Total** | **1** |");
+    expect(md).toMatch(/🟠 HIGH \| 1 \|/);
+  });
+
+  it("hideDismissed=true with all findings dismissed: 'No active findings' + the note (not 'No findings.')", () => {
+    const artifact = makeArtifact({ findings: [dismissedFinding] });
+    const md = renderMarkdownReport(artifact, { hideDismissed: true });
+    expect(md).toContain("No active findings");
+    expect(md).not.toContain("The adversarial review found no issues");
+    expect(md).toContain("1 dismissed finding not shown in this report");
+  });
+
+  it("hideDismissed=true with zero dismissed: no note, behaves like the default", () => {
+    const artifact = makeArtifact({ findings: [activeFinding] });
+    const md = renderMarkdownReport(artifact, { hideDismissed: true });
+    expect(md).not.toContain("not shown in this report");
+    expect(md).toContain("Active SQL injection");
+  });
+});

@@ -86,6 +86,7 @@ program
   .option("--summary", "Print a short, human-first report instead of the full Markdown report")
   .option("--summary-top <n>", "Maximum findings shown by --summary", parseSummaryTop, DEFAULT_SUMMARY_TOP)
   .option("--github-inline", "Post findings as inline PR comments on diff lines (requires GITHUB_TOKEN)")
+  .option("--hide-dismissed", "Omit dismissed findings from the report (overrides report.hide_dismissed; the JSON artifact keeps the full audit trail)")
   .action(async (opts) => {
     try {
       await runCliReview(opts);
@@ -162,6 +163,7 @@ program
   .description("Render a PR-comment markdown report from an existing findings JSON artifact — no LLM call, no git diff. Use this to produce a comment body from a prior `flaught review --output` run instead of re-running the review.")
   .argument("[path]", "Path to a findings JSON artifact (from `flaught review --output`)")
   .option("-f, --from <path>", "Path to a findings JSON artifact (alternative to the positional argument)")
+  .option("--hide-dismissed", "Omit dismissed findings from the rendered report (the JSON artifact keeps the full audit trail)")
   .action((argPath, opts) => {
     try {
       runReport(argPath, opts);
@@ -196,6 +198,7 @@ interface CliReviewOptions {
   summary?: boolean;
   summaryTop?: number;
   githubInline?: boolean;
+  hideDismissed?: boolean;
   emitContext?: string;
   onlyLlm?: boolean;
   context?: string;
@@ -257,6 +260,7 @@ async function runCliReview(opts: CliReviewOptions): Promise<void> {
       configPath: opts.config,
       repoPath: opts.repo ? path.resolve(opts.repo) : undefined,
       skipRefute: (opts as Record<string, unknown>).refute === false,
+      hideDismissed: opts.hideDismissed,
       onProgress: progress,
     });
     console.log(await renderCliReport(result, opts));
@@ -283,6 +287,7 @@ async function runCliReview(opts: CliReviewOptions): Promise<void> {
     skipRefute: (opts as Record<string, unknown>).refute === false, // --no-refute sets refute to false
     emitBundle: !!opts.emitContext, // unprivileged half: don't budget (the privileged half budgets the full set)
     configFromBase: opts.configFromBase ?? Boolean(process.env.FLAUGHT_CONFIG_FROM_BASE),
+    hideDismissed: opts.hideDismissed,
     onProgress: progress,
   });
 
@@ -570,7 +575,7 @@ async function runDismissalsRemove(fingerprint: string, opts: { repo?: string; c
  * uses) and renderMarkdownReport (the public library API), so a report rendered
  * here is byte-identical to the one a full `flaught review` prints.
  */
-function runReport(argPath: string | undefined, opts: { from?: string }): void {
+function runReport(argPath: string | undefined, opts: { from?: string; hideDismissed?: boolean }): void {
   const artifactPath = opts.from ?? argPath;
   if (!artifactPath) {
     console.error(
@@ -589,7 +594,7 @@ function runReport(argPath: string | undefined, opts: { from?: string }): void {
   // instead of a raw stack trace — well-formed artifacts come from
   // `flaught review --output` and never hit this path.
   try {
-    console.log(renderMarkdownReport(artifact));
+    console.log(renderMarkdownReport(artifact, { hideDismissed: opts.hideDismissed }));
   } catch (err) {
     const reason = err instanceof Error ? err.message : String(err);
     console.error(

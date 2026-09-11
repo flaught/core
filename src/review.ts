@@ -114,6 +114,10 @@ export interface ReviewOptions {
    * config. See `loadConfigFromRef`.
    */
   configFromBase?: boolean;
+  /** Omit dismissed findings from the markdown report (CLI --hide-dismissed
+   * overrides config.report.hide_dismissed). The JSON artifact keeps the full
+   * audit trail. #80 / core-uks. */
+  hideDismissed?: boolean;
   /** Progress callback for logging */
   onProgress?: ProgressCallback;
 }
@@ -490,7 +494,7 @@ export async function runReview(options: ReviewOptions = {}): Promise<ReviewResu
 
   // 9. Render reports
   progress("Rendering reports...");
-  const markdown = renderMarkdownReport(artifact);
+  const markdown = renderMarkdownReport(artifact, { hideDismissed: options.hideDismissed ?? config.report.hide_dismissed });
   const json = renderJsonArtifact(artifact);
 
   // 10. Determine exit code
@@ -816,6 +820,8 @@ export interface OnlyLlmOptions {
   repoPath?: string;
   /** Skip the skeptic/refute pass even if LLM review succeeds. */
   skipRefute?: boolean;
+  /** Omit dismissed findings from the markdown report (#80 / core-uks). */
+  hideDismissed?: boolean;
   onProgress?: ProgressCallback;
 }
 
@@ -955,7 +961,7 @@ export async function runReviewOnlyLlm(options: OnlyLlmOptions): Promise<ReviewR
 
   // 14. Render reports + exit code.
   progress("Rendering reports...");
-  const markdown = renderMarkdownReport(artifact);
+  const markdown = renderMarkdownReport(artifact, { hideDismissed: options.hideDismissed ?? config.report.hide_dismissed });
   const json = renderJsonArtifact(artifact);
   const exitCode = computeExitCode(artifact, config);
 

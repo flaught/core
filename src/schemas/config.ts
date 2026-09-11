@@ -227,6 +227,16 @@ const ExcludeSchema = z.object({
   patterns: z.array(z.string()).default([]),
 });
 
+// ─── Report rendering ───────────────────────────────────────────────────────
+
+const ReportSchema = z.object({
+  /** When true, the markdown report omits dismissed findings (rendering only
+   * active ones) and adds a "N dismissed not shown — see findings.json" note.
+   * The JSON artifact always carries the full audit trail. Default false
+   * (show everything). #80 / core-uks. */
+  hide_dismissed: z.boolean().default(false),
+});
+
 // ─── Full config ────────────────────────────────────────────────────────────
 
 export const FlaughtConfigSchema = z.object({
@@ -243,6 +253,7 @@ export const FlaughtConfigSchema = z.object({
   refute: RefuteSchema.default({}),
   prompt: PromptSchema.default({}),
   exclude: ExcludeSchema.default({}),
+  report: ReportSchema.default({}),
 });
 
 export type FlaughtConfig = z.infer<typeof FlaughtConfigSchema>;
