@@ -186,4 +186,32 @@ describe("runSemgrep no-silent-zero wiring (F-0001)", () => {
     expect(result.success).toBe(true);
     expect(result.findings).toEqual([]);
   });
+
+  // The early-return fault path: semgrep exits non-zero (crash/rule-load error)
+  // — handled BEFORE parsing, so a non-JSON stdout with non-zero exit must
+  // surface as a fault without attempting to parse. (F-0002 from PR #82 run 2.)
+  it("surfaces a non-zero exit as a tool fault without parsing stdout", async () => {
+    const fakeExec = async () => ({
+      success: false,
+      exitCode: 1,
+      stdout: "semgrep: rule load failed (not even reached)",
+      stderr: "Error: invalid rule",
+    });
+    const result = await runSemgrep(config, process.cwd(), fakeExec);
+    expect(result.success).toBe(false);
+    expect(result.findings).toEqual([]);
+    expect(result.exitCode).toBe(1);
+    expect(result.stderr).toContain("invalid rule");
+  });
+
+  // A thrown exec (e.g. timeout / spawn error) surfaces as a fault, not a crash
+  // and not a clean 0-finding scan.
+  it("surfaces a thrown exec as a tool fault (timeout/spawn error)", async () => {
+    const fakeExec = async () => { throw new Error("spawn EAGAIN"); };
+    const result = await runSemgrep(config, process.cwd(), fakeExec);
+    expect(result.success).toBe(false);
+    expect(result.findings).toEqual([]);
+    expect(result.exitCode).toBe(-1);
+    expect(result.stderr).toContain("spawn EAGAIN");
+  });
 });
