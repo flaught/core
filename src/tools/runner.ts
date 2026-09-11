@@ -264,12 +264,17 @@ function getSemgrepArgs(config: FlaughtConfig): string[] {
   return ["semgrep", "--config", "auto", "--json", "."];
 }
 
-async function runSemgrep(config: FlaughtConfig, repoPath: string): Promise<ToolResult> {
+export async function runSemgrep(
+  config: FlaughtConfig,
+  repoPath: string,
+  /** Injectable for tests; defaults to execCommandSafe. */
+  exec: (args: string[], cwd: string) => Promise<ExecResult> = execCommandSafe,
+): Promise<ToolResult> {
   const args = getSemgrepArgs(config);
   const startTime = Date.now();
 
   try {
-    const result = await execCommandSafe(args, repoPath);
+    const result = await exec(args, repoPath);
     const durationMs = Date.now() - startTime;
 
     // Semgrep exits 0 even with findings; non-zero means error

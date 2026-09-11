@@ -134,3 +134,56 @@ describe("parseSemgrepOutput", () => {
     expect(findings.map((f) => f.severity)).toEqual(["critical", "high", "info", "medium", "medium"]);
   });
 });
+import { runSemgrep } from "./runner.js";
+import { FlaughtConfigSchema } from "../schemas/config.js";
+
+// F-0001 from PR #82's own review: the runSemgrep parseError -> success:false
+// wiring (the no-silent-zero fix) must be exercised end-to-end, not just the
+// pure parser. runSemgrep takes an injectable exec so we can feed a non-JSON
+// stdout without spawning real semgrep.
+describe("runSemgrep no-silent-zero wiring (F-0001)", () => {
+  const config = FlaughtConfigSchema.parse({});
+
+  it("surfaces a non-JSON stdout as a tool fault (success:false, 0 findings), not a clean 0-finding scan", async () => {
+    const fakeExec = async () => ({
+      success: true,
+      exitCode: 0,
+      stdout: "Semgrep requires login to use this rule.\n{not valid json",
+      stderr: "",
+    });
+    const result = await runSemgrep(config, process.cwd(), fakeExec);
+
+    expect(result.success).toBe(false); // fault, not clean
+    expect(result.findings).toEqual([]); // 0 findings, but NOT reported as clean
+    expect(result.stderr).toContain("not valid JSON");
+  });
+
+  it("returns success:true with findings for valid JSON output", async () => {
+    const fakeExec = async () => ({
+      success: true,
+      exitCode: 0,
+      stdout: JSON.stringify({
+        results: [
+          {
+            check_id: "ts.eval",
+            path: "a.ts",
+            start: { line: 4 },
+            extra: { severity: "WARNING", message: "eval is dangerous", lines: "eval(x)" },
+          },
+        ],
+      }),
+      stderr: "",
+    });
+    const result = await runSemgrep(config, process.cwd(), fakeExec);
+    expect(result.success).toBe(true);
+    expect(result.findings).toHaveLength(1);
+    expect(result.findings[0]!.snippet).toBe("eval(x)"); // real lines, not gated
+  });
+
+  it("returns success:true with 0 findings for a genuinely clean scan (valid JSON, no results)", async () => {
+    const fakeExec = async () => ({ success: true, exitCode: 0, stdout: JSON.stringify({ results: [] }), stderr: "" });
+    const result = await runSemgrep(config, process.cwd(), fakeExec);
+    expect(result.success).toBe(true);
+    expect(result.findings).toEqual([]);
+  });
+});

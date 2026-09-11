@@ -31,7 +31,7 @@ export { runReview, type ReviewResult, type ReviewOptions, type ProgressCallback
 export { renderMarkdownReport } from "./report/markdown.js";
 export { renderSummaryReport, DEFAULT_SUMMARY_TOP, type SummaryReportOptions } from "./report/summary.js";
 export { renderJsonArtifact } from "./report/json.js";
-export { runDeterministicTools, formatToolFindingsForPrompt, parseSemgrepOutput, isGatedEnrichment, type ToolResult, type DeterministicFinding, type DeterministicToolsOptions } from "./tools/runner.js";
+export { runDeterministicTools, formatToolFindingsForPrompt, type ToolResult, type DeterministicFinding, type DeterministicToolsOptions } from "./tools/runner.js";
 export { runTestInversion } from "./test-inversion/runner.js";
 export { detectScopeCreepHeuristic, extractScopeCreepFromFindings, formatScopeCreepForPrompt } from "./scope-creep/detector.js";
 export { DismissalEntrySchema, DismissalStoreSchema, type DismissalEntry, type DismissalStore, DISMISSAL_STORE_VERSION } from "./schemas/dismissals.js";
