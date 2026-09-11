@@ -343,6 +343,8 @@ Flaught auto-detects which tools to run based on your repo contents:
 
 All tools degrade gracefully — if a tool isn't installed, Flaught skips it and continues. Findings from deterministic tools are tagged `source_type: "deterministic"` with confidence 1.0.
 
+**Semgrep is scoped to the PR's changed files.** Flaught runs `semgrep` against the diff's added/modified/renamed files (`git diff --name-only --diff-filter=AMRC <base>..<head>`), not the whole repository — so a PR doesn't re-detect the same historical findings in files it never touched. If the diff can't be computed, Flaught falls back to a whole-repo scan (`.`) and announces it. When the diff has no changed files, semgrep is skipped cleanly (not reported as a 0-finding clean scan). Set `tools.semgrep.config` to point at a local ruleset; note that `--config auto` pulls rules from the Semgrep registry (a SaaS), which has tightened toward requiring an account — see [Troubleshooting](troubleshooting.md) if you see `requires login` in findings.
+
 ### Dependency sanity
 
 For packages **added** in `package.json` (`dependencies`, `devDependencies`, `peerDependencies`, `optionalDependencies` — version bumps of existing names are ignored), Flaught queries the npm registry:

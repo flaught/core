@@ -168,19 +168,54 @@ export async function runDeterministicTools(
   }
 
   // ── Semgrep ──
+  // #79 (core-0vy): scope semgrep to the diff's changed files, not the whole
+  // repo ("."). Fall back to whole-repo only if the diff can't be computed.
+  // Never pass an empty target list — many CLIs interpret that as the whole
+  // working directory (the research flagged this), so skip cleanly when a
+  // scoped diff has zero changed files.
+  let semgrepTargets: string[] = ["."];
+  let semgrepScoped = false;
+  try {
+    const { stdout: changed } = await execFileAsync(
+      "git",
+      ["diff", "--name-only", "--diff-filter=AMRC", baseRef, headRef],
+      { cwd: repoPath, maxBuffer: 10 * 1024 * 1024 },
+    );
+    semgrepTargets = changed.split(/\r?\n/).filter(Boolean);
+    semgrepScoped = true;
+  } catch {
+    progress("    semgrep: could not compute changed files; falling back to whole-repo scan");
+  }
+
   if (config.tools.semgrep.enabled) {
     progress("  Running semgrep...");
-    const result = await runSemgrep(config, repoPath);
-    results.push(result);
-    executions.push({
-      tool: "semgrep",
-      version: result.success ? await getToolVersion("semgrep") : "unknown",
-      exit_code: result.exitCode,
-      raw_findings_count: result.findings.length,
-      command: result.success ? getSemgrepArgs(config).join(" ") : "(failed)",
-    });
-    allFindings.push(...result.findings);
-    progress(`    semgrep: ${result.findings.length} findings (${result.durationMs}ms)`);
+    if (semgrepScoped && semgrepTargets.length === 0) {
+      // Nothing in the diff to scan — skip cleanly (not a fault, not a clean 0).
+      const skipped: ToolResult = {
+        tool: "semgrep", success: true, stdout: "", stderr: "",
+        exitCode: 0, findings: [], durationMs: 0,
+      };
+      results.push(skipped);
+      executions.push({
+        tool: "semgrep",
+        version: await getToolVersion("semgrep"),
+        exit_code: 0, raw_findings_count: 0,
+        command: "(skipped: no changed files in the diff)",
+      });
+      progress("    semgrep: skipped (no changed files in the diff)");
+    } else {
+      const result = await runSemgrep(config, repoPath, semgrepTargets);
+      results.push(result);
+      executions.push({
+        tool: "semgrep",
+        version: result.success ? await getToolVersion("semgrep") : "unknown",
+        exit_code: result.exitCode,
+        raw_findings_count: result.findings.length,
+        command: result.success ? semgrepCommandSummary(config, semgrepTargets, semgrepScoped) : "(failed)",
+      });
+      allFindings.push(...result.findings);
+      progress(`    semgrep: ${result.findings.length} findings (${result.durationMs}ms)`);
+    }
   }
 
   // ── Linter ──
@@ -255,22 +290,41 @@ export async function runDeterministicTools(
 
 // ── Semgrep ──────────────────────────────────────────────────────────────────
 
-function getSemgrepArgs(config: FlaughtConfig): string[] {
+export function getSemgrepArgs(config: FlaughtConfig, targets: string[]): string[] {
   // SECURITY: Uses argument array (not shell interpolation) to prevent
   // command injection through config.tools.semgrep.config.
-  if (config.tools.semgrep.config) {
-    return ["semgrep", "--config", config.tools.semgrep.config, "--json", "."];
-  }
-  return ["semgrep", "--config", "auto", "--json", "."];
+  // #79 (core-0vy): scan only the diff's changed files, not the whole repo.
+  // The `--` separator protects filenames that start with `-` from being read
+  // as flags. Caller ensures targets is non-empty (a whole-repo fallback uses
+  // ["."]).
+  const base = config.tools.semgrep.config
+    ? ["semgrep", "--config", config.tools.semgrep.config, "--json"]
+    : ["semgrep", "--config", "auto", "--json"];
+  return [...base, "--", ...targets];
+}
+
+/** A concise, stable summary of the semgrep invocation for the artifact's
+ * `command` field — the full per-file list is noisy and large, so record the
+ * base args + the target count (or `.` for a whole-repo fallback). */
+export function semgrepCommandSummary(config: FlaughtConfig, targets: string[], scoped: boolean): string {
+  const base = config.tools.semgrep.config
+    ? `semgrep --config ${config.tools.semgrep.config} --json`
+    : `semgrep --config auto --json`;
+  if (!scoped) return `${base} -- .`;
+  return `${base} -- <${targets.length} changed file${targets.length === 1 ? "" : "s"}>`;
 }
 
 export async function runSemgrep(
   config: FlaughtConfig,
   repoPath: string,
+  /** Files to scan (#79): the diff's changed files, or ["."] for a whole-repo
+   * fallback when the diff can't be computed. Never empty — caller skips when
+   * a scoped diff has zero changed files. */
+  targets: string[],
   /** Injectable for tests; defaults to execCommandSafe. */
   exec: (args: string[], cwd: string) => Promise<ExecResult> = execCommandSafe,
 ): Promise<ToolResult> {
-  const args = getSemgrepArgs(config);
+  const args = getSemgrepArgs(config, targets);
   const startTime = Date.now();
 
   try {
