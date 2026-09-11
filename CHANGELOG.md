@@ -5,7 +5,9 @@ All notable changes to **@flaught/core** are documented here. The format is base
 [Semantic Versioning](https://semver.org/). For 0.x releases, a backwards-compatible
 feature bumps the minor version and a fix bumps the patch.
 
-## [Unreleased]
+## [0.12.1] - 2026-09-11
+
+Two semgrep correctness/honesty fixes since `0.12.0`. No findings-schema or public-API change.
 
 ### Fixed
 
