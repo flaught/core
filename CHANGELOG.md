@@ -5,6 +5,14 @@ All notable changes to **@flaught/core** are documented here. The format is base
 [Semantic Versioning](https://semver.org/). For 0.x releases, a backwards-compatible
 feature bumps the minor version and a fix bumps the patch.
 
+## [Unreleased]
+
+### Fixed
+
+- **semgrep: stop rendering the gated `extra.lines` "requires login" sentinel as a finding's code snippet** (#81, core-a73) — semgrep CE gates the `extra.lines` enrichment field (the code snippet) behind an account and returns the literal string `"requires login"` as its value. Flaught's parser preferred `extra.lines` over the CE-available `extra.message`, so the report displayed `"requires login"` as if it were the finding's code — misleading, and (for policy-preference rules mapped to high severity) capable of looking like a real gate-tripping finding. The parser now prefers `extra.message` (the rule's real message, CE-available) whenever `extra.lines` is gated/absent, and never renders the account sentinel as evidence. The finding itself is preserved (it was a real match; only the snippet field was gated).
+
+- **semgrep: a non-JSON stdout is now a tool fault, not a silent zero** (#81, core-a73) — `parseSemgrepOutput` previously caught JSON-parse failures and returned `[]`, so account/login noise polluting semgrep stdout silently reported a clean 0-finding scan. It now returns a `parseError`; `runSemgrep` surfaces it as a tool fault (`command: "(failed)"` → the report's "did not complete cleanly" warning), and the gate fails open (a tool fault is not a verdict, matching the `dependency_sanity` fail-open principle). A genuinely clean scan (valid JSON, zero results) is unchanged. The "did not complete cleanly" report message was broadened to cover both failure modes (tool not found/crashed AND output unparseable), since the prior wording ("not run — is it installed and on `PATH`?") was wrong for a parse fault.
+
 ## [0.12.0] - 2026-09-10
 
 One backwards-compatible feature and one gate-logic fix since `0.11.0`. No findings-schema change (still v4). ⚠️ **Behavior change for all consumers:** the gate fix means a finding the skeptic refuted no longer blocks merge where it previously did — a defect fix (a finding determined false should never have gated), not a policy change.

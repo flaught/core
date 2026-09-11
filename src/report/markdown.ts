@@ -142,8 +142,8 @@ function renderToolsWarning(artifact: FindingsArtifact): string | null {
   if (failed.length === 0) return null;
 
   const lines = [
-    `> ⚠️ **${failed.length} deterministic tool(s) did not run** — their findings below are 0 because the tool itself failed to execute (not found, crashed, or timed out), not because the scan came back clean:`,
-    ...failed.map((t) => `> - \`${t.tool}\` — not run (is it installed and on \`PATH\`?)`),
+    `> ⚠️ **${failed.length} deterministic tool(s) did not complete cleanly** — their findings below are 0 because the tool failed to execute (not found, crashed, or timed out) OR its output could not be parsed (e.g. an account/login prompt polluting stdout, a version change) — not because the scan came back clean:`,
+    ...failed.map((t) => `> - \`${t.tool}\` — did not complete cleanly. See the workflow logs for the raw output; a 0 here is not evidence of a clean scan.`),
   ];
   return lines.join("\n");
 }
