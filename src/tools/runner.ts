@@ -264,12 +264,17 @@ function getSemgrepArgs(config: FlaughtConfig): string[] {
   return ["semgrep", "--config", "auto", "--json", "."];
 }
 
-async function runSemgrep(config: FlaughtConfig, repoPath: string): Promise<ToolResult> {
+export async function runSemgrep(
+  config: FlaughtConfig,
+  repoPath: string,
+  /** Injectable for tests; defaults to execCommandSafe. */
+  exec: (args: string[], cwd: string) => Promise<ExecResult> = execCommandSafe,
+): Promise<ToolResult> {
   const args = getSemgrepArgs(config);
   const startTime = Date.now();
 
   try {
-    const result = await execCommandSafe(args, repoPath);
+    const result = await exec(args, repoPath);
     const durationMs = Date.now() - startTime;
 
     // Semgrep exits 0 even with findings; non-zero means error
@@ -285,8 +290,24 @@ async function runSemgrep(config: FlaughtConfig, repoPath: string): Promise<Tool
       };
     }
 
-    // Parse JSON output
-    const findings = parseSemgrepOutput(result.stdout);
+    // Parse JSON output. A silent zero is not a clean scan: if semgrep's stdout
+    // isn't valid JSON (account/login noise polluting stdout, a version change,
+    // a truncated buffer), surface a tool fault rather than reporting 0
+    // findings. The execution then records command "(failed)" so the markdown
+    // report flags it via renderToolsWarning; the gate fails open (a tool fault
+    // is not a verdict), matching the dependency_sanity fail-open principle.
+    const { findings, parseError } = parseSemgrepOutput(result.stdout);
+    if (parseError) {
+      return {
+        tool: "semgrep",
+        success: false,
+        stdout: result.stdout,
+        stderr: result.stderr ? `${result.stderr}\n${parseError}` : parseError,
+        exitCode: result.exitCode,
+        findings: [],
+        durationMs,
+      };
+    }
     return {
       tool: "semgrep",
       success: true,
@@ -309,39 +330,85 @@ async function runSemgrep(config: FlaughtConfig, repoPath: string): Promise<Tool
   }
 }
 
-function parseSemgrepOutput(stdout: string): DeterministicFinding[] {
-  try {
-    const data = JSON.parse(stdout);
-    const results: DeterministicFinding[] = [];
-
-    for (const result of data.results ?? []) {
-      results.push({
-        title: result.check_id ?? result.rule_id ?? "semgrep-finding",
-        severity: mapSemgrepSeverity(result.extra?.severity),
-        category: mapSemgrepCategory(result.check_id ?? result.rule_id ?? ""),
-        file: result.path ?? "",
-        line: result.start?.line ?? 0,
-        snippet: result.extra?.lines ?? (result.extra?.message ?? ""),
-        source: "semgrep",
-        ruleId: result.check_id ?? result.rule_id ?? "unknown",
-        reference: result.extra?.metadata?.references?.[0] ?? undefined,
-      });
-    }
-
-    return results;
-  } catch {
-    // Not JSON or malformed — no findings
-    return [];
-  }
+export interface ParsedSemgrepOutput {
+  findings: DeterministicFinding[];
+  /** Non-null when stdout was not valid JSON (a tool fault, NOT a clean 0-finding scan). */
+  parseError: string | null;
 }
 
-function mapSemgrepSeverity(severity: string): string {
+/**
+ * Detect a semgrep CE gated-enrichment sentinel. semgrep CE gates some JSON
+ * enrichment fields (extra.lines, fingerprint, metavars) behind an account and
+ * returns the literal "requires login" as the field value. Never render that
+ * sentinel as code or treat it as evidence — it is an account prompt, not a
+ * finding's content.
+ */
+export function isGatedEnrichment(value: string | undefined | null): boolean {
+  if (!value) return false;
+  const v = value.trim().toLowerCase();
+  return v === "requires login" || v === "requires authentication" || v.startsWith("requires login");
+}
+
+export function parseSemgrepOutput(stdout: string): ParsedSemgrepOutput {
+  let data: { results?: unknown[] };
+  try {
+    data = JSON.parse(stdout);
+  } catch (err) {
+    return {
+      findings: [],
+      parseError: `semgrep stdout was not valid JSON (${err instanceof Error ? err.message : String(err)}) — scan did not complete cleanly; not a clean 0-finding result`,
+    };
+  }
+
+  const findings: DeterministicFinding[] = [];
+  for (const raw of data.results ?? []) {
+    const result = raw as {
+      check_id?: string;
+      rule_id?: string;
+      path?: string;
+      start?: { line?: number };
+      extra?: {
+        severity?: string;
+        message?: string;
+        lines?: string;
+        metadata?: { references?: string[] };
+      };
+    };
+
+    // `extra.lines` (the code snippet) is gated behind an account in semgrep
+    // CE and returns the literal sentinel "requires login" when unavailable —
+    // never show that as if it were code. `extra.message` (the rule's
+    // human-readable message) is available in CE, so prefer it as the snippet
+    // when lines is gated/absent. (Reconstructing the snippet from source is a
+    // future scanner-agnostic improvement; this stops the misleading display.)
+    const lines = result.extra?.lines;
+    const snippet = isGatedEnrichment(lines) || !lines
+      ? (result.extra?.message ?? "")
+      : lines;
+
+    findings.push({
+      title: result.check_id ?? result.rule_id ?? "semgrep-finding",
+      severity: mapSemgrepSeverity(result.extra?.severity),
+      category: mapSemgrepCategory(result.check_id ?? result.rule_id ?? ""),
+      file: result.path ?? "",
+      line: result.start?.line ?? 0,
+      snippet,
+      source: "semgrep",
+      ruleId: result.check_id ?? result.rule_id ?? "unknown",
+      reference: result.extra?.metadata?.references?.[0] ?? undefined,
+    });
+  }
+
+  return { findings, parseError: null };
+}
+
+function mapSemgrepSeverity(severity: string | undefined): string {
   const map: Record<string, string> = {
     ERROR: "critical",
     WARNING: "high",
     INFO: "info",
   };
-  return map[severity] ?? "medium";
+  return map[severity ?? ""] ?? "medium";
 }
 
 function mapSemgrepCategory(ruleId: string): string {

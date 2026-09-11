@@ -267,7 +267,6 @@ describe("renderMarkdownReport", () => {
       ],
     });
     const md = renderMarkdownReport(artifact);
-    expect(md).toContain("did not run");
     expect(md).toContain("`semgrep`");
     expect(md).toContain("not because the scan came back clean");
   });
@@ -279,13 +278,13 @@ describe("renderMarkdownReport", () => {
       ],
     });
     const md = renderMarkdownReport(artifact);
-    expect(md).not.toContain("did not run");
+    expect(md).not.toContain("not because the scan came back clean");
   });
 
   it("omits the tools warning entirely when tools_executed is empty", () => {
     const artifact = makeArtifact({ tools_executed: [] });
     const md = renderMarkdownReport(artifact);
-    expect(md).not.toContain("did not run");
+    expect(md).not.toContain("not because the scan came back clean");
   });
 
   it("doesn't throw when tools_executed is missing (public-API callers may pass an unvalidated artifact)", () => {
@@ -295,7 +294,7 @@ describe("renderMarkdownReport", () => {
     // runtime (e.g. an older findings.json, or a hand-built object).
     delete (artifact as { tools_executed?: unknown }).tools_executed;
     expect(() => renderMarkdownReport(artifact)).not.toThrow();
-    expect(renderMarkdownReport(artifact)).not.toContain("did not run");
+    expect(renderMarkdownReport(artifact)).not.toContain("not because the scan came back clean");
   });
 
   it("doesn't throw when tools_executed is a malformed non-array value", () => {
@@ -306,7 +305,7 @@ describe("renderMarkdownReport", () => {
       const artifact = makeArtifact();
       (artifact as { tools_executed?: unknown }).tools_executed = bad;
       expect(() => renderMarkdownReport(artifact)).not.toThrow();
-      expect(renderMarkdownReport(artifact)).not.toContain("did not run");
+      expect(renderMarkdownReport(artifact)).not.toContain("not because the scan came back clean");
     }
   });
 
@@ -318,7 +317,7 @@ describe("renderMarkdownReport", () => {
       ],
     });
     const md = renderMarkdownReport(artifact);
-    expect(md).toContain("2 deterministic tool(s) did not run");
+    expect(md).toContain("2 deterministic tool(s)");
     expect(md).toContain("`semgrep`");
     expect(md).toContain("`linter`");
   });
