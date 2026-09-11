@@ -8,7 +8,7 @@
  * - Dismissed findings are shown struck-through with dismissal reason
  */
 
-import type { FindingsArtifact, Finding, Severity } from "../schemas/findings.js";
+import type { FindingsArtifact, Finding, Severity, SourceType } from "../schemas/findings.js";
 import { CAVEAT, FINDING_ID_CAVEAT } from "../schemas/findings.js";
 import { formatTokenUsage } from "./usage.js";
 
@@ -30,52 +30,103 @@ const SEVERITY_LABEL: Record<Severity, string> = {
   info: "INFO",
 };
 
-export function renderMarkdownReport(artifact: FindingsArtifact): string {
+export function renderMarkdownReport(artifact: FindingsArtifact, opts?: { hideDismissed?: boolean }): string {
+  const hideDismissed = opts?.hideDismissed ?? false;
+  const dismissedCount = artifact.summary.dismissed_count;
+  // When hiding, render from a "display view" recomputed from undismissed
+  // findings only, so the summary table, noise-budget counts, severity
+  // sections, and skeptic breakdown all agree (the JSON artifact keeps the
+  // full audit trail). #80 / core-uks.
+  const view = hideDismissed && dismissedCount > 0 ? buildUndismissedView(artifact) : artifact;
   const sections: string[] = [];
 
   // Header
-  sections.push(renderHeader(artifact));
+  sections.push(renderHeader(view));
 
   // Caveat
   sections.push(renderCaveat());
 
   // Analysis-completeness warning (LLM saw less than the whole change)
-  const completenessWarning = renderCompletenessWarning(artifact);
+  const completenessWarning = renderCompletenessWarning(view);
   if (completenessWarning) sections.push(completenessWarning);
 
   // Summary
-  sections.push(renderSummary(artifact));
+  sections.push(renderSummary(view));
+
+  // Dismissed-not-shown note (only when hiding and there are dismissed findings)
+  if (hideDismissed && dismissedCount > 0) {
+    sections.push(`> 📝 ${dismissedCount} dismissed finding${dismissedCount === 1 ? "" : "s"} not shown in this report — see the \`findings.json\` artifact for the full audit trail.`);
+  }
 
   // LLM review failure warning (deterministic findings below are real,
   // but no adversarial/skeptic pass ran — this is not evidence of a clean PR)
-  const llmErrorWarning = renderLlmErrorWarning(artifact);
+  const llmErrorWarning = renderLlmErrorWarning(view);
   if (llmErrorWarning) sections.push(llmErrorWarning);
 
   // Tool execution warnings (a tool that didn't run is not the same as a
   // tool that ran clean — both report 0 findings for that tool otherwise)
-  const toolsWarning = renderToolsWarning(artifact);
+  const toolsWarning = renderToolsWarning(view);
   if (toolsWarning) sections.push(toolsWarning);
 
   // Findings by severity
   for (const severity of SEVERITY_ORDER) {
-    const findings = artifact.findings.filter((f) => f.severity === severity);
+    const findings = view.findings.filter((f) => f.severity === severity);
     if (findings.length === 0) continue;
 
-    const budget = artifact.noise_budget[severity];
+    const budget = view.noise_budget[severity];
     const collapsed = severity === "info" || severity === "low";
 
     sections.push(renderSeveritySection(severity, findings, budget.used, budget.limit, collapsed));
   }
 
-  // No findings
-  if (artifact.findings.length === 0) {
-    sections.push("\n✅ **No findings.** The adversarial review found no issues worth flagging at the configured noise budget.");
+  // No findings / no active findings
+  if (view.findings.length === 0) {
+    if (dismissedCount > 0) {
+      sections.push(`\n✅ **No active findings** — every finding was dismissed (see the note above and the \`findings.json\` artifact).`);
+    } else {
+      sections.push("\n✅ **No findings.** The adversarial review found no issues worth flagging at the configured noise budget.");
+    }
   }
 
   // Footer
-  sections.push(renderFooter(artifact));
+  sections.push(renderFooter(view));
 
   return sections.join("\n\n");
+}
+
+/**
+ * Build a display view of the artifact containing only undismissed findings,
+ * with summary counts and noise-budget `used` values recomputed so the report
+ * is internally consistent when dismissed findings are hidden. The original
+ * artifact (full audit trail) is unchanged. #80 / core-uks.
+ */
+function buildUndismissedView(artifact: FindingsArtifact): FindingsArtifact {
+  const displayed = artifact.findings.filter((f) => !f.dismissed);
+  const by_severity: Record<Severity, number> = { critical: 0, high: 0, medium: 0, low: 0, info: 0 };
+  const by_source_type: Record<SourceType, number> = { deterministic: 0, llm: 0 };
+  const by_category: Record<string, number> = {};
+  for (const f of displayed) {
+    by_severity[f.severity] = (by_severity[f.severity] ?? 0) + 1;
+    by_source_type[f.source_type] = (by_source_type[f.source_type] ?? 0) + 1;
+    by_category[f.category] = (by_category[f.category] ?? 0) + 1;
+  }
+  const noise_budget = { ...artifact.noise_budget };
+  for (const sev of SEVERITY_ORDER) {
+    noise_budget[sev] = { ...noise_budget[sev], used: by_severity[sev] };
+  }
+  return {
+    ...artifact,
+    findings: displayed,
+    noise_budget,
+    summary: {
+      ...artifact.summary,
+      total_findings: displayed.length,
+      by_severity,
+      by_source_type: by_source_type as FindingsArtifact["summary"]["by_source_type"],
+      by_category: by_category as FindingsArtifact["summary"]["by_category"],
+      dismissed_count: 0,
+    },
+  };
 }
 
 function renderHeader(_artifact: FindingsArtifact): string {

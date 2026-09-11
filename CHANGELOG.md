@@ -7,7 +7,12 @@ feature bumps the minor version and a fix bumps the patch.
 
 ## [Unreleased]
 
+### Added
+
+- **Option to hide dismissed findings from the rendered report** (#80, core-uks) — the markdown report unconditionally listed every finding, dismissed or not (struck-through with the dismissal note), padding every PR comment with the same historical dismissed findings on repos with a large, actively-maintained dismissal store. New `report.hide_dismissed` config (default `false`) and `--hide-dismissed` CLI flag on `flaught review` and `flaught report` omit dismissed findings from the report, add a one-line note ("N dismissed findings not shown — see `findings.json`"), and recompute the summary/noise-budget counts so the report is internally consistent. The JSON artifact always carries the full audit trail. `flaught review --summary` already showed only active findings. `renderMarkdownReport` gains an optional `{ hideDismissed?: boolean }` argument (backward-compatible).
+
 ### Fixed
+
 
 - **semgrep now scans only the PR's changed files, not the whole repository** (#79, core-0vy) — `semgrep` was invoked as `semgrep --config auto --json .`, scanning the entire repo every run. Since semgrep is stateless (no memory of dismissals), every PR re-detected the same historical findings in files that PR never touched — on a frontend-only PR, 20 semgrep findings in unrelated backend/migration files, all already dismissed weeks earlier. Flaught now scopes semgrep to the diff's added/modified/renamed files (`git diff --name-only --diff-filter=AMRC <base>..<head>`); when the diff has no changed files, semgrep is skipped cleanly (not reported as a 0-finding clean scan); if the diff can't be computed, it falls back to a whole-repo scan and announces it. This is the deterministic-tools analog of #76 (the LLM re-reviews the whole PR diff), and — unlike #76 — it's a self-contained fix: the changed-file list was already computed for test-weakening, just not passed to semgrep.
 

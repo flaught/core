@@ -197,3 +197,58 @@ describe("flaught report", () => {
     expect(stdout.join("\n")).toContain(FINDING_ID_CAVEAT);
   });
 });
+  it("--hide-dismissed omits dismissed findings from the rendered report and shows the note", async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "flaught-cli-report-"));
+    tempDirs.push(dir);
+    const artifactPath = path.join(dir, "findings.json");
+
+    const active = makeFinding({ id: "F-0001", title: "Active SQL injection" });
+    const dismissed = makeFinding({
+      id: "F-0002", title: "Already-fixed dependency advisory",
+      dismissed: true, dismissed_by: "alice", dismissed_at: "2026-09-11T09:00:00Z",
+      dismissal_reason: "Pre-existing, unrelated to this PR",
+    });
+    const base = makeArtifact();
+    const artifact = {
+      ...base,
+      findings: [active, dismissed],
+      summary: {
+        ...base.summary,
+        total_findings: 2,
+        by_severity: { critical: 0, high: 2, medium: 0, low: 0, info: 0 },
+        dismissed_count: 1,
+      },
+    };
+    fs.writeFileSync(artifactPath, JSON.stringify(artifact), "utf-8");
+
+    const { stdout } = await runReportCli(["--from", artifactPath, "--hide-dismissed"]);
+    const out = stdout.join("\n");
+    expect(out).toContain("Active SQL injection");
+    expect(out).not.toContain("Already-fixed dependency advisory");
+    expect(out).not.toContain("DISMISSED");
+    expect(out).toContain("1 dismissed finding not shown in this report");
+  });
+
+  it("without --hide-dismissed, dismissed findings are shown (audit-trail default)", async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "flaught-cli-report-"));
+    tempDirs.push(dir);
+    const artifactPath = path.join(dir, "findings.json");
+    const dismissed = makeFinding({
+      id: "F-0002", title: "Already-fixed dependency advisory",
+      dismissed: true, dismissed_by: "alice", dismissed_at: "2026-09-11T09:00:00Z",
+      dismissal_reason: "Pre-existing",
+    });
+    const base = makeArtifact();
+    const artifact = {
+      ...base,
+      findings: [dismissed],
+      summary: { ...base.summary, total_findings: 1, by_severity: { critical: 0, high: 1, medium: 0, low: 0, info: 0 }, dismissed_count: 1 },
+    };
+    fs.writeFileSync(artifactPath, JSON.stringify(artifact), "utf-8");
+
+    const { stdout } = await runReportCli(["--from", artifactPath]);
+    const out = stdout.join("\n");
+    expect(out).toContain("Already-fixed dependency advisory");
+    expect(out).toContain("DISMISSED");
+    expect(out).not.toContain("not shown in this report");
+  });
