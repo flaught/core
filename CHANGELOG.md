@@ -5,7 +5,9 @@ All notable changes to **@flaught/core** are documented here. The format is base
 [Semantic Versioning](https://semver.org/). For 0.x releases, a backwards-compatible
 feature bumps the minor version and a fix bumps the patch.
 
-## [Unreleased]
+## [0.13.0] - 2026-09-11
+
+A report feature and a semgrep scoping fix since `0.12.1`. No findings-schema change. New `report` config section (`hide_dismissed`).
 
 ### Added
 
