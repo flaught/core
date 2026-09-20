@@ -230,8 +230,12 @@ function renderSummary(artifact: FindingsArtifact): string {
   const confirmed = artifact.findings.filter((f) => f.refute_result?.verdict === "confirmed").length;
   const refuted = artifact.findings.filter((f) => f.refute_result?.verdict === "refuted").length;
   const uncertain = artifact.findings.filter((f) => f.refute_result?.verdict === "uncertain").length;
-  if (confirmed + refuted + uncertain > 0) {
-    refuteLines.push(`🔍 Skeptic: ${confirmed} confirmed, ${refuted} refuted, ${uncertain} uncertain`);
+  const notEvaluated = artifact.findings.filter((f) => f.refute_result?.verdict === "not_evaluated").length;
+  if (confirmed + refuted + uncertain + notEvaluated > 0) {
+    const base = `🔍 Skeptic: ${confirmed} confirmed, ${refuted} refuted, ${uncertain} uncertain`;
+    // Distinguish "skeptic couldn't decide" from "skeptic never saw it"
+    // (issue #88) — the latter means the refute pass was incomplete.
+    refuteLines.push(notEvaluated > 0 ? `${base}, ${notEvaluated} NOT EVALUATED (incomplete skeptic coverage)` : base);
   }
 
   // Token usage (null when the LLM pass did not run — nothing to render)
@@ -306,6 +310,7 @@ function renderFinding(f: Finding): string {
       confirmed: "✅",
       refuted: "❌",
       uncertain: "❓",
+      not_evaluated: "⏭️",
     };
     const emoji = verdictEmoji[f.refute_result.verdict] ?? "";
     const verdictLabel = f.refute_result.verdict.charAt(0).toUpperCase() + f.refute_result.verdict.slice(1);

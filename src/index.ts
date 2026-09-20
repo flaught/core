@@ -48,4 +48,4 @@ export {
 } from "./dismissals/store.js";
 export { applyDismissals, type ApplyDismissalsResult } from "./dismissals/apply.js";
 export { runRefutePass, type RunRefuteResult, type RefuteProgressCallback } from "./refute/runner.js";
-export { REFUTE_SYSTEM_PROMPT, buildRefuteUserPrompt, parseRefuteResponse, type RefuteEvaluation, type RefuteResponse } from "./refute/prompt.js";
+export { REFUTE_SYSTEM_PROMPT, buildRefuteUserPrompt, parseRefuteResponse, type RefuteEvaluation, type RefuteParseResult } from "./refute/prompt.js";

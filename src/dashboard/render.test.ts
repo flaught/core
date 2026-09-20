@@ -12,7 +12,7 @@ function makePoint(overrides: Partial<TrendPoint> = {}): TrendPoint {
     total_findings: 3,
     by_severity: { critical: 1, high: 1, medium: 1, low: 0, info: 0 },
     by_source_type: { llm: 2, deterministic: 1 },
-    refute: { confirmed: 1, refuted: 1, uncertain: 0 },
+    refute: { confirmed: 1, refuted: 1, uncertain: 0, not_evaluated: 0 },
     dismissed_count: 0,
     llm_error: false,
     usage: null,

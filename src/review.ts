@@ -27,6 +27,7 @@ import {
   type AnalysisCompleteness,
   type TokenUsage,
   type TokenUsageSummary,
+  type SkepticStatus,
   SCHEMA_VERSION,
   FINDINGS_SCHEMA_URL,
   CAVEAT,
@@ -220,6 +221,7 @@ export async function runReview(options: ReviewOptions = {}): Promise<ReviewResu
   let findings: Finding[] = [];
   let droppedBelowMinConfidence = 0;
   let refuteUsage: TokenUsage | null = null;
+  let skepticStatus: SkepticStatus | null = null;
 
   // Convert deterministic findings to Finding format
   for (const df of deterministicFindings) {
@@ -317,6 +319,7 @@ export async function runReview(options: ReviewOptions = {}): Promise<ReviewResu
     analysisCompleteness = llmStage.completeness;
     droppedBelowMinConfidence = llmStage.droppedBelowMinConfidence;
     refuteUsage = llmStage.refuteUsage;
+    skepticStatus = llmStage.skepticStatus;
     findings.push(...llmStage.llmFindings);
   }
 
@@ -492,6 +495,12 @@ export async function runReview(options: ReviewOptions = {}): Promise<ReviewResu
   // LLM pass did not run (--no-llm) or the provider returned no usage.
   artifact.run.usage = buildUsageSummary(llmResult?.usage, refuteUsage);
 
+  // Record skeptic-pass diagnostics (issue #88): incomplete coverage must be
+  // visible at the run level, not just as per-finding not_evaluated verdicts.
+  if (skepticStatus) {
+    artifact.run.skeptic = skepticStatus;
+  }
+
   // 9. Render reports
   progress("Rendering reports...");
   const markdown = renderMarkdownReport(artifact, { hideDismissed: options.hideDismissed ?? config.report.hide_dismissed });
@@ -550,6 +559,8 @@ export interface LlmStageResult {
   droppedBelowMinConfidence: number;
   /** Token usage from the skeptic/refute pass, or null when the pass was skipped/disabled/failed or returned no usage. */
   refuteUsage: TokenUsage | null;
+  /** Skeptic coverage/validation diagnostics (issue #88), or null when the refute pass did not run. */
+  skepticStatus: SkepticStatus | null;
 }
 
 /**
@@ -633,6 +644,7 @@ export async function runLlmStage(input: LlmStageInput): Promise<LlmStageResult>
   let llmFindings: Finding[] = [];
   let droppedBelowMinConfidence = 0;
   let refuteUsage: TokenUsage | null = null;
+  let skepticStatus: SkepticStatus | null = null;
 
   // ── LLM review ──
   // If the LLM call fails, we gracefully degrade: return no LLM findings;
@@ -684,6 +696,7 @@ export async function runLlmStage(input: LlmStageInput): Promise<LlmStageResult>
         prDescription,
       );
       llmFindings = refuteResult.findings.filter((f) => f.source_type === "llm");
+      skepticStatus = refuteResult.skeptic;
       progress(`  Refute model: ${refuteResult.model}`);
       if (refuteResult.usage) {
         refuteUsage = refuteResult.usage;
@@ -701,7 +714,7 @@ export async function runLlmStage(input: LlmStageInput): Promise<LlmStageResult>
     progress("No LLM findings to refute — skipping skeptic pass.");
   }
 
-  return { llmFindings, llmResult, llmError, completeness, droppedBelowMinConfidence, refuteUsage };
+  return { llmFindings, llmResult, llmError, completeness, droppedBelowMinConfidence, refuteUsage, skepticStatus };
 }
 
 // ─── Review bundle (context artifact for the fork-PR split) ──────────────────
@@ -958,6 +971,9 @@ export async function runReviewOnlyLlm(options: OnlyLlmOptions): Promise<ReviewR
     artifact.run.llm_error = llmStage.llmError;
   }
   artifact.run.usage = buildUsageSummary(llmStage.llmResult?.usage, llmStage.refuteUsage);
+  if (llmStage.skepticStatus) {
+    artifact.run.skeptic = llmStage.skepticStatus;
+  }
 
   // 14. Render reports + exit code.
   progress("Rendering reports...");
@@ -1162,7 +1178,9 @@ export function isDocsOnlyDiff(changedFiles: ChangedFile[]): boolean {
  * refuted finding block merge makes the skeptic cosmetic for gating (it would
  * filter the report display but not the verdict). 'confirmed' and 'uncertain'
  * still gate; 'uncertain' is treated as potentially real (conservative — the
- * skeptic couldn't determine, so don't assume it's safe). Dismissed findings
+ * skeptic couldn't determine, so don't assume it's safe), and
+ * 'not_evaluated' gates too (issue #88: a skeptic response that omitted the
+ * finding is not evidence either way). Dismissed findings
  * are excluded as before (they're a human-recorded disposition, not noise).
  */
 export function gateTripped(

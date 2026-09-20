@@ -86,7 +86,9 @@ function buildInlineCommentBody(finding: Finding): string {
       ? "✅"
       : finding.refute_result.verdict === "refuted"
         ? "❌"
-        : "❓";
+        : finding.refute_result.verdict === "not_evaluated"
+          ? "⏭️"
+          : "❓";
     lines.push("");
     lines.push(`${verdictEmoji} Skeptic: ${finding.refute_result.verdict}${finding.refute_result.reasoning ? ` — ${finding.refute_result.reasoning}` : ""}`);
   }
@@ -378,9 +380,11 @@ export function buildInlineSummaryHeader(artifact: FindingsArtifact): string {
   const confirmed = artifact.findings.filter((f) => f.refute_result?.verdict === "confirmed").length;
   const refuted = artifact.findings.filter((f) => f.refute_result?.verdict === "refuted").length;
   const uncertain = artifact.findings.filter((f) => f.refute_result?.verdict === "uncertain").length;
-  if (confirmed + refuted + uncertain > 0) {
+  const notEvaluated = artifact.findings.filter((f) => f.refute_result?.verdict === "not_evaluated").length;
+  if (confirmed + refuted + uncertain + notEvaluated > 0) {
     lines.push("");
-    lines.push(`🔍 Skeptic: ${confirmed} confirmed, ${refuted} refuted, ${uncertain} uncertain`);
+    const base = `🔍 Skeptic: ${confirmed} confirmed, ${refuted} refuted, ${uncertain} uncertain`;
+    lines.push(notEvaluated > 0 ? `${base}, ${notEvaluated} NOT EVALUATED (incomplete skeptic coverage)` : base);
   }
 
   // Token usage (null when the LLM pass did not run — nothing to render)

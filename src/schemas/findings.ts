@@ -27,15 +27,50 @@ export type SourceType = "deterministic" | "llm";
 
 // ─── Refute result ──────────────────────────────────────────────────────────
 
-export type RefuteVerdict = "confirmed" | "refuted" | "uncertain";
+/**
+ * `not_evaluated` is distinct from `uncertain` (issue #88): `uncertain` is an
+ * evidence-based skeptic verdict ("I looked and cannot decide"), while
+ * `not_evaluated` means the skeptic's response contained no usable evaluation
+ * for this finding at all (parse failure, missing/invalid ID, incomplete
+ * coverage). The two must never be conflated — a paid skeptic call is not
+ * evidence that every finding was evaluated.
+ */
+export type RefuteVerdict = "confirmed" | "refuted" | "uncertain" | "not_evaluated";
 
 export interface RefuteResult {
-  /** Whether the skeptic confirmed, refuted, or was uncertain about this finding */
+  /** Whether the skeptic confirmed, refuted, was uncertain about, or never evaluated this finding */
   verdict: RefuteVerdict;
   /** The skeptic's reasoning for the verdict */
   reasoning: string;
   /** Confidence after the refute pass. Same as original if confirmed; reduced if refuted/uncertain. */
   adjusted_confidence: number;
+}
+
+/**
+ * Per-run skeptic diagnostics (issue #88): was every finding sent to the
+ * skeptic actually evaluated? Recorded even when every individual finding
+ * carries a refute_result, because per-finding verdicts alone cannot
+ * distinguish "9 uncertain verdicts" from "0 of 9 evaluations returned".
+ */
+export interface SkepticStatus {
+  /** complete: all LLM findings evaluated; partial: some evaluated; failed: none could be evaluated (persistent parse/validation failure); not_run: skeptic pass did not run. */
+  state: "complete" | "partial" | "failed" | "not_run";
+  /** LLM findings sent to the skeptic. */
+  expected: number;
+  /** Findings with a matched, validated evaluation. */
+  evaluated: number;
+  /** Findings left without an evaluation (marked `not_evaluated`). */
+  not_evaluated: number;
+  /** Batches whose first response yielded zero usable evaluations and were retried once. */
+  parse_failures: number;
+  /** Batch retries actually performed (bounded: at most one per batch). */
+  retries: number;
+  /** Evaluations referencing an unknown/unrecognized finding ID (rejected). */
+  unknown_ids: number;
+  /** Duplicate evaluations for the same finding ID (first kept, rest rejected). */
+  duplicate_ids: number;
+  /** Evaluations matched via the legacy numeric finding_index fallback (no opaque ID returned). */
+  legacy_index_matches: number;
 }
 
 // ─── Finding evidence ──────────────────────────────────────────────────────────
@@ -224,6 +259,8 @@ export interface FindingsArtifact {
     llm_error: string | null;
     /** Token usage from the LLM calls. Null when the LLM pass did not run (--no-llm, no changes, the unprivileged emit-bundle half) or the provider returned no usage. */
     usage: TokenUsageSummary | null;
+    /** Skeptic-pass diagnostics (issue #88). Absent on artifacts written before this field existed; null when the refute pass did not run. */
+    skeptic?: SkepticStatus | null;
   };
 
   /** Was the LLM given the full change context, or was part truncated to fit the prompt cap? Null when the LLM pass did not run (--no-llm, no changes, or the unprivileged emit-bundle half). */
