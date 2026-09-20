@@ -102,6 +102,62 @@ describe("buildRefuteUserPrompt", () => {
     expect(prompt).toContain("Unified Diff");
   });
 
+  it("does not truncate when the prompt fits within the budget", () => {
+    const prompt = buildRefuteUserPrompt(
+      [makeFinding()],
+      "small diff",
+      new Map([["a.ts", "content"]]),
+      new Map(),
+      undefined,
+      undefined,
+      50_000,
+    );
+    expect(prompt).not.toContain("Context truncated");
+    expect(prompt).not.toContain("omitted entirely");
+  });
+
+  it("truncates an oversized diff to the budget and SAYS SO in-band (CI 400 regression)", () => {
+    // CI failure that motivated this: a 316K-char diff rode the refute prompt
+    // uncapped and Groq rejected the whole call (400: reduce the length of
+    // the messages or completion). The findings and instructions — the
+    // sections the skeptic actually needs — must survive; the diff tail
+    // degrades with an explicit note.
+    const hugeDiff = "diff content line\n".repeat(20_000); // ~360K chars
+    const budget = 30_000;
+
+    const prompt = buildRefuteUserPrompt(
+      [makeFinding()],
+      hugeDiff,
+      new Map(),
+      new Map(),
+      undefined,
+      undefined,
+      budget,
+    );
+
+    expect(prompt.length).toBeLessThanOrEqual(budget + 1000); // budget + note overhead
+    expect(prompt).toContain("Context truncated");
+    expect(prompt).toContain("the skeptic saw only part of it");
+    expect(prompt).toContain(makeFinding().title); // findings never truncated
+    expect(prompt).toContain("## Your Task");
+  });
+
+  it("evicts neighborhood contents before shrinking the diff", () => {
+    const hugeHood = new Map([["neighbor.ts", "x".repeat(60_000)]]);
+    const prompt = buildRefuteUserPrompt(
+      [makeFinding()],
+      "d".repeat(40_000),
+      new Map(),
+      hugeHood,
+      undefined,
+      undefined,
+      30_000,
+    );
+
+    expect(prompt).toContain('"neighborhood file contents" omitted entirely');
+    expect(prompt).toContain("## Unified Diff");
+  });
+
   it("includes only LLM findings in the prompt", () => {
     const findings = [
       makeFinding({ id: "D-0001", source: "semgrep", source_type: "deterministic", title: "Deterministic finding" }),

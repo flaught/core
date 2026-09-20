@@ -58,6 +58,14 @@ export function buildRefuteUserPrompt(
    * back to RF-1..N per position in this batch.
    */
   findingIds?: string[],
+  /**
+   * Soft cap on the total user prompt, in characters (~4/token). The findings
+   * and task instructions are essential and always included; the context
+   * sections (neighborhood, changed-file contents, diff) degrade gracefully
+   * to fit. Uncapped refute prompts on large diffs are a real failure mode
+   * (provider 400: "reduce the length of the messages or completion").
+   */
+  maxPromptChars: number = 100_000,
 ): string {
   const sections: string[] = [];
 
@@ -70,6 +78,13 @@ export function buildRefuteUserPrompt(
     );
   }
 
+  // Degradable context sections, with their positions, in eviction order
+  // (least-to-most useful for refutation): neighborhood, file contents, diff.
+  const degradable: Array<{ index: number; name: string }> = [];
+  let contentsIdx: number | null = null;
+  let hoodIdx: number | null = null;
+  let diffIdx: number | null = null;
+
   // ── Changed files context ──
   if (changedFileContents.size > 0) {
     const fileContents = Array.from(changedFileContents.entries())
@@ -77,6 +92,7 @@ export function buildRefuteUserPrompt(
       .join("\n\n");
 
     sections.push(`## Changed File Contents\n\n${fileContents}`);
+    contentsIdx = sections.length - 1;
   }
 
   // ── Neighborhood context ──
@@ -86,11 +102,13 @@ export function buildRefuteUserPrompt(
       .join("\n\n");
 
     sections.push(`## Neighborhood File Contents (for blast radius context)\n\n${hoodContents}`);
+    hoodIdx = sections.length - 1;
   }
 
   // ── Diff ──
   if (diff) {
     sections.push(`## Unified Diff\n\n\`\`\`diff\n${diff}\n\`\`\``);
+    diffIdx = sections.length - 1;
   }
 
   // ── Findings to evaluate ──
@@ -144,7 +162,54 @@ export function buildRefuteUserPrompt(
     `\`\`\``,
   );
 
-  return sections.join("\n\n---\n\n");
+  if (hoodIdx !== null) degradable.push({ index: hoodIdx, name: "neighborhood file contents" });
+  if (contentsIdx !== null) degradable.push({ index: contentsIdx, name: "changed-file contents" });
+  if (diffIdx !== null) degradable.push({ index: diffIdx, name: "unified diff" });
+
+  return joinWithinBudget(sections, degradable, maxPromptChars);
+}
+
+const SECTION_SEPARATOR = "\n\n---\n\n";
+
+function joinSections(sections: string[]): string {
+  return sections.filter((s) => s !== "").join(SECTION_SEPARATOR);
+}
+
+/**
+ * Final assembly: fit the user prompt within the soft character budget by
+ * shrinking degradable context sections (in eviction order), each shrink
+ * annotated in-band so "the skeptic saw only part of the context" is visible
+ * in the prompt itself. Findings, stated intent, and the task instructions
+ * are never truncated.
+ */
+function joinWithinBudget(
+  sections: string[],
+  degradable: Array<{ index: number; name: string }>,
+  maxPromptChars: number,
+): string {
+  let rendered = joinSections(sections);
+  if (rendered.length <= maxPromptChars) return rendered;
+
+  for (const entry of degradable) {
+    if (rendered.length <= maxPromptChars) break;
+    const original = sections[entry.index]!;
+    const overflow = rendered.length - maxPromptChars;
+    const headroom = 300; // space for the truncation note itself
+    const keep = original.length - overflow - headroom;
+    if (keep <= 200) {
+      sections[entry.index] =
+        `… [Context section "${entry.name}" omitted entirely to fit the ` +
+        `${maxPromptChars}-char prompt budget — the skeptic did NOT see it.]`;
+    } else {
+      sections[entry.index] =
+        original.slice(0, keep) +
+        `\n\n… [Context truncated: "${entry.name}" cut from ${original.length} to ${keep} chars ` +
+        `to fit the ${maxPromptChars}-char prompt budget — the skeptic saw only part of it.]`;
+    }
+    rendered = joinSections(sections);
+  }
+
+  return rendered;
 }
 
 // ─── Parse skeptic response ──────────────────────────────────────────────────

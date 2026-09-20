@@ -35,6 +35,15 @@ const LlmSchema = z.object({
   temperature: z.number().min(0).max(1).default(0.2),
   max_tokens: z.number().int().positive().default(4096),
   min_confidence: z.number().min(0).max(1).default(0),
+  /**
+   * Soft cap (in characters, ~4 per token) on the assembled user prompt for
+   * BOTH the review and refute passes. Review truncates tier-by-tier
+   * (neighborhood, then changed-file contents, then diff) and records
+   * `analysis_completeness`; refute truncates its context sections and appends
+   * a truncation note. Oversized prompts are a real failure mode — Groq
+   * 400s requests whose messages+completion exceed the model window.
+   */
+  max_prompt_chars: z.number().int().min(10_000).default(100_000),
   timeout_seconds: z.number().int().positive().default(120),
   /**
    * Reasoning effort for models that support it (GPT-OSS on Groq, OpenAI o-series).

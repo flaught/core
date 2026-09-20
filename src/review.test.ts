@@ -718,7 +718,15 @@ describe("runReview (LLM graceful degradation)", () => {
     expect(result.llmError).toContain("Refute (skeptic) pass failed");
     const kept = result.artifact.findings.find((f) => f.id === "L-0001");
     expect(kept).toBeTruthy();
-    expect(kept!.refute_result).toBeNull();
+    // GH#88: a failed skeptic call is recorded, not silently null — the
+    // finding is marked not_evaluated and the run-level coverage says failed.
+    expect(kept!.refute_result?.verdict).toBe("not_evaluated");
+    expect(kept!.refute_result?.reasoning).toContain("Skeptic pass failed");
+    expect(result.artifact.run.skeptic).toMatchObject({
+      state: "failed",
+      evaluated: 0,
+      not_evaluated: 1,
+    });
   }, 30_000);
 });
 // ─── --only-llm: the privileged half of the fork-PR split (core-8fz) ──────────

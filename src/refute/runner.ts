@@ -190,6 +190,9 @@ export async function runRefutePass(
       context.neighborhoodFileContents,
       prDescription,
       batchIds,
+      // Same soft cap as the review pass — an uncapped refute prompt against
+      // a large diff is a real provider-400 failure mode.
+      config.llm.max_prompt_chars,
     );
 
     // Call the skeptic, retrying once if the response is entirely unusable

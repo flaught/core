@@ -593,11 +593,18 @@ export class OllamaProvider implements LLMProvider {
 async function read400Body(response: Response): Promise<{
   detail: string;
   failedGeneration: string | null;
+  /** The raw response body, truncated — providers often carry diagnostic fields (code, type) our extraction doesn't model. */
+  raw: string;
 }> {
   let detail = "";
   let failedGeneration: string | null = null;
+  let raw = "";
   try {
-    const body = await response.clone().json().catch(() => ({} as Record<string, unknown>));
+    const text = await response.clone().text().catch(() => "");
+    raw = text.slice(0, 500);
+    let parsed: unknown = {};
+    try { parsed = JSON.parse(text); } catch { /* not JSON — raw excerpt below still helps */ }
+    const body = parsed as Record<string, unknown>;
     const err = (body as Record<string, unknown>)?.error;
     if (typeof err === "object" && err !== null && typeof (err as Record<string, unknown>).message === "string") {
       detail = (err as Record<string, unknown>).message as string;
@@ -607,7 +614,7 @@ async function read400Body(response: Response): Promise<{
     const fg = (body as Record<string, unknown>).failed_generation;
     if (typeof fg === "string" && fg.length > 0) failedGeneration = fg;
   } catch { /* ignore parse errors */ }
-  return { detail, failedGeneration };
+  return { detail, failedGeneration, raw };
 }
 
 async function classifyHttpError(
@@ -630,7 +637,7 @@ async function classifyHttpError(
     case 400: {
       // Bad request — usually model-specific limitations (JSON mode not supported,
       // invalid parameters, etc.). Include the provider's error message for debugging.
-      const { detail, failedGeneration } = await read400Body(response);
+      const { detail, failedGeneration, raw } = await read400Body(response);
       // `failed_generation` (Groq) means the JSON-mode grammar enforced valid JSON
       // only up to a truncation point — the model ran out of tokens before closing
       // the object. That is a truncation problem, not malformed-JSON, and the fix is
@@ -648,8 +655,14 @@ async function classifyHttpError(
       const snippet = failedGeneration !== null
         ? `\n\nfailed_generation (first 200 chars):\n${failedGeneration.slice(0, 200)}`
         : "";
+      // Raw body too: providers carry diagnostic fields (code/type/param)
+      // that our extraction above doesn't model; don't make users re-run
+      // with a proxy to see them.
+      const rawSnippet = raw && raw.trim() !== "" && raw.trim() !== "{}"
+        ? `\n\nProvider response body (first 500 chars):\n${raw}`
+        : "";
       return new LLMError(
-        `Bad request from ${providerName} for model "${model}" (${status}).${detail ? `\n\n${detail}` : ""}${truncationHint}${snippet}`,
+        `Bad request from ${providerName} for model "${model}" (${status}).${detail ? `\n\n${detail}` : ""}${truncationHint}${snippet}${rawSnippet}`,
         providerName,
         model,
         status,

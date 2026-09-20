@@ -719,7 +719,30 @@ export async function runLlmStage(input: LlmStageInput): Promise<LlmStageResult>
       llmError = `Refute (skeptic) pass failed: ${err instanceof Error ? err.message : String(err)}`;
       progress(`  ⚠ ${llmError}`);
       progress(`  Continuing with un-refuted LLM findings.`);
-      llmFindings = llmFindings.map((f) => ({ ...f, refute_result: null }));
+      // A failed skeptic call must not be indistinguishable from a paid one
+      // (GH#88): mark every LLM finding not_evaluated and record the failure
+      // in run.skeptic, rather than leaving refute_result silently null.
+      const firstLine = (err instanceof Error ? err.message : String(err)).split("\n")[0]!;
+      llmFindings = llmFindings.map((f) => ({
+        ...f,
+        refute_result: {
+          verdict: "not_evaluated" as const,
+          reasoning: `Skeptic pass failed before evaluating any finding (${firstLine}). This is an incomplete-skeptic signal, not an uncertain verdict.`,
+          adjusted_confidence: f.confidence * 0.7,
+        },
+        confidence: f.confidence * 0.7,
+      }));
+      skepticStatus = {
+        state: "failed",
+        expected: llmFindings.length,
+        evaluated: 0,
+        not_evaluated: llmFindings.length,
+        parse_failures: 0,
+        retries: 0,
+        unknown_ids: 0,
+        duplicate_ids: 0,
+        legacy_index_matches: 0,
+      };
     }
   } else if (!config.refute.enabled) {
     progress("Refute pass disabled in config — skipping skeptic.");

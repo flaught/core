@@ -95,13 +95,15 @@ export interface BuiltUserPrompt {
 
 export function buildUserPromptWithCompleteness(
   context: ReviewContext,
-  _config: FlaughtConfig,
+  config: FlaughtConfig,
   prDescription?: string,
   templates: PromptTemplates = NO_TEMPLATES,
   activeDismissals: DismissalEntry[] = [],
 ): BuiltUserPrompt {
   const sections: string[] = [];
-  const MAX_PROMPT_CHARS = 100_000; // ~25K tokens, leaves room for the system prompt and output
+  // ~4 chars/token; configurable via llm.max_prompt_chars (default 100K ≈ 25K
+  // tokens, leaving room for the system prompt and output).
+  const MAX_PROMPT_CHARS = config.llm.max_prompt_chars;
 
   // ── PR context ──
   if (prDescription) {
