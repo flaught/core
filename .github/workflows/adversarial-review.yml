@@ -119,24 +119,25 @@ jobs:
 
       - name: Render review comment body (same-repo path only)
         if: always() && steps.review.outputs.split != 'true'
-        env:
-          PR_BASE_REF: ${{ github.base_ref }}
-          PR_TITLE: ${{ github.event.pull_request.title }}
-          PR_BODY: ${{ github.event.pull_request.body }}
         # Only for same-repo PRs: the full review above already wrote findings.json (with LLM
-        # findings). This re-runs --no-llm to render the markdown comment body. For fork PRs the
-        # comment body is rendered by the privileged half (which has the LLM findings).
+        # findings). Render the comment body FROM THE ARTIFACT with `flaught report` — do NOT
+        # re-run the review with --no-llm here (the historical behavior): a rerun loses the LLM
+        # findings from the comment AND its exit-1 severity gate used to overwrite the rendered
+        # body with "Review could not be rendered." exactly when findings mattered most (the
+        # dogfood run of GH#91 hit exactly that). For fork PRs the comment body is rendered by
+        # the privileged half (which has the LLM findings).
         run: |
           if [ -f findings.json ]; then
             set +e
-            printf '%s\n\n%s\n' "${PR_TITLE}" "${PR_BODY}" > .flaught-pr-intent.txt
-            if ! flaught review \
-              --base "origin/${PR_BASE_REF}" \
-              --head HEAD \
-              --no-llm \
-              --pr-description-file .flaught-pr-intent.txt > review-body.md 2>/dev/null \
-              || [ ! -s review-body.md ]; then
-              echo "Review could not be rendered." > review-body.md
+            flaught report --from findings.json > review-body.md 2>render-errors.log
+            RENDER_STATUS=$?
+            # A render crash and a severity-gate exit are different things; only a genuine
+            # render failure (or empty output) gets the fallback body.
+            if [ $RENDER_STATUS -ne 0 ] || [ ! -s review-body.md ]; then
+              echo "Review could not be rendered. Render log:" > review-body.md
+              echo '```' >> review-body.md
+              head -50 render-errors.log >> review-body.md
+              echo '```' >> review-body.md
             fi
           else
             echo "⚠️ Flaught review failed to produce findings. Check the workflow logs for details." > review-body.md
