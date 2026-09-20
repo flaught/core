@@ -282,6 +282,33 @@ describe("buildUserPromptWithCompleteness", () => {
     expect(completeness.note).toContain("blast-radius");
   });
 
+  it("keeps a diff whose CONTENT contains the marker strings (self-review regression, GH#91 dogfood)", () => {
+    // Flaught reviewing its own prompt.ts: the diff body literally contains
+    // "Neighborhood File Contents". Substring-based section filtering would
+    // discard the DIFF along with the real neighborhood section — the model
+    // then reviewed a file list and hallucinated code (dogfood prompt_chars
+    // stuck at 16,290 with a 132K diff). Section drops are index-based now.
+    const config = FlaughtConfigSchema.parse({});
+    const selfReferentialDiff =
+      "diff --git a/src/llm/prompt.ts b/src/llm/prompt.ts\n" +
+      '+const label = "## Neighborhood File Contents (for blast radius context)";\n' +
+      "+// the diff is big enough to force tier-1 truncation\n" +
+      "+".padEnd(60_000, "const filler = true;\n+");
+    const context = mockContext({
+      diff: selfReferentialDiff,
+      neighborhoodFiles: ["src/routes.ts"],
+      neighborhoodFileContents: new Map([["src/routes.ts", "y".repeat(50_000)]]),
+    });
+    const { prompt, completeness } = buildUserPromptWithCompleteness(context, config);
+
+    // The real neighborhood section is dropped (tier 1), the diff SURVIVES.
+    expect(completeness.state).toBe("partial");
+    expect(completeness.dropped).toEqual(["neighborhood"]);
+    expect(prompt).not.toContain("y".repeat(500)); // real neighborhood gone
+    expect(prompt).toContain("diff --git a/src/llm/prompt.ts");
+    expect(prompt).toContain("const filler = true");
+  });
+
   it("reports partial (neighborhood + changed-file dropped) when both overflow", () => {
     const config = FlaughtConfigSchema.parse({});
     const big = "x".repeat(120_000);

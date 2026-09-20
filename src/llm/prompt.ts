@@ -155,6 +155,16 @@ export function buildUserPromptWithCompleteness(
     );
   }
 
+  // Index-tracked context sections. The truncation tiers below MUST drop
+  // sections by index, never by substring match: when Flaught reviews a diff
+  // that itself contains the marker strings (e.g. a PR editing this very
+  // file), substring filtering silently removes the DIFF — the model then
+  // reviews a file list and hallucinates code (dogfood runs 35538580998 /
+  // 35539622649, prompt_chars 16,290 of a 132K-char diff).
+  let contentsIdx: number | null = null;
+  let hoodIdx: number | null = null;
+  let diffIdx: number | null = null;
+
   // ── Changed file contents ──
   const fileContents = Array.from(context.changedFileContents.entries())
     .map(([path, content]) => `### ${path}\n\`\`\`\n${content}\n\`\`\``)
@@ -162,6 +172,7 @@ export function buildUserPromptWithCompleteness(
 
   if (fileContents) {
     sections.push(`## Changed File Contents\n\n${fileContents}`);
+    contentsIdx = sections.length - 1;
   }
 
   // ── Neighborhood file contents ──
@@ -175,11 +186,13 @@ export function buildUserPromptWithCompleteness(
     sections.push(
       `## Neighborhood File Contents (for blast radius context)\n\n${neighborhoodContents}`,
     );
+    hoodIdx = sections.length - 1;
   }
 
   // ── Diff ──
   if (context.diff) {
     sections.push(`## Unified Diff\n\n\`\`\`diff\n${context.diff}\n\`\`\``);
+    diffIdx = sections.length - 1;
   }
 
   // ── Previously dismissed findings (don't re-raise reworded restatements) ──
@@ -234,11 +247,14 @@ export function buildUserPromptWithCompleteness(
     };
   }
 
+  const withoutIdx = (...dropIndices: Array<number | null>): string =>
+    sections
+      .filter((_, i) => !dropIndices.includes(i))
+      .join("\n\n---\n\n");
+
   // Tier 1: drop neighborhood (blast-radius) file contents. The LLM still has
   // the full diff and changed-file contents, just not the surrounding code.
-  const withoutNeighborhood = sections
-    .filter((s) => !s.includes("Neighborhood File Contents"))
-    .join("\n\n---\n\n");
+  const withoutNeighborhood = withoutIdx(hoodIdx);
   if (withoutNeighborhood.length <= limit) {
     return {
       prompt: withoutNeighborhood + "\n\n---\n\n⚠️ Neighborhood file contents were truncated to fit the prompt size limit.",
@@ -254,9 +270,7 @@ export function buildUserPromptWithCompleteness(
 
   // Tier 2: drop changed-file full contents too. The LLM has the full diff and
   // summaries, but not the full text of the changed files.
-  const essential = sections
-    .filter((s) => !s.includes("Neighborhood File Contents") && !s.includes("Changed File Contents"))
-    .join("\n\n---\n\n");
+  const essential = withoutIdx(hoodIdx, contentsIdx);
   if (essential.length <= limit) {
     return {
       prompt: essential + "\n\n---\n\n⚠️ File contents were truncated to fit the prompt size limit. Only the diff and summaries are included.",
@@ -272,12 +286,12 @@ export function buildUserPromptWithCompleteness(
 
   // Tier 3: truncate the diff itself (worst case). The LLM reviewed only part
   // of the change; findings may miss issues in the omitted portions entirely.
-  const diffSection = sections.find((s) => s.includes("Unified Diff"));
-  const nonDiffSections = sections.filter((s) => !s.includes("Unified Diff") && !s.includes("Neighborhood File Contents") && !s.includes("Changed File Contents"));
-  const diffBudget = limit - nonDiffSections.join("\n\n---\n\n").length - 200;
+  const diffSection = diffIdx !== null ? sections[diffIdx] : undefined;
+  const nonDiffJoined = withoutIdx(hoodIdx, contentsIdx, diffIdx);
+  const diffBudget = limit - nonDiffJoined.length - 200;
   if (diffSection && diffBudget > 1000) {
     const truncatedDiff = diffSection.slice(0, diffBudget);
-    const out = [...nonDiffSections, truncatedDiff].join("\n\n---\n\n") +
+    const out = nonDiffJoined + "\n\n---\n\n" + truncatedDiff +
       `\n\n---\n\n⚠️ The diff was truncated to fit the prompt size limit (${context.changedFiles.length} files changed; showing first ~${diffBudget} chars).`;
     return {
       prompt: out,
@@ -292,7 +306,7 @@ export function buildUserPromptWithCompleteness(
   }
 
   // Absolute fallback: only summaries survived.
-  const out = nonDiffSections.join("\n\n---\n\n") +
+  const out = nonDiffJoined +
     `\n\n⚠️ Context was truncated to fit the prompt size limit.`;
   return {
     prompt: out,
