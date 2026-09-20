@@ -82,6 +82,7 @@ jobs:
           PR_NUMBER: ${{ github.event.pull_request.number }}
           PR_BASE_REF: ${{ github.base_ref }}
           PR_TITLE: ${{ github.event.pull_request.title }}
+          PR_BODY: ${{ github.event.pull_request.body }}
         # Shell-injection-safe: all GitHub expressions passed via env vars, not interpolated inline.
         # set +e / explicit exit 0: the step's own pass/fail no longer gates the job — the two Check
         # steps below branch on exit_code so exit 1 (findings) and exit 2 (tool/LLM error) differ.
@@ -91,12 +92,14 @@ jobs:
         # run the LLM pass against (core-8fz fork-PR split).
         run: |
           set +e
+          # Scope-creep intent anchor: full title + body via file (GH#86), never inline shell.
+          printf '%s\n\n%s\n' "${PR_TITLE}" "${PR_BODY}" > .flaught-pr-intent.txt
           if [ -n "$GROQ_API_KEY" ]; then
             flaught review \
               --base "origin/${PR_BASE_REF}" \
               --head HEAD \
               --output findings.json \
-              --pr-description "${PR_TITLE}" \
+              --pr-description-file .flaught-pr-intent.txt \
               --github-inline \
               --quiet
           else
@@ -107,7 +110,7 @@ jobs:
               --base "origin/${PR_BASE_REF}" \
               --head HEAD \
               --output findings.json \
-              --pr-description "${PR_TITLE}" \
+              --pr-description-file .flaught-pr-intent.txt \
               --quiet
           fi
           EXIT_CODE=$?
@@ -121,17 +124,19 @@ jobs:
         env:
           PR_BASE_REF: ${{ github.base_ref }}
           PR_TITLE: ${{ github.event.pull_request.title }}
+          PR_BODY: ${{ github.event.pull_request.body }}
         # Only for same-repo PRs: the full review above already wrote findings.json (with LLM
         # findings). This re-runs --no-llm to render the markdown comment body. For fork PRs the
         # comment body is rendered by the privileged half (which has the LLM findings).
         run: |
           if [ -f findings.json ]; then
             set +e
+            printf '%s\n\n%s\n' "${PR_TITLE}" "${PR_BODY}" > .flaught-pr-intent.txt
             if ! flaught review \
               --base "origin/${PR_BASE_REF}" \
               --head HEAD \
               --no-llm \
-              --pr-description "${PR_TITLE}" \
+              --pr-description-file .flaught-pr-intent.txt \
               --quiet > review-body.md 2>/dev/null \
               || [ ! -s review-body.md ]; then
               echo "Review could not be rendered." > review-body.md

@@ -247,6 +247,17 @@ export interface FindingsArtifact {
     url: string | null;
     title: string | null;
     description: string | null;
+    /**
+     * Provenance of the scope-creep intent anchor (GH#86): what KIND of intent
+     * the review ran against (source, size, whether it looked title-only) —
+     * without duplicating the intent text itself. Absent in older artifacts.
+     */
+    intent_provenance?: {
+      source: "cli-text" | "cli-file" | "bundle";
+      chars: number;
+      lines: number;
+      appears_title_only: boolean;
+    } | null;
     base_sha: string;
     head_sha: string;
   };

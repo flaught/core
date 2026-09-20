@@ -110,6 +110,12 @@ The JSON artifact (`--output findings.json`) is a complete, self-contained recor
     "url": null,
     "title": null,
     "description": null,
+    "intent_provenance": {
+      "source": "cli-file",
+      "chars": 812,
+      "lines": 24,
+      "appears_title_only": false
+    },
     "base_sha": "abc123def456...",
     "head_sha": "def456abc789..."
   },
@@ -121,6 +127,17 @@ The JSON artifact (`--output findings.json`) is a complete, self-contained recor
     "usage": {
       "review": { "prompt_tokens": 4200, "completion_tokens": 850, "total_tokens": 5050 },
       "refute": { "prompt_tokens": 3100, "completion_tokens": 400, "total_tokens": 3500 }
+    },
+    "skeptic": {
+      "state": "complete",
+      "expected": 6,
+      "evaluated": 6,
+      "not_evaluated": 0,
+      "parse_failures": 0,
+      "retries": 0,
+      "unknown_ids": 0,
+      "duplicate_ids": 0,
+      "legacy_index_matches": 0
     }
   },
 
@@ -288,6 +305,32 @@ The `run.usage` field records token counts from the LLM calls, normalized across
 | `refute` | Token counts for the skeptic/refute pass; omitted when the pass was skipped, disabled, failed, or produced no usage |
 
 Each entry carries `prompt_tokens`, `completion_tokens`, and `total_tokens`. The review and refute counts are kept distinct rather than summed because they are separate calls, possibly on different models — a consumer can see how much of the spend was review vs. refutation. Dollar cost is not included; providers do not return cost inline, so cost would be computed by multiplying these counts by the provider's published per-million-token pricing for the model used.
+
+## Skeptic (refute) coverage
+
+Each LLM finding carries a `refute_result` with the skeptic's verdict:
+
+| Verdict | Meaning |
+|---|---|
+| `confirmed` | The skeptic verified the finding is real (confidence adjusted) |
+| `refuted` | The skeptic determined it is a false positive — `refuted` findings do not trip the severity gate |
+| `uncertain` | The skeptic evaluated the finding but could not decide — an evidence-based "don't know"; still trips the gate (conservative) |
+| `not_evaluated` | The skeptic response omitted or mis-referenced this finding — **incomplete coverage, not an uncertain verdict**; still trips the gate |
+
+Findings are matched to skeptic evaluations by an opaque run-scoped ID (`RF-<salt>-<n>`) that the skeptic must return verbatim; unknown, duplicated, or out-of-range references are rejected and counted, never silently attached to the wrong finding.
+
+The `run.skeptic` field records run-level coverage diagnostics (absent in artifacts from older versions, `null`/absent when the pass did not run):
+
+| Field | Meaning |
+| --- | --- |
+| `state` | `"complete"` (every finding evaluated), `"partial"` (some evaluated), `"failed"` (none evaluated after the bounded retry), `"not_run"` (nothing to evaluate) |
+| `expected` / `evaluated` / `not_evaluated` | Coverage counts over the LLM findings sent to the skeptic |
+| `parse_failures` | Malformed skeptic responses (each retried exactly once) |
+| `retries` | Total retried batches in this run |
+| `unknown_ids` / `duplicate_ids` | Evaluations rejected for referencing an invented ID or the same finding twice |
+| `legacy_index_matches` | Evaluations matched via the legacy numeric `finding_index` fallback — nonzero suggests an old or non-compliant skeptic model |
+
+`state` lets a consumer distinguish "skeptic ran and verified N of N" from "131k tokens burned, zero findings evaluated" without downloading per-finding data.
 
 ## Schema versioning
 

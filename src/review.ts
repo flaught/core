@@ -35,6 +35,7 @@ import {
 import { renderMarkdownReport } from "./report/markdown.js";
 import { renderJsonArtifact } from "./report/json.js";
 import { runDeterministicTools, formatToolFindingsForPrompt, type DeterministicFinding } from "./tools/runner.js";
+import { buildIntentProvenance, warnOnSparseIntent, type IntentProvenance } from "./intent.js";
 import { runTestInversion } from "./test-inversion/runner.js";
 import {
   detectScopeCreepHeuristic,
@@ -95,6 +96,12 @@ export interface ReviewOptions {
   headRef?: string;
   configPath?: string;
   prDescription?: string;
+  /**
+   * Provenance of the intent anchor (GH#86): what kind of intent the review
+   * ran against — recorded on the artifact without duplicating the text.
+   * Absent for programmatic callers that only pass prDescription text.
+   */
+  intentProvenance?: IntentProvenance;
   /** Skip LLM review (context assembly only) */
   skipLlm?: boolean;
   /** Skip the skeptic/refute pass even if LLM review is enabled */
@@ -210,6 +217,10 @@ export async function runReview(options: ReviewOptions = {}): Promise<ReviewResu
   }
 
   // 3b. Heuristic scope-creep pre-filter (runs before LLM so it can be injected into the prompt)
+  // Sparse intent (missing or title-only) degrades scope-creep detection —
+  // warn loudly rather than silently producing false "unrelated change"
+  // findings (GH#86).
+  warnOnSparseIntent(progress, config.scope_creep.enabled, !options.skipLlm, options.prDescription);
   if (context.changedFiles.length > 0 && config.scope_creep.enabled) {
     scopeCreepHeuristic = detectScopeCreepHeuristic(context, options.prDescription, config);
   }
@@ -485,6 +496,8 @@ export async function runReview(options: ReviewOptions = {}): Promise<ReviewResu
   // fork-PR split (--only-llm) can recover the scope-creep intent anchor from
   // the partial findings artifact without a separate bundle field.
   artifact.pull_request.description = options.prDescription ?? null;
+  artifact.pull_request.intent_provenance = options.intentProvenance
+    ?? (options.prDescription !== undefined ? buildIntentProvenance(options.prDescription, "cli-text") : undefined);
 
   // Record LLM error in the artifact if the LLM call failed
   if (llmError) {
@@ -885,6 +898,13 @@ export async function runReviewOnlyLlm(options: OnlyLlmOptions): Promise<ReviewR
   const deterministicFindings: DeterministicFinding[] = bundle.deterministicFindings ?? [];
   const scopeCreepHeuristic: FlaggedHunk[] = partial.scope_creep?.flagged_hunks ?? [];
   const prDescription = partial.pull_request?.description ?? undefined;
+  // Intent provenance (GH#86) travels with the artifact so the split halves
+  // record the same provenance a monolithic run would; "bundle" marks intent
+  // recovered from a pre-#86 partial artifact that has text but no provenance.
+  const intentProvenance: IntentProvenance | undefined =
+    partial.pull_request?.intent_provenance
+    ?? (prDescription !== undefined ? buildIntentProvenance(prDescription, "bundle") : undefined);
+  warnOnSparseIntent(progress, config.scope_creep.enabled, true, prDescription);
 
   // 5. Start from the partial findings (deterministic + test-inversion).
   let findings: Finding[] = [...partial.findings];
@@ -966,6 +986,10 @@ export async function runReviewOnlyLlm(options: OnlyLlmOptions): Promise<ReviewR
   artifact.test_inversion = partial.test_inversion;
   artifact.scope_creep = scopeCreepResult;
   artifact.pull_request = partial.pull_request;
+  // Intent provenance recovered for older bundles (pre-#86) that lack it.
+  if (artifact.pull_request.intent_provenance === undefined && intentProvenance !== undefined) {
+    artifact.pull_request.intent_provenance = intentProvenance;
+  }
   artifact.analysis_completeness = llmStage.completeness;
   if (llmStage.llmError) {
     artifact.run.llm_error = llmStage.llmError;
