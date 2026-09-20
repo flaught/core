@@ -223,7 +223,7 @@ describe("renderMarkdownReport", () => {
     const artifact = makeArtifact();
     const md = renderMarkdownReport(artifact);
     expect(md).toContain("Flaught v0.4.1");
-    expect(md).toContain("Schema v4");
+    expect(md).toContain(`Schema v${SCHEMA_VERSION}`);
   });
 
   it("includes the run-local finding ID caveat in the footer", () => {
@@ -446,7 +446,7 @@ describe("renderJsonArtifact", () => {
     const json = renderJsonArtifact(artifact);
     const parsed = JSON.parse(json);
     expect(parsed).toBeTruthy();
-    expect(parsed.schema_version).toBe(4);
+    expect(parsed.schema_version).toBe(SCHEMA_VERSION);
   });
 
   it("includes the caveat", () => {

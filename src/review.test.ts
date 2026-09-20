@@ -6,6 +6,7 @@ import { simpleGit, type SimpleGit } from "simple-git";
 import { runReview, runReviewOnlyLlm, isDocFile, isDocsOnlyDiff, filterFindingsByConfidence } from "./review.js";
 import { contextToJSON } from "./context/assembler.js";
 import type { Finding } from "./schemas/findings.js";
+import { SCHEMA_VERSION } from "./schemas/findings.js";
 import { resolveDismissalsPath, loadDismissalStore, addDismissal, saveDismissalStore } from "./dismissals/store.js";
 
 // Skip the real liveness network check — graceful-degradation tests below
@@ -242,7 +243,7 @@ describe("runReview (no-llm mode)", () => {
 
     expect(result.context.changedFiles.length).toBeGreaterThanOrEqual(1);
     expect(result.artifact.findings).toHaveLength(0);
-    expect(result.artifact.schema_version).toBe(4);
+    expect(result.artifact.schema_version).toBe(SCHEMA_VERSION);
     expect(result.artifact._caveat).toContain("evidence that adversarial scrutiny occurred");
     // The LLM pass was skipped, so completeness is null — the artifact must not
     // claim the LLM saw anything (it never ran).
@@ -316,7 +317,7 @@ describe("runReview (no-llm mode)", () => {
     });
 
     const parsed = JSON.parse(result.json);
-    expect(parsed.schema_version).toBe(4);
+    expect(parsed.schema_version).toBe(SCHEMA_VERSION);
     expect(parsed.findings).toEqual([]);
     expect(parsed.noise_budget).toBeTruthy();
     expect(parsed._caveat).toBeTruthy();

@@ -155,6 +155,15 @@ export async function runReview(options: ReviewOptions = {}): Promise<ReviewResu
     headRef: options.headRef,
     configPath: options.configPath,
   });
+  // Assembly summary — the single most valuable line when a CI review comes
+  // back oddly empty or hallucinated: if the diff or contents are empty here,
+  // the LLM reviewed a file list, not code (GH#91 dogfood, run 35538580998).
+  progress(
+    `  Context: ${context.changedFiles.length} changed files, ` +
+    `${context.diff.length.toLocaleString()} diff chars, ` +
+    `${context.changedFileContents.size} changed-file contents, ` +
+    `${context.neighborhoodFileContents.size} neighborhood files`,
+  );
 
   // 2a. Load the dismissal store up front — needed both to inject "known
   // non-issues" context into the LLM prompt (below) and, later, to apply
@@ -896,6 +905,12 @@ export async function runReviewOnlyLlm(options: OnlyLlmOptions): Promise<ReviewR
   progress("Loading review context artifact...");
   const bundle = loadReviewBundle(options.contextPath);
   const context = contextFromJSON(bundle.context);
+  progress(
+    `  Context: ${context.changedFiles.length} changed files, ` +
+    `${context.diff.length.toLocaleString()} diff chars, ` +
+    `${context.changedFileContents.size} changed-file contents, ` +
+    `${context.neighborhoodFileContents.size} neighborhood files (from bundle)`,
+  );
 
   // 2. Load the partial findings artifact (deterministic + test-inversion, un-budgeted).
   progress("Loading deterministic findings artifact...");

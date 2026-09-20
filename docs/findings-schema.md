@@ -2,7 +2,7 @@
 
 Every finding carries a `source_type` field that distinguishes **deterministic** (tool-asserted) from **LLM-asserted** evidence. This is the governance-critical field — it tells you whether a finding came from a tool that always produces the same output, or from an LLM that may hallucinate.
 
-The schema is versioned from day one — currently `schema_version: 4` — and self-describing (`$schema` URL). Every artifact includes the `_caveat` field — an honest disclaimer about what the data represents.
+The schema is versioned from day one — currently `schema_version: 5` — and self-describing (`$schema` URL). Every artifact includes the `_caveat` field — an honest disclaimer about what the data represents.
 
 ## Finding structure
 
@@ -93,8 +93,8 @@ The JSON artifact (`--output findings.json`) is a complete, self-contained recor
 
 ```json
 {
-  "$schema": "https://flaught.dev/schemas/findings/v4.schema.json",
-  "schema_version": 4,
+  "$schema": "https://flaught.dev/schemas/findings/v5.schema.json",
+  "schema_version": 5,
   "_caveat": "This artifact is evidence that adversarial scrutiny occurred on this PR. It is NOT evidence that findings are correct. LLM-asserted findings may include hallucinations. Deterministic-tool findings have their own false-positive rates. Treat this as a prompt for human review, not as audit-truth.",
   "generated_at": "2025-01-15T10:25:00Z",
   "flaught_version": "0.2.0",
@@ -334,6 +334,6 @@ The `run.skeptic` field records run-level coverage diagnostics (absent in artifa
 
 ## Schema versioning
 
-The schema uses integer versioning. The current version is `4` (`4` bumped from `3` when `run.usage` was added so consumers can see token spend per run without a separate billing query; `3` bumped from `2` when `analysis_completeness` was added so consumers can distinguish "Flaught completed" from "Flaught comprehensively reviewed this"; `2` bumped from `1` when `fingerprint` and `evidence.rule_id` were added — see [dismissals](dismissals.md)). Breaking changes will increment the version. The `$schema` URL points to a JSON Schema document for validation.
+The schema uses integer versioning. The current version is `5` (`5` bumped from `4` when `run.skeptic`, `pull_request.intent_provenance`, and the `not_evaluated` refute verdict were added so consumers can distinguish skeptic-ran from skeptic-never-ran (GH#88) and trace PR-intent provenance (GH#86); `4` bumped from `3` when `run.usage` was added so consumers can see token spend per run without a separate billing query; `3` bumped from `2` when `analysis_completeness` was added so consumers can distinguish "Flaught completed" from "Flaught comprehensively reviewed this"; `2` bumped from `1` when `fingerprint` and `evidence.rule_id` were added — see [dismissals](dismissals.md)). Breaking changes will increment the version. The `$schema` URL points to a JSON Schema document for validation.
 
 The `_caveat` field is always present and never stripped — it's an honest disclaimer about what the artifact represents and what it doesn't.

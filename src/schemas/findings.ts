@@ -294,9 +294,12 @@ export interface FindingsArtifact {
 
 // ─── Constants ─────────────────────────────────────────────────────────────
 
-export const SCHEMA_VERSION = 4;
+// 4 → 5: run.skeptic (skeptic coverage diagnostics), pull_request.intent_provenance,
+// and the not_evaluated refute verdict (GH#88/#86/#91 — schema-version bump itself
+// was caught by the dogfood run's confirmed finding F-0006).
+export const SCHEMA_VERSION = 5;
 
-export const FINDINGS_SCHEMA_URL = "https://flaught.dev/schemas/findings/v4.schema.json";
+export const FINDINGS_SCHEMA_URL = "https://flaught.dev/schemas/findings/v5.schema.json";
 
 export const CAVEAT =
   "This artifact is evidence that adversarial scrutiny occurred on this PR. " +
