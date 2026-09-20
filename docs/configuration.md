@@ -416,7 +416,7 @@ scope_creep:
   exclude_paths: []                # e.g. ["docs/adr/**"] — never scored as scope creep
 ```
 
-Pass the PR description via `--pr-description` on the CLI. Without a PR description, only heuristic detection runs.
+Pass the PR intent via `--pr-description <text>` or (recommended) `--pr-description-file <path>` on the CLI — see [GitHub Actions](github-actions.md#pr-intent-for-scope-creep-detection-title--full-body). **Pass the full title + body, not just the title**: a title-only anchor starves the detector and causes false "unrelated change" findings against work the body authorized. Flaught warns when the intent looks title-only, and records intent provenance (source/size/title-only-ness, not the text) under `pull_request.intent_provenance` in the artifact. Without a PR description, only heuristic detection runs.
 
 `exclude_paths` is for paths that are *structurally* expected to ride along with certain changes — most commonly an ADR or design doc that accompanies the change it documents, which would otherwise get flagged every time as "large documentation diff unrelated to the code change." It's enforced twice: as explicit guidance in the LLM prompt, and as a post-hoc filter on the LLM's findings (so it holds even if the LLM ignores the guidance). Same `*`/`**` glob syntax as `exclude.paths`.
 

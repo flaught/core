@@ -22,6 +22,7 @@ import { simpleGit } from "simple-git";
 const pkgVersion: string = require("../package.json").version;
 
 import { contextToJSON } from "./context/assembler.js";
+import { resolvePrIntent, buildIntentProvenance } from "./intent.js";
 import { runReview, type ProgressCallback, type ReviewResult } from "./review.js";
 import { initConfig, loadConfig } from "./config.js";
 import { LLMError, MissingAPIKeyError } from "./llm/provider.js";
@@ -82,6 +83,7 @@ program
   .option("--no-refute", "Skip the skeptic/refute pass even if LLM review is enabled")
   .option("--config-from-base", "Load .advreview.yml from the --base ref instead of the working tree, so a malicious PR can't inject shell commands via config edits (requires --base)")
   .option("--pr-description <text>", "PR description for scope-creep detection")
+  .option("--pr-description-file <path>", "Read PR title + body (scope-creep intent) from a file; recommended over --pr-description for multiline, user-controlled text")
   .option("--quiet", "Only output the final report, no progress messages")
   .option("--summary", "Print a short, human-first report instead of the full Markdown report")
   .option("--summary-top <n>", "Maximum findings shown by --summary", parseSummaryTop, DEFAULT_SUMMARY_TOP)
@@ -194,6 +196,7 @@ interface CliReviewOptions {
   output?: string;
   llm?: boolean;
   prDescription?: string;
+  prDescriptionFile?: string;
   quiet?: boolean;
   summary?: boolean;
   summaryTop?: number;
@@ -277,17 +280,31 @@ async function runCliReview(opts: CliReviewOptions): Promise<void> {
   }
 
   // Full review pipeline
+  // PR intent: file-backed is the recommended route (user-controlled multiline
+  // text stays data, never shell code). Both flags together are an error.
+  let intent: ReturnType<typeof resolvePrIntent>;
+  try {
+    intent = resolvePrIntent(opts);
+  } catch (err) {
+    console.error(`\n❌ ${err instanceof Error ? err.message : String(err)}`);
+    process.exit(2);
+  }
+
   const result = await runReview({
     repoPath: opts.repo ? path.resolve(opts.repo) : undefined,
     baseRef: opts.base,
     headRef: opts.head,
     configPath: opts.config,
-    prDescription: opts.prDescription,
+    prDescription: intent.text,
     skipLlm: !opts.llm,
     skipRefute: (opts as Record<string, unknown>).refute === false, // --no-refute sets refute to false
     emitBundle: !!opts.emitContext, // unprivileged half: don't budget (the privileged half budgets the full set)
     configFromBase: opts.configFromBase ?? Boolean(process.env.FLAUGHT_CONFIG_FROM_BASE),
     hideDismissed: opts.hideDismissed,
+    intentProvenance:
+      intent.text !== undefined && intent.source !== undefined
+        ? buildIntentProvenance(intent.text, intent.source)
+        : undefined,
     onProgress: progress,
   });
 

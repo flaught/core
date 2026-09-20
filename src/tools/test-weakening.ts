@@ -32,6 +32,62 @@ function finding(
   };
 }
 
+/** Normalize for move/reindent-insensitive comparison. */
+function normalizeText(text: string): string {
+  return text.replace(/\s+/g, " ").trim();
+}
+
+/**
+ * Multiset difference: lines from `lines` whose normalized text does not
+ * reappear in `other`. A reindented or moved line cancels out (it shows up
+ * as removed+added pairs of identical content), so what remains is what was
+ * genuinely deleted or genuinely introduced (issue #89).
+ */
+function genuinelyChanged(lines: DiffLine[], other: DiffLine[]): DiffLine[] {
+  const available = new Map<string, number>();
+  for (const line of other) {
+    const key = normalizeText(line.text);
+    available.set(key, (available.get(key) ?? 0) + 1);
+  }
+  return lines.filter((line) => {
+    const key = normalizeText(line.text);
+    const count = available.get(key) ?? 0;
+    if (count > 0) {
+      available.set(key, count - 1);
+      return false;
+    }
+    return true;
+  });
+}
+
+/**
+ * Whether a genuinely-removed line is an executable statement inside a test
+ * body — as opposed to a comment, a lone closing brace, or a test/describe
+ * header. Used to confirm an actual BODY was removed, not merely a header
+ * renamed or a comment added next to intact code (issue #89).
+ */
+function isExecutableStatement(text: string): boolean {
+  const t = text.trim();
+  if (!t) return false;
+  if (/^(?:\/\/|\/\*|\*)/.test(t)) return false; // comment lines
+  if (/^[}\]);,(]*$/.test(t)) return false; // closing braces/parens only
+  if (/\b(?:it|test|describe)\s*\(/.test(t)) return false; // callback headers
+  return true;
+}
+
+/**
+ * Whether an added `//` comment looks like commented-out CODE (a disabled
+ * test header or assertion) rather than prose. Commenting out a test is a
+ * genuine weakening; adding an explanatory comment inside a helper is not
+ * (issue #89).
+ */
+function commentLooksLikeCode(text: string): boolean {
+  const match = text.match(/^\s*\/\/\s*(.*)$/);
+  if (!match) return false;
+  const content = match[1] ?? "";
+  return /\b(?:it|test)\s*\(/.test(content) || ASSERTION.test(content) || /[;={}]/.test(content);
+}
+
 function parseDiffLines(diff: string): DiffLine[] {
   const changedLines: DiffLine[] = [];
   let file = "";
@@ -141,10 +197,18 @@ export function detectTestWeakening(diff: string, deletedFiles: string[] = []): 
       }
     }
 
-    const removedTest = rem.find((line) => /\b(?:it|test)\s*\(/.test(line.text));
-    const addedComment = add.find((line) => /^\s*\/\//.test(line.text));
-    if (removedTest && addedComment) {
-      findings.push(finding("A test body was replaced with comments", addedComment, addedComment.text, "commented-test-body"));
+    // Issue #89: fire only when the evidence survives move/reindent
+    // cancellation AND an actual body was removed or code was commented out.
+    // Location/snippet point at the removed test callback itself (old line
+    // number), not at a nearby comment.
+    const genuinelyRemoved = genuinelyChanged(rem, add);
+    const genuinelyAdded = genuinelyChanged(add, rem);
+    const removedTest = genuinelyRemoved.find((line) => /\b(?:it|test)\s*\(/.test(line.text));
+    if (!removedTest) continue;
+    const bodyRemoved = genuinelyRemoved.some((line) => isExecutableStatement(line.text));
+    const codeCommentedOut = genuinelyAdded.some((line) => commentLooksLikeCode(line.text));
+    if (bodyRemoved || codeCommentedOut) {
+      findings.push(finding("A test body was replaced with comments", removedTest, removedTest.text, "commented-test-body"));
     }
   }
 

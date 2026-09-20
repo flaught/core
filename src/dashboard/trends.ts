@@ -27,7 +27,7 @@ export interface TrendPoint {
 }
 
 const SEVERITIES: Severity[] = ["critical", "high", "medium", "low", "info"];
-const VERDICTS: RefuteVerdict[] = ["confirmed", "refuted", "uncertain"];
+const VERDICTS: RefuteVerdict[] = ["confirmed", "refuted", "uncertain", "not_evaluated"];
 
 /**
  * Minimal runtime shape check for a parsed JSON value. The dashboard reads
@@ -48,7 +48,7 @@ export function isFindingsArtifact(value: unknown): value is FindingsArtifact {
 }
 
 function countRefuteVerdicts(artifact: FindingsArtifact): Record<RefuteVerdict, number> {
-  const counts: Record<RefuteVerdict, number> = { confirmed: 0, refuted: 0, uncertain: 0 };
+  const counts: Record<RefuteVerdict, number> = { confirmed: 0, refuted: 0, uncertain: 0, not_evaluated: 0 };
   for (const f of artifact.findings) {
     if (f.refute_result) counts[f.refute_result.verdict]++;
   }

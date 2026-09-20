@@ -10,7 +10,7 @@ version: 1
 # GPT-OSS models support JSON mode on Groq.
 llm:
   provider: groq
-  model: openai/gpt-oss-20b # good balance of speed and quality; also try: openai/gpt-oss-120b
+  model: openai/gpt-oss-120b # reviewer is the model-quality lever (GH#91 F-001/F-004 noise came from 20b judging a partial diff); skeptic stays on 20b for anti-correlation
   api_key_env: GROQ_API_KEY
   temperature: 0.2
   # gpt-oss is a reasoning model. With the previous 4096 budget it could spend
@@ -18,20 +18,26 @@ llm:
   # which Groq rejects as 400 `failed_generation` (truncation, not bad JSON).
   # 8192 + reasoning_effort: low keeps the budget on the structured output.
   max_tokens: 8192
+  # Both gpt-oss models carry a 131k-token context (~500k chars); Flaught's
+  # own soft cap was the binding constraint (analysis_completeness: partial,
+  # diff truncated to 84k of 316k chars). 200k chars ≈ 50k tokens leaves
+  # ample headroom for system prompt + completion.
+  max_prompt_chars: 200000
   reasoning_effort: low
   timeout_seconds: 120
 
 # ── Refute pass (skeptic) ────────────────────────────────────
 # Same-provider anti-correlation: the skeptic runs on a different Groq
-# model (120b, not the 20b that wrote the findings) rather than the exact
-# model that just reviewed the diff grading its own homework. `provider`
-# is left unset so it inherits `llm.provider` (groq) — only `model` differs.
+# model (20b, not the 120b that wrote the findings) rather than the exact
+# model that just reviewed the diff grading its own homework — preserving
+# reviewer/skeptic separation (an artifact protocol invariant) while the
+# reviewer carries the big context. `provider` is left unset so it inherits
+# `llm.provider` (groq) — only `model` differs.
 refute:
-  model: openai/gpt-oss-120b
-  # 120b is a reasoning model too; the schema default of 2048 is too tight once
-  # reasoning tokens are counted, so it would 400 `failed_generation` the
-  # moment the review pass starts succeeding. reasoning_effort is inherited
-  # from llm.reasoning_effort (low) via the refute schema's null default.
+  model: openai/gpt-oss-20b
+  # Skeptic batches are small (5 findings + budgeted context) since the
+  # refute prompt is now capped by llm.max_prompt_chars; 4096 + low
+  # reasoning_effort (inherited) keeps the window on the JSON output.
   max_tokens: 4096
 
 # ── Deterministic tools ────────────────────────────────────

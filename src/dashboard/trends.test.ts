@@ -112,7 +112,7 @@ describe("computeTrends", () => {
     expect(point!.by_severity.critical).toBe(2);
     expect(point!.by_severity.medium).toBe(1);
     expect(point!.by_source_type).toEqual({ llm: 2, deterministic: 1 });
-    expect(point!.refute).toEqual({ confirmed: 1, refuted: 1, uncertain: 0 });
+    expect(point!.refute).toEqual({ confirmed: 1, refuted: 1, uncertain: 0, not_evaluated: 0 });
     expect(point!.dismissed_count).toBe(1);
   });
 

@@ -77,6 +77,80 @@ describe("test weakening detection", () => {
     });
   });
 
+  it("does not flag an explanatory comment inside an executable test helper (GH#89 repro 1)", () => {
+    // MysteryMixClub PR #360: a prose comment added inside loadPush(), an
+    // async test HELPER (not an it/test callback), while tests were actively
+    // extended. The removed `it(` header reappears unmodified (reindent from
+    // being wrapped in describe), so nothing was genuinely removed.
+    const diff = [
+      "diff --git a/src/push.test.ts b/src/push.test.ts",
+      "--- a/src/push.test.ts",
+      "+++ b/src/push.test.ts",
+      "@@ -38,6 +38,10 @@",
+      "+describe(\"push registration\", () => {",
+      "+  // loadPush resets modules, imports the module and opens the push session",
+      "+  async function loadPush() {",
+      "+    vi.resetModules();",
+      "-  it(\"registers after login\", async () => {",
+      "+    it(\"registers after login\", async () => {",
+      "+      expect(true).toBe(true);",
+      "+    });",
+    ].join("\n");
+
+    expect(detectTestWeakening(diff, []).some((f) => f.ruleId === "commented-test-body")).toBe(false);
+  });
+
+  it("does not flag reindented/moved test code with a nearby comment (GH#89 repro 2)", () => {
+    // MysteryMixClub PR #354: reindentation produces removed+added pairs of
+    // identical content; a prose comment added nearby must not combine with
+    // the "removed" header into a commented-test-body finding.
+    const diff = [
+      "diff --git a/src/example.test.ts b/src/example.test.ts",
+      "--- a/src/example.test.ts",
+      "+++ b/src/example.test.ts",
+      "@@ -10,4 +10,5 @@",
+      "-  it(\"keeps state\", () => {",
+      "+    it(\"keeps state\", () => {",
+      "+    // covers the re-login path too",
+    ].join("\n");
+
+    expect(detectTestWeakening(diff, []).some((f) => f.ruleId === "commented-test-body")).toBe(false);
+  });
+
+  it("still flags a test body genuinely replaced by comments", () => {
+    const diff = [
+      "diff --git a/src/example.test.ts b/src/example.test.ts",
+      "--- a/src/example.test.ts",
+      "+++ b/src/example.test.ts",
+      "@@ -7,4 +7,3 @@",
+      "-it(\"validates the token\", () => {",
+      "-  const result = validate(token);",
+      "-  expect(result.ok).toBe(true);",
+      "-});",
+      "+// TODO: re-enable once the token endpoint stabilises",
+    ].join("\n");
+
+    const findings = detectTestWeakening(diff, []);
+    const flagged = findings.find((f) => f.ruleId === "commented-test-body");
+    expect(flagged).toBeTruthy();
+    // Evidence points at the removed test callback (old line 7), not the comment
+    expect(flagged).toMatchObject({ file: "src/example.test.ts", line: 7 });
+    expect(flagged?.snippet).toContain('it("validates the token"');
+  });
+
+  it("still flags a test commented out wholesale", () => {
+    const diff = [
+      "diff --git a/src/example.test.ts b/src/example.test.ts",
+      "--- a/src/example.test.ts",
+      "+++ b/src/example.test.ts",
+      "@@ -7,2 +7,2 @@",
+      "-it(\"important\", () => {",
+      "+// it(\"important\", () => {",
+    ].join("\n");
+
+    expect(detectTestWeakening(diff, []).some((f) => f.ruleId === "commented-test-body")).toBe(true);
+  });
+
 it("does not flag a clean test diff", () => {
     expect(detectTestWeakening("+expect(value).toBe(1)")).toEqual([]);
   });

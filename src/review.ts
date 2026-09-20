@@ -27,6 +27,7 @@ import {
   type AnalysisCompleteness,
   type TokenUsage,
   type TokenUsageSummary,
+  type SkepticStatus,
   SCHEMA_VERSION,
   FINDINGS_SCHEMA_URL,
   CAVEAT,
@@ -34,6 +35,7 @@ import {
 import { renderMarkdownReport } from "./report/markdown.js";
 import { renderJsonArtifact } from "./report/json.js";
 import { runDeterministicTools, formatToolFindingsForPrompt, type DeterministicFinding } from "./tools/runner.js";
+import { buildIntentProvenance, warnOnSparseIntent, type IntentProvenance } from "./intent.js";
 import { runTestInversion } from "./test-inversion/runner.js";
 import {
   detectScopeCreepHeuristic,
@@ -94,6 +96,12 @@ export interface ReviewOptions {
   headRef?: string;
   configPath?: string;
   prDescription?: string;
+  /**
+   * Provenance of the intent anchor (GH#86): what kind of intent the review
+   * ran against — recorded on the artifact without duplicating the text.
+   * Absent for programmatic callers that only pass prDescription text.
+   */
+  intentProvenance?: IntentProvenance;
   /** Skip LLM review (context assembly only) */
   skipLlm?: boolean;
   /** Skip the skeptic/refute pass even if LLM review is enabled */
@@ -147,6 +155,15 @@ export async function runReview(options: ReviewOptions = {}): Promise<ReviewResu
     headRef: options.headRef,
     configPath: options.configPath,
   });
+  // Assembly summary — the single most valuable line when a CI review comes
+  // back oddly empty or hallucinated: if the diff or contents are empty here,
+  // the LLM reviewed a file list, not code (GH#91 dogfood, run 35538580998).
+  progress(
+    `  Context: ${context.changedFiles.length} changed files, ` +
+    `${context.diff.length.toLocaleString()} diff chars, ` +
+    `${context.changedFileContents.size} changed-file contents, ` +
+    `${context.neighborhoodFileContents.size} neighborhood files`,
+  );
 
   // 2a. Load the dismissal store up front — needed both to inject "known
   // non-issues" context into the LLM prompt (below) and, later, to apply
@@ -209,6 +226,10 @@ export async function runReview(options: ReviewOptions = {}): Promise<ReviewResu
   }
 
   // 3b. Heuristic scope-creep pre-filter (runs before LLM so it can be injected into the prompt)
+  // Sparse intent (missing or title-only) degrades scope-creep detection —
+  // warn loudly rather than silently producing false "unrelated change"
+  // findings (GH#86).
+  warnOnSparseIntent(progress, config.scope_creep.enabled, !options.skipLlm, options.prDescription);
   if (context.changedFiles.length > 0 && config.scope_creep.enabled) {
     scopeCreepHeuristic = detectScopeCreepHeuristic(context, options.prDescription, config);
   }
@@ -220,6 +241,7 @@ export async function runReview(options: ReviewOptions = {}): Promise<ReviewResu
   let findings: Finding[] = [];
   let droppedBelowMinConfidence = 0;
   let refuteUsage: TokenUsage | null = null;
+  let skepticStatus: SkepticStatus | null = null;
 
   // Convert deterministic findings to Finding format
   for (const df of deterministicFindings) {
@@ -317,6 +339,7 @@ export async function runReview(options: ReviewOptions = {}): Promise<ReviewResu
     analysisCompleteness = llmStage.completeness;
     droppedBelowMinConfidence = llmStage.droppedBelowMinConfidence;
     refuteUsage = llmStage.refuteUsage;
+    skepticStatus = llmStage.skepticStatus;
     findings.push(...llmStage.llmFindings);
   }
 
@@ -482,6 +505,8 @@ export async function runReview(options: ReviewOptions = {}): Promise<ReviewResu
   // fork-PR split (--only-llm) can recover the scope-creep intent anchor from
   // the partial findings artifact without a separate bundle field.
   artifact.pull_request.description = options.prDescription ?? null;
+  artifact.pull_request.intent_provenance = options.intentProvenance
+    ?? (options.prDescription !== undefined ? buildIntentProvenance(options.prDescription, "cli-text") : undefined);
 
   // Record LLM error in the artifact if the LLM call failed
   if (llmError) {
@@ -491,6 +516,12 @@ export async function runReview(options: ReviewOptions = {}): Promise<ReviewResu
   // Record token usage from the LLM review + refute calls. Null when the
   // LLM pass did not run (--no-llm) or the provider returned no usage.
   artifact.run.usage = buildUsageSummary(llmResult?.usage, refuteUsage);
+
+  // Record skeptic-pass diagnostics (issue #88): incomplete coverage must be
+  // visible at the run level, not just as per-finding not_evaluated verdicts.
+  if (skepticStatus) {
+    artifact.run.skeptic = skepticStatus;
+  }
 
   // 9. Render reports
   progress("Rendering reports...");
@@ -550,6 +581,8 @@ export interface LlmStageResult {
   droppedBelowMinConfidence: number;
   /** Token usage from the skeptic/refute pass, or null when the pass was skipped/disabled/failed or returned no usage. */
   refuteUsage: TokenUsage | null;
+  /** Skeptic coverage/validation diagnostics (issue #88), or null when the refute pass did not run. */
+  skepticStatus: SkepticStatus | null;
 }
 
 /**
@@ -633,6 +666,7 @@ export async function runLlmStage(input: LlmStageInput): Promise<LlmStageResult>
   let llmFindings: Finding[] = [];
   let droppedBelowMinConfidence = 0;
   let refuteUsage: TokenUsage | null = null;
+  let skepticStatus: SkepticStatus | null = null;
 
   // ── LLM review ──
   // If the LLM call fails, we gracefully degrade: return no LLM findings;
@@ -684,6 +718,7 @@ export async function runLlmStage(input: LlmStageInput): Promise<LlmStageResult>
         prDescription,
       );
       llmFindings = refuteResult.findings.filter((f) => f.source_type === "llm");
+      skepticStatus = refuteResult.skeptic;
       progress(`  Refute model: ${refuteResult.model}`);
       if (refuteResult.usage) {
         refuteUsage = refuteResult.usage;
@@ -693,7 +728,30 @@ export async function runLlmStage(input: LlmStageInput): Promise<LlmStageResult>
       llmError = `Refute (skeptic) pass failed: ${err instanceof Error ? err.message : String(err)}`;
       progress(`  ⚠ ${llmError}`);
       progress(`  Continuing with un-refuted LLM findings.`);
-      llmFindings = llmFindings.map((f) => ({ ...f, refute_result: null }));
+      // A failed skeptic call must not be indistinguishable from a paid one
+      // (GH#88): mark every LLM finding not_evaluated and record the failure
+      // in run.skeptic, rather than leaving refute_result silently null.
+      const firstLine = (err instanceof Error ? err.message : String(err)).split("\n")[0]!;
+      llmFindings = llmFindings.map((f) => ({
+        ...f,
+        refute_result: {
+          verdict: "not_evaluated" as const,
+          reasoning: `Skeptic pass failed before evaluating any finding (${firstLine}). This is an incomplete-skeptic signal, not an uncertain verdict.`,
+          adjusted_confidence: f.confidence * 0.7,
+        },
+        confidence: f.confidence * 0.7,
+      }));
+      skepticStatus = {
+        state: "failed",
+        expected: llmFindings.length,
+        evaluated: 0,
+        not_evaluated: llmFindings.length,
+        parse_failures: 0,
+        retries: 0,
+        unknown_ids: 0,
+        duplicate_ids: 0,
+        legacy_index_matches: 0,
+      };
     }
   } else if (!config.refute.enabled) {
     progress("Refute pass disabled in config — skipping skeptic.");
@@ -701,7 +759,7 @@ export async function runLlmStage(input: LlmStageInput): Promise<LlmStageResult>
     progress("No LLM findings to refute — skipping skeptic pass.");
   }
 
-  return { llmFindings, llmResult, llmError, completeness, droppedBelowMinConfidence, refuteUsage };
+  return { llmFindings, llmResult, llmError, completeness, droppedBelowMinConfidence, refuteUsage, skepticStatus };
 }
 
 // ─── Review bundle (context artifact for the fork-PR split) ──────────────────
@@ -847,6 +905,12 @@ export async function runReviewOnlyLlm(options: OnlyLlmOptions): Promise<ReviewR
   progress("Loading review context artifact...");
   const bundle = loadReviewBundle(options.contextPath);
   const context = contextFromJSON(bundle.context);
+  progress(
+    `  Context: ${context.changedFiles.length} changed files, ` +
+    `${context.diff.length.toLocaleString()} diff chars, ` +
+    `${context.changedFileContents.size} changed-file contents, ` +
+    `${context.neighborhoodFileContents.size} neighborhood files (from bundle)`,
+  );
 
   // 2. Load the partial findings artifact (deterministic + test-inversion, un-budgeted).
   progress("Loading deterministic findings artifact...");
@@ -872,6 +936,13 @@ export async function runReviewOnlyLlm(options: OnlyLlmOptions): Promise<ReviewR
   const deterministicFindings: DeterministicFinding[] = bundle.deterministicFindings ?? [];
   const scopeCreepHeuristic: FlaggedHunk[] = partial.scope_creep?.flagged_hunks ?? [];
   const prDescription = partial.pull_request?.description ?? undefined;
+  // Intent provenance (GH#86) travels with the artifact so the split halves
+  // record the same provenance a monolithic run would; "bundle" marks intent
+  // recovered from a pre-#86 partial artifact that has text but no provenance.
+  const intentProvenance: IntentProvenance | undefined =
+    partial.pull_request?.intent_provenance
+    ?? (prDescription !== undefined ? buildIntentProvenance(prDescription, "bundle") : undefined);
+  warnOnSparseIntent(progress, config.scope_creep.enabled, true, prDescription);
 
   // 5. Start from the partial findings (deterministic + test-inversion).
   let findings: Finding[] = [...partial.findings];
@@ -953,11 +1024,18 @@ export async function runReviewOnlyLlm(options: OnlyLlmOptions): Promise<ReviewR
   artifact.test_inversion = partial.test_inversion;
   artifact.scope_creep = scopeCreepResult;
   artifact.pull_request = partial.pull_request;
+  // Intent provenance recovered for older bundles (pre-#86) that lack it.
+  if (artifact.pull_request.intent_provenance === undefined && intentProvenance !== undefined) {
+    artifact.pull_request.intent_provenance = intentProvenance;
+  }
   artifact.analysis_completeness = llmStage.completeness;
   if (llmStage.llmError) {
     artifact.run.llm_error = llmStage.llmError;
   }
   artifact.run.usage = buildUsageSummary(llmStage.llmResult?.usage, llmStage.refuteUsage);
+  if (llmStage.skepticStatus) {
+    artifact.run.skeptic = llmStage.skepticStatus;
+  }
 
   // 14. Render reports + exit code.
   progress("Rendering reports...");
@@ -1162,7 +1240,9 @@ export function isDocsOnlyDiff(changedFiles: ChangedFile[]): boolean {
  * refuted finding block merge makes the skeptic cosmetic for gating (it would
  * filter the report display but not the verdict). 'confirmed' and 'uncertain'
  * still gate; 'uncertain' is treated as potentially real (conservative — the
- * skeptic couldn't determine, so don't assume it's safe). Dismissed findings
+ * skeptic couldn't determine, so don't assume it's safe), and
+ * 'not_evaluated' gates too (issue #88: a skeptic response that omitted the
+ * finding is not evidence either way). Dismissed findings
  * are excluded as before (they're a human-recorded disposition, not noise).
  */
 export function gateTripped(

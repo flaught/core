@@ -147,7 +147,7 @@ function renderTable(points: TrendPoint[]): string {
         <td>${p.total_findings}</td>
         ${sevCells}
         <td>${p.by_source_type.llm} / ${p.by_source_type.deterministic}</td>
-        <td>${p.refute.confirmed} / ${p.refute.refuted} / ${p.refute.uncertain}</td>
+        <td>${p.refute.confirmed} / ${p.refute.refuted} / ${p.refute.uncertain}${p.refute.not_evaluated > 0 ? ` (+${p.refute.not_evaluated} unevaluated)` : ""}</td>
         <td>${formatTokens(p.usage)}</td>
         <td>${p.dismissed_count}</td>
         <td>${p.llm_error ? "⚠️" : ""}</td>

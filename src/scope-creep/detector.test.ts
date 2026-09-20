@@ -122,3 +122,47 @@ describe("detectScopeCreepHeuristic — exclude_paths", () => {
     expect(flagged.find((h) => h.file === ".eslintrc.json")).toBeTruthy();
   });
 });
+
+// ─── Issue #86 acceptance fixture: intent must come from the full PR ─────────
+
+describe("detectScopeCreepHeuristic — title-only vs full-body intent (GH#86)", () => {
+  const TITLE = "docs: fix the push notification runbook";
+  const BODY = [
+    TITLE,
+    "",
+    "## Why",
+    "",
+    "The APNs debugging runbook has been stale for three releases.",
+    "",
+    "## What",
+    "",
+    "- Rewrite docs/ios/push-runbook.md for the current token flow",
+    "- Add scripts/diagnostics/push_probe.py, a diagnostic tool that replays a",
+    "  recorded APNs payload locally so on-call can verify push behavior",
+  ].join("\n");
+
+  const context = mockContext({
+    changedFiles: [
+      { path: "scripts/diagnostics/push_probe.py", additions: 42, deletions: 0, status: "added" as const },
+      { path: "docs/ios/push-runbook.md", additions: 25, deletions: 4, status: "modified" as const },
+    ],
+  });
+
+  it("title-only intent falsely flags the body-authorized diagnostic tooling", () => {
+    // This LOST test documents the failure mode: the heuristic cannot see the
+    // body's authorization when only the title is passed — the exact
+    // MysteryMixClub symptom. It stays here as the regression pair for the
+    // passing case below and the reason full-body intent is the default.
+    const config = FlaughtConfigSchema.parse({});
+    const flagged = detectScopeCreepHeuristic(context, TITLE, config);
+    // (Title-only starves the path matcher: "scripts"/"diagnostics" never
+    // appear in the title, so the authorized tool looks unrelated.)
+    expect(flagged.find((h) => h.file === "scripts/diagnostics/push_probe.py")).toBeTruthy();
+  });
+
+  it("full title+body intent does NOT flag work the body authorized", () => {
+    const config = FlaughtConfigSchema.parse({});
+    const flagged = detectScopeCreepHeuristic(context, BODY, config);
+    expect(flagged.find((h) => h.file === "scripts/diagnostics/push_probe.py")).toBeUndefined();
+  });
+});

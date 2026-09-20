@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, afterEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { REFUTE_SYSTEM_PROMPT, buildRefuteUserPrompt, parseRefuteResponse } from "./prompt.js";
 import { runRefutePass } from "./runner.js";
 import type { Finding } from "../schemas/findings.js";
@@ -102,6 +102,62 @@ describe("buildRefuteUserPrompt", () => {
     expect(prompt).toContain("Unified Diff");
   });
 
+  it("does not truncate when the prompt fits within the budget", () => {
+    const prompt = buildRefuteUserPrompt(
+      [makeFinding()],
+      "small diff",
+      new Map([["a.ts", "content"]]),
+      new Map(),
+      undefined,
+      undefined,
+      50_000,
+    );
+    expect(prompt).not.toContain("Context truncated");
+    expect(prompt).not.toContain("omitted entirely");
+  });
+
+  it("truncates an oversized diff to the budget and SAYS SO in-band (CI 400 regression)", () => {
+    // CI failure that motivated this: a 316K-char diff rode the refute prompt
+    // uncapped and Groq rejected the whole call (400: reduce the length of
+    // the messages or completion). The findings and instructions — the
+    // sections the skeptic actually needs — must survive; the diff tail
+    // degrades with an explicit note.
+    const hugeDiff = "diff content line\n".repeat(20_000); // ~360K chars
+    const budget = 30_000;
+
+    const prompt = buildRefuteUserPrompt(
+      [makeFinding()],
+      hugeDiff,
+      new Map(),
+      new Map(),
+      undefined,
+      undefined,
+      budget,
+    );
+
+    expect(prompt.length).toBeLessThanOrEqual(budget + 1000); // budget + note overhead
+    expect(prompt).toContain("Context truncated");
+    expect(prompt).toContain("the skeptic saw only part of it");
+    expect(prompt).toContain(makeFinding().title); // findings never truncated
+    expect(prompt).toContain("## Your Task");
+  });
+
+  it("evicts neighborhood contents before shrinking the diff", () => {
+    const hugeHood = new Map([["neighbor.ts", "x".repeat(60_000)]]);
+    const prompt = buildRefuteUserPrompt(
+      [makeFinding()],
+      "d".repeat(40_000),
+      new Map(),
+      hugeHood,
+      undefined,
+      undefined,
+      30_000,
+    );
+
+    expect(prompt).toContain('"neighborhood file contents" omitted entirely');
+    expect(prompt).toContain("## Unified Diff");
+  });
+
   it("includes only LLM findings in the prompt", () => {
     const findings = [
       makeFinding({ id: "D-0001", source: "semgrep", source_type: "deterministic", title: "Deterministic finding" }),
@@ -178,17 +234,17 @@ describe("buildRefuteUserPrompt", () => {
 // ─── Parse refute response ─────────────────────────────────────────────────────
 
 describe("parseRefuteResponse", () => {
-  it("parses a valid JSON response", () => {
+  it("parses a valid JSON response with opaque finding IDs", () => {
     const response = JSON.stringify({
       evaluations: [
         {
-          finding_index: 0,
+          finding_id: "RF-ab12-1",
           verdict: "confirmed",
           reasoning: "The SQL injection is clearly visible on line 47.",
           adjusted_confidence: 0.92,
         },
         {
-          finding_index: 1,
+          finding_id: "RF-ab12-2",
           verdict: "refuted",
           reasoning: "The variable is sanitized before use.",
           adjusted_confidence: 0.1,
@@ -197,32 +253,65 @@ describe("parseRefuteResponse", () => {
     });
 
     const result = parseRefuteResponse(response);
-    expect(result).toHaveLength(2);
-    expect(result[0]!.verdict).toBe("confirmed");
-    expect(result[0]!.reasoning).toContain("SQL injection");
-    expect(result[0]!.adjusted_confidence).toBe(0.92);
-    expect(result[1]!.verdict).toBe("refuted");
-    expect(result[1]!.adjusted_confidence).toBe(0.1);
+    expect(result.parse_error).toBe(false);
+    expect(result.evaluations).toHaveLength(2);
+    expect(result.evaluations[0]!.finding_id).toBe("RF-ab12-1");
+    expect(result.evaluations[0]!.verdict).toBe("confirmed");
+    expect(result.evaluations[0]!.reasoning).toContain("SQL injection");
+    expect(result.evaluations[0]!.adjusted_confidence).toBe(0.92);
+    expect(result.evaluations[1]!.verdict).toBe("refuted");
+    expect(result.evaluations[1]!.adjusted_confidence).toBe(0.1);
+  });
+
+  it("retains the legacy numeric finding_index as a fallback reference", () => {
+    const response = JSON.stringify({
+      evaluations: [
+        { finding_index: 0, verdict: "confirmed", reasoning: "ok", adjusted_confidence: 0.9 },
+      ],
+    });
+
+    const result = parseRefuteResponse(response);
+    expect(result.evaluations).toHaveLength(1);
+    expect(result.evaluations[0]!.finding_index).toBe(0);
+    expect(result.evaluations[0]!.finding_id).toBeNull();
   });
 
   it("parses a response wrapped in markdown code blocks", () => {
-    const response = '```json\n{"evaluations": [{"finding_index": 0, "verdict": "uncertain", "reasoning": "Cannot verify from context.", "adjusted_confidence": 0.45}]}\n```';
+    const response = '```json\n{"evaluations": [{"finding_id": "RF-x-1", "verdict": "uncertain", "reasoning": "Cannot verify from context.", "adjusted_confidence": 0.45}]}\n```';
 
     const result = parseRefuteResponse(response);
-    expect(result).toHaveLength(1);
-    expect(result[0]!.verdict).toBe("uncertain");
+    expect(result.evaluations).toHaveLength(1);
+    expect(result.evaluations[0]!.verdict).toBe("uncertain");
   });
 
-  it("returns empty array for invalid JSON", () => {
-    expect(parseRefuteResponse("not json")).toEqual([]);
-    expect(parseRefuteResponse("")).toEqual([]);
+  it("reports a parse error (not an empty success) for invalid JSON", () => {
+    // #88: a skeptic response we cannot parse is a FAILURE SIGNAL, not
+    // "zero evaluations happened to come back".
+    expect(parseRefuteResponse("not json")).toEqual({ evaluations: [], parse_error: true, dropped_entries: 0 });
+    expect(parseRefuteResponse("")).toEqual({ evaluations: [], parse_error: true, dropped_entries: 0 });
+  });
+
+  it("drops entries with no finding reference instead of attaching them to finding 0 (#88)", () => {
+    // The old parser defaulted a missing finding_index to 0, silently
+    // attaching an unidentified evaluation to the FIRST finding.
+    const response = JSON.stringify({
+      evaluations: [
+        { verdict: "uncertain", reasoning: "Cannot tell", adjusted_confidence: 0.45 },
+        { finding_id: "RF-x-2", verdict: "confirmed", reasoning: "Real", adjusted_confidence: 0.9 },
+      ],
+    });
+
+    const result = parseRefuteResponse(response);
+    expect(result.evaluations).toHaveLength(1);
+    expect(result.evaluations[0]!.finding_id).toBe("RF-x-2");
+    expect(result.dropped_entries).toBe(1);
   });
 
   it("defaults uncertain for invalid verdicts", () => {
     const response = JSON.stringify({
       evaluations: [
         {
-          finding_index: 0,
+          finding_id: "RF-x-1",
           verdict: "maybe",
           reasoning: "Not sure",
           adjusted_confidence: 0.5,
@@ -231,15 +320,15 @@ describe("parseRefuteResponse", () => {
     });
 
     const result = parseRefuteResponse(response);
-    expect(result).toHaveLength(1);
-    expect(result[0]!.verdict).toBe("uncertain");
+    expect(result.evaluations).toHaveLength(1);
+    expect(result.evaluations[0]!.verdict).toBe("uncertain");
   });
 
   it("clamps adjusted_confidence to 0-1 range", () => {
     const response = JSON.stringify({
       evaluations: [
         {
-          finding_index: 0,
+          finding_id: "RF-x-1",
           verdict: "confirmed",
           reasoning: "Confirmed",
           adjusted_confidence: 1.5,
@@ -248,14 +337,14 @@ describe("parseRefuteResponse", () => {
     });
 
     const result = parseRefuteResponse(response);
-    expect(result[0]!.adjusted_confidence).toBe(1);
+    expect(result.evaluations[0]!.adjusted_confidence).toBe(1);
   });
 
   it("defaults adjusted_confidence to 0.5 for missing values", () => {
     const response = JSON.stringify({
       evaluations: [
         {
-          finding_index: 0,
+          finding_id: "RF-x-1",
           verdict: "uncertain",
           reasoning: "Cannot tell",
         },
@@ -263,13 +352,13 @@ describe("parseRefuteResponse", () => {
     });
 
     const result = parseRefuteResponse(response);
-    expect(result[0]!.adjusted_confidence).toBe(0.5);
+    expect(result.evaluations[0]!.adjusted_confidence).toBe(0.5);
   });
 
   it("handles a plain array response (not wrapped in evaluations key)", () => {
     const response = JSON.stringify([
       {
-        finding_index: 0,
+        finding_id: "RF-x-1",
         verdict: "confirmed",
         reasoning: "Looks right",
         adjusted_confidence: 0.85,
@@ -277,8 +366,8 @@ describe("parseRefuteResponse", () => {
     ]);
 
     const result = parseRefuteResponse(response);
-    expect(result).toHaveLength(1);
-    expect(result[0]!.verdict).toBe("confirmed");
+    expect(result.evaluations).toHaveLength(1);
+    expect(result.evaluations[0]!.verdict).toBe("confirmed");
   });
 });
 
@@ -452,5 +541,242 @@ describe("runRefutePass — token usage", () => {
       completion_tokens: 200,
       total_tokens: 1200,
     });
+  });
+});
+// ─── Issue #88: stable finding identities + unevaluated-skeptic reporting ──────
+
+/** Extract the opaque finding IDs embedded in the skeptic prompt, in order. */
+function promptFindingIds(prompt: string): string[] {
+  return [...prompt.matchAll(/### Finding (RF-[0-9a-f]+-\d+):/g)].map((m) => m[1]!);
+}
+
+function skepticResponse(evaluations: unknown[], usage?: { prompt_tokens: number; completion_tokens: number; total_tokens: number }) {
+  return {
+    findings: [],
+    raw: JSON.stringify({ evaluations }),
+    model: "test",
+    ...(usage ? { usage } : {}),
+  };
+}
+
+describe("runRefutePass — finding identity and coverage (GH#88)", () => {
+  beforeEach(() => {
+    // Restore the default (legacy index-based) skeptic response: mockClear
+    // does NOT reset custom implementations, so an implementation set by one
+    // test would otherwise leak into the next.
+    mockCreateProvider.mockClear();
+    mockReview.mockReset();
+    mockReview.mockResolvedValue({
+      findings: [],
+      raw: JSON.stringify({
+        evaluations: [{ finding_index: 0, verdict: "confirmed", reasoning: "ok", adjusted_confidence: 0.9 }],
+      }),
+      model: "test",
+    });
+    capturedConfigs.length = 0;
+  });
+
+  it("labels findings with opaque IDs in the prompt and requires them back verbatim", async () => {
+    const config = FlaughtConfigSchema.parse({ llm: { provider: "groq", model: "m" } });
+    const findings = [makeFinding(), makeFinding({ title: "Second finding" })];
+
+    mockReview.mockImplementation(async (_sys: string, userPrompt: string) => {
+      const ids = promptFindingIds(userPrompt);
+      expect(ids).toHaveLength(2);
+      expect(ids[0]).not.toBe(ids[1]);
+      return skepticResponse(
+        ids.map((id) => ({ finding_id: id, verdict: "confirmed", reasoning: "verified", adjusted_confidence: 0.9 })),
+      );
+    });
+
+    const result = await runRefutePass(findings, mockContext(), config);
+
+    const userPrompt = mockReview.mock.calls[0]![1] as string;
+    expect(userPrompt).toContain('"finding_id"');
+    expect(userPrompt).toContain("copied verbatim");
+    expect(result.skeptic).toMatchObject({ state: "complete", expected: 2, evaluated: 2, not_evaluated: 0 });
+    expect(result.findings.filter((f) => f.source_type === "llm").every((f) => f.refute_result?.verdict === "confirmed")).toBe(true);
+  });
+
+  it("matches reordered evaluations by ID — verdicts cannot shift between findings", async () => {
+    const config = FlaughtConfigSchema.parse({ llm: { provider: "groq", model: "m" } });
+    const findings = [
+      makeFinding({ title: "First finding" }),
+      makeFinding({ title: "Second finding" }),
+    ];
+
+    mockReview.mockImplementation(async (_sys: string, userPrompt: string) => {
+      const ids = promptFindingIds(userPrompt);
+      // Return evaluations in REVERSE order with distinct verdicts
+      return skepticResponse([
+        { finding_id: ids[1], verdict: "refuted", reasoning: "second is wrong", adjusted_confidence: 0.1 },
+        { finding_id: ids[0], verdict: "confirmed", reasoning: "first is right", adjusted_confidence: 0.95 },
+      ]);
+    });
+
+    const result = await runRefutePass(findings, mockContext(), config);
+    const llm = result.findings.filter((f) => f.source_type === "llm");
+
+    expect(llm[0]!.refute_result?.verdict).toBe("confirmed");
+    expect(llm[0]!.refute_result?.reasoning).toBe("first is right");
+    expect(llm[1]!.refute_result?.verdict).toBe("refuted");
+    expect(llm[1]!.refute_result?.reasoning).toBe("second is wrong");
+    expect(result.skeptic).toMatchObject({ state: "complete", evaluated: 2 });
+  });
+
+  it("rejects unknown/invented finding IDs and counts them", async () => {
+    const config = FlaughtConfigSchema.parse({ llm: { provider: "groq", model: "m" } });
+
+    mockReview.mockImplementation(async (_sys: string, userPrompt: string) => {
+      const ids = promptFindingIds(userPrompt);
+      return skepticResponse([
+        { finding_id: ids[0], verdict: "confirmed", reasoning: "ok", adjusted_confidence: 0.9 },
+        { finding_id: "RF-zzzz-99", verdict: "refuted", reasoning: "invented", adjusted_confidence: 0.1 },
+      ]);
+    });
+
+    const result = await runRefutePass([makeFinding(), makeFinding({ title: "Second" })], mockContext(), config);
+
+    expect(result.skeptic.unknown_ids).toBe(1);
+    expect(result.skeptic.state).toBe("partial");
+    const llm = result.findings.filter((f) => f.source_type === "llm");
+    expect(llm[1]!.refute_result?.verdict).toBe("not_evaluated");
+  });
+
+  it("rejects duplicate evaluations for the same finding (keeps the first)", async () => {
+    const config = FlaughtConfigSchema.parse({ llm: { provider: "groq", model: "m" } });
+
+    mockReview.mockImplementation(async (_sys: string, userPrompt: string) => {
+      const ids = promptFindingIds(userPrompt);
+      return skepticResponse([
+        { finding_id: ids[0], verdict: "refuted", reasoning: "first verdict", adjusted_confidence: 0.1 },
+        { finding_id: ids[0], verdict: "confirmed", reasoning: "duplicate overwrite attempt", adjusted_confidence: 0.95 },
+      ]);
+    });
+
+    const result = await runRefutePass([makeFinding()], mockContext(), config);
+
+    const llm = result.findings.filter((f) => f.source_type === "llm");
+    expect(llm[0]!.refute_result?.verdict).toBe("refuted");
+    expect(llm[0]!.refute_result?.reasoning).toBe("first verdict");
+    expect(result.skeptic.duplicate_ids).toBe(1);
+  });
+
+  it("an evaluation naming a different finding's ID attaches to THAT finding, never silently to finding 0", async () => {
+    // Regression for the observed #88 symptom: the skeptic's reasoning about
+    // finding B was attached to finding A. With ID round-tripping, whatever
+    // the model names is where it lands — and if it names nothing valid,
+    // it attaches nowhere.
+    const config = FlaughtConfigSchema.parse({ llm: { provider: "groq", model: "m" } });
+
+    mockReview.mockImplementation(async (_sys: string, userPrompt: string) => {
+      const ids = promptFindingIds(userPrompt);
+      return skepticResponse([
+        { finding_id: ids[1], verdict: "refuted", reasoning: "this reasons about the SECOND finding", adjusted_confidence: 0.1 },
+      ]);
+    });
+
+    const result = await runRefutePass([makeFinding({ title: "A" }), makeFinding({ title: "B" })], mockContext(), config);
+    const llm = result.findings.filter((f) => f.source_type === "llm");
+
+    // Old buggy behavior: this evaluation would have attached to finding 0.
+    expect(llm[0]!.refute_result?.verdict).toBe("not_evaluated");
+    expect(llm[1]!.refute_result?.verdict).toBe("refuted");
+  });
+
+  it("retries a malformed response once, then marks findings not_evaluated with state=failed", async () => {
+    const config = FlaughtConfigSchema.parse({ llm: { provider: "groq", model: "m" } });
+
+    mockReview
+      .mockResolvedValueOnce({ findings: [], raw: "<<<garbage>>>", model: "test" })
+      .mockResolvedValueOnce({ findings: [], raw: "still <<<garbage>>>", model: "test" });
+
+    const result = await runRefutePass([makeFinding()], mockContext(), config);
+
+    expect(mockReview).toHaveBeenCalledTimes(2); // bounded: exactly one retry
+    expect(result.skeptic).toMatchObject({
+      state: "failed",
+      expected: 1,
+      evaluated: 0,
+      not_evaluated: 1,
+      parse_failures: 1,
+      retries: 1,
+    });
+    const llm = result.findings.filter((f) => f.source_type === "llm");
+    expect(llm[0]!.refute_result?.verdict).toBe("not_evaluated");
+    expect(llm[0]!.refute_result?.reasoning).toContain("not an uncertain verdict");
+  });
+
+  it("recovers on retry when the first response is malformed but the second is valid", async () => {
+    const config = FlaughtConfigSchema.parse({ llm: { provider: "groq", model: "m" } });
+
+    mockReview
+      .mockResolvedValueOnce({ findings: [], raw: "not json at all", model: "test" })
+      .mockImplementationOnce(async (_sys: string, userPrompt: string) => {
+        const ids = promptFindingIds(userPrompt);
+        return skepticResponse([
+          { finding_id: ids[0], verdict: "confirmed", reasoning: "verified on retry", adjusted_confidence: 0.9 },
+        ]);
+      });
+
+    const result = await runRefutePass([makeFinding()], mockContext(), config);
+
+    expect(mockReview).toHaveBeenCalledTimes(2);
+    expect(result.skeptic).toMatchObject({ state: "complete", retries: 1 });
+    const llm = result.findings.filter((f) => f.source_type === "llm");
+    expect(llm[0]!.refute_result?.verdict).toBe("confirmed");
+  });
+
+  it("marks only the omitted findings not_evaluated when coverage is partial", async () => {
+    const config = FlaughtConfigSchema.parse({ llm: { provider: "groq", model: "m" } });
+
+    mockReview.mockImplementation(async (_sys: string, userPrompt: string) => {
+      const ids = promptFindingIds(userPrompt);
+      return skepticResponse([
+        { finding_id: ids[0], verdict: "uncertain", reasoning: "genuinely cannot decide", adjusted_confidence: 0.45 },
+      ]);
+    });
+
+    const result = await runRefutePass(
+      [makeFinding(), makeFinding({ title: "B" }), makeFinding({ title: "C" })],
+      mockContext(),
+      config,
+    );
+
+    expect(result.skeptic).toMatchObject({ state: "partial", expected: 3, evaluated: 1, not_evaluated: 2 });
+    const llm = result.findings.filter((f) => f.source_type === "llm");
+    expect(llm[0]!.refute_result?.verdict).toBe("uncertain");
+    expect(llm[1]!.refute_result?.verdict).toBe("not_evaluated");
+    expect(llm[2]!.refute_result?.verdict).toBe("not_evaluated");
+  });
+
+  it("keeps the legacy finding_index path for compatibility, counted in diagnostics", async () => {
+    const config = FlaughtConfigSchema.parse({ llm: { provider: "groq", model: "m" } });
+
+    // Default mockReview returns finding_index: 0 (legacy scheme, 0-based)
+    const result = await runRefutePass([makeFinding()], mockContext(), config);
+
+    const llm = result.findings.filter((f) => f.source_type === "llm");
+    expect(llm[0]!.refute_result?.verdict).toBe("confirmed");
+    expect(result.skeptic.legacy_index_matches).toBe(1);
+  });
+
+  it("rejects an out-of-range legacy index instead of wrapping it onto a real finding", async () => {
+    // The 1-based-vs-0-based hazard: a model numbering 1..N produced index N
+    // (out of range) for the last finding and index 1 for the FIRST finding —
+    // silently mis-attaching it to the second. Out-of-range must be rejected.
+    const config = FlaughtConfigSchema.parse({ llm: { provider: "groq", model: "m" } });
+
+    mockReview.mockResolvedValue(skepticResponse([
+      { finding_index: 2, verdict: "confirmed", reasoning: "1-based mistake", adjusted_confidence: 0.9 },
+    ]));
+
+    const result = await runRefutePass([makeFinding(), makeFinding({ title: "B" })], mockContext(), config);
+
+    expect(result.skeptic.unknown_ids).toBe(1);
+    expect(result.skeptic.state).toBe("failed");
+    const llm = result.findings.filter((f) => f.source_type === "llm");
+    expect(llm[0]!.refute_result?.verdict).toBe("not_evaluated");
+    expect(llm[1]!.refute_result?.verdict).toBe("not_evaluated");
   });
 });

@@ -82,6 +82,7 @@ jobs:
           PR_NUMBER: ${{ github.event.pull_request.number }}
           PR_BASE_REF: ${{ github.base_ref }}
           PR_TITLE: ${{ github.event.pull_request.title }}
+          PR_BODY: ${{ github.event.pull_request.body }}
         # Shell-injection-safe: all GitHub expressions passed via env vars, not interpolated inline.
         # set +e / explicit exit 0: the step's own pass/fail no longer gates the job — the two Check
         # steps below branch on exit_code so exit 1 (findings) and exit 2 (tool/LLM error) differ.
@@ -91,14 +92,15 @@ jobs:
         # run the LLM pass against (core-8fz fork-PR split).
         run: |
           set +e
+          # Scope-creep intent anchor: full title + body via file (GH#86), never inline shell.
+          printf '%s\n\n%s\n' "${PR_TITLE}" "${PR_BODY}" > .flaught-pr-intent.txt
           if [ -n "$GROQ_API_KEY" ]; then
             flaught review \
               --base "origin/${PR_BASE_REF}" \
               --head HEAD \
               --output findings.json \
-              --pr-description "${PR_TITLE}" \
-              --github-inline \
-              --quiet
+              --pr-description-file .flaught-pr-intent.txt \
+              --github-inline
           else
             echo "No GROQ_API_KEY (fork PR) — running deterministic-only and emitting a context bundle for the privileged LLM half."
             flaught review \
@@ -107,8 +109,7 @@ jobs:
               --base "origin/${PR_BASE_REF}" \
               --head HEAD \
               --output findings.json \
-              --pr-description "${PR_TITLE}" \
-              --quiet
+              --pr-description-file .flaught-pr-intent.txt
           fi
           EXIT_CODE=$?
           echo "exit_code=$EXIT_CODE" >> "$GITHUB_OUTPUT"
@@ -118,23 +119,25 @@ jobs:
 
       - name: Render review comment body (same-repo path only)
         if: always() && steps.review.outputs.split != 'true'
-        env:
-          PR_BASE_REF: ${{ github.base_ref }}
-          PR_TITLE: ${{ github.event.pull_request.title }}
         # Only for same-repo PRs: the full review above already wrote findings.json (with LLM
-        # findings). This re-runs --no-llm to render the markdown comment body. For fork PRs the
-        # comment body is rendered by the privileged half (which has the LLM findings).
+        # findings). Render the comment body FROM THE ARTIFACT with `flaught report` — do NOT
+        # re-run the review with --no-llm here (the historical behavior): a rerun loses the LLM
+        # findings from the comment AND its exit-1 severity gate used to overwrite the rendered
+        # body with "Review could not be rendered." exactly when findings mattered most (the
+        # dogfood run of GH#91 hit exactly that). For fork PRs the comment body is rendered by
+        # the privileged half (which has the LLM findings).
         run: |
           if [ -f findings.json ]; then
             set +e
-            if ! flaught review \
-              --base "origin/${PR_BASE_REF}" \
-              --head HEAD \
-              --no-llm \
-              --pr-description "${PR_TITLE}" \
-              --quiet > review-body.md 2>/dev/null \
-              || [ ! -s review-body.md ]; then
-              echo "Review could not be rendered." > review-body.md
+            flaught report --from findings.json > review-body.md 2>render-errors.log
+            RENDER_STATUS=$?
+            # A render crash and a severity-gate exit are different things; only a genuine
+            # render failure (or empty output) gets the fallback body.
+            if [ $RENDER_STATUS -ne 0 ] || [ ! -s review-body.md ]; then
+              echo "Review could not be rendered. Render log:" > review-body.md
+              echo '```' >> review-body.md
+              head -50 render-errors.log >> review-body.md
+              echo '```' >> review-body.md
             fi
           else
             echo "⚠️ Flaught review failed to produce findings. Check the workflow logs for details." > review-body.md

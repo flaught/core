@@ -150,13 +150,15 @@ jobs:
         env:
           PR_BASE_REF: ${{ github.base_ref }}
           PR_TITLE: ${{ github.event.pull_request.title }}
+          PR_BODY: ${{ github.event.pull_request.body }}
         run: |
+          printf '%s\n\n%s\n' "${PR_TITLE}" "${PR_BODY}" > .flaught-pr-intent.txt
           flaught review \
             --base "origin/${PR_BASE_REF}" \
             --head HEAD \
             --no-llm \
             --output findings.json \
-            --pr-description "${PR_TITLE}" \
+            --pr-description-file .flaught-pr-intent.txt \
             --quiet
         continue-on-error: true
 
@@ -222,17 +224,19 @@ jobs:
           GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
           PR_BASE_REF: ${{ github.base_ref }}
           PR_TITLE: ${{ github.event.pull_request.title }}
+          PR_BODY: ${{ github.event.pull_request.body }}
         # set +e / explicit exit 0: this step's own pass/fail no longer
         # gates the job — the two Check steps below do that, branching on
         # exit_code so exit 1 (findings) and exit 2 (tool/LLM error) are
         # handled differently instead of alike.
         run: |
           set +e
+          printf '%s\n\n%s\n' "${PR_TITLE}" "${PR_BODY}" > .flaught-pr-intent.txt
           flaught review \
             --base "origin/${PR_BASE_REF}" \
             --head HEAD \
             --output findings.json \
-            --pr-description "${PR_TITLE}" \
+            --pr-description-file .flaught-pr-intent.txt \
             --quiet
           echo "exit_code=$?" >> "$GITHUB_OUTPUT"
           exit 0
@@ -313,12 +317,14 @@ Set `provider`/`model`/`api_key_env` in `.advreview.yml` for whichever provider 
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           PR_BASE_REF: ${{ github.base_ref }}
           PR_TITLE: ${{ github.event.pull_request.title }}
+          PR_BODY: ${{ github.event.pull_request.body }}
         run: |
+          printf '%s\n\n%s\n' "${PR_TITLE}" "${PR_BODY}" > .flaught-pr-intent.txt
           flaught review \
             --base "origin/${PR_BASE_REF}" \
             --head HEAD \
             --output findings.json \
-            --pr-description "${PR_TITLE}" \
+            --pr-description-file .flaught-pr-intent.txt \
             --quiet
         continue-on-error: true
 ```
@@ -361,12 +367,14 @@ jobs:
           OLLAMA_API_KEY: ${{ secrets.OLLAMA_API_KEY }}
           PR_BASE_REF: ${{ github.base_ref }}
           PR_TITLE: ${{ github.event.pull_request.title }}
+          PR_BODY: ${{ github.event.pull_request.body }}
         run: |
+          printf '%s\n\n%s\n' "${PR_TITLE}" "${PR_BODY}" > .flaught-pr-intent.txt
           flaught review \
             --base "origin/${PR_BASE_REF}" \
             --head HEAD \
             --output findings.json \
-            --pr-description "${PR_TITLE}" \
+            --pr-description-file .flaught-pr-intent.txt \
             --quiet
         continue-on-error: true
 
@@ -445,12 +453,14 @@ jobs:
           OLLAMA_HOST: http://localhost:11434
           PR_BASE_REF: ${{ github.base_ref }}
           PR_TITLE: ${{ github.event.pull_request.title }}
+          PR_BODY: ${{ github.event.pull_request.body }}
         run: |
+          printf '%s\n\n%s\n' "${PR_TITLE}" "${PR_BODY}" > .flaught-pr-intent.txt
           flaught review \
             --base "origin/${PR_BASE_REF}" \
             --head HEAD \
             --output findings.json \
-            --pr-description "${PR_TITLE}" \
+            --pr-description-file .flaught-pr-intent.txt \
             --quiet
         continue-on-error: true
 
@@ -521,20 +531,30 @@ Capture the exit code with `set +e` and an explicit `exit 0` (the step's own pas
   # No `exit 1` here — this step intentionally warns and passes.
 ```
 
-## PR description for scope-creep detection
+## PR intent for scope-creep detection (title + full body)
 
-Pass the PR title or body via `--pr-description` to enable scope-creep detection. Route it through `env:` rather than interpolating it directly into `run:` — a PR title is attacker-controlled text, and inlining it into a shell command is a shell-injection risk:
+The PR description is the **intent anchor** — Flaught's scope-creep layer flags changes that appear unrelated to it. **Pass the full title AND body, not just the title.** A title-only anchor starves the detector: work the body explicitly authorized (e.g. "also adds `scripts/diagnostics/push_probe.py`") looks unrelated to a title like "docs: fix runbook" and gets falsely flagged. Flaught warns when the intent it receives looks title-only.
+
+PR text is **untrusted, attacker-controlled data**. Never interpolate it into a shell command string — route it through `env:` and into a file with `printf`:
 
 ```yaml
 env:
   PR_TITLE: ${{ github.event.pull_request.title }}
   PR_BODY: ${{ github.event.pull_request.body }}
 run: |
-  # Just the title:
-  flaught review --pr-description "${PR_TITLE}" --quiet
-
-  # Title + body:
-  flaught review --pr-description "${PR_TITLE}: ${PR_BODY}" --quiet
+  printf '%s\n\n%s\n' "${PR_TITLE}" "${PR_BODY}" > .flaught-pr-intent.txt
+  flaught review --pr-description-file .flaught-pr-intent.txt --quiet
 ```
 
-The PR description serves as the "intent anchor" — Flaught flags hunks that appear unrelated to it.
+`--pr-description-file` reads the file verbatim (utf-8): multiline text, quotes, and literal shell metacharacters survive as **data** — they are never executed or interpolated into shell code. `--pr-description "<text>"` still exists for short inline intent, but `--pr-description-file` is the recommended default for real PRs (arg-list length limits and quoting hazards don't apply).
+
+**Supplemental acceptance criteria from external trackers** (Jira, Beads, an issue body, etc.) can ride in the same file — append them as text; there is no tracker-specific dependency:
+
+```yaml
+run: |
+  printf '%s\n\n%s\n' "${PR_TITLE}" "${PR_BODY}" > .flaught-pr-intent.txt
+  # e.g. gh issue view 123 --json title,body -q '.title + "\n" + .body' >> .flaught-pr-intent.txt
+  flaught review --pr-description-file .flaught-pr-intent.txt --quiet
+```
+
+The artifact records **intent provenance** under `pull_request.intent_provenance` (`source`, `chars`, `lines`, `appears_title_only`) — an audit trail of *what kind* of intent the review ran against, without duplicating the text. Within a review, PR/issue text is always treated as task data, never as reviewer instructions.

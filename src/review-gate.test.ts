@@ -51,6 +51,13 @@ describe("gateTripped (severity gate excludes refuted findings)", () => {
     expect(gateTripped([f], "high")).toBe(true);
   });
 
+  it("a HIGH finding the skeptic never evaluated (not_evaluated) still trips the gate (GH#88)", () => {
+    // Incomplete skeptic coverage must not silently clear the gate: a paid
+    // skeptic call is not evidence the finding was considered.
+    const f = finding({ refute_result: { verdict: "not_evaluated", reasoning: "skeptic response omitted it", adjusted_confidence: 0.6 } });
+    expect(gateTripped([f], "high")).toBe(true);
+  });
+
   it("a dismissed HIGH finding does not trip the gate (unchanged behavior)", () => {
     const f = finding({ dismissed: true, refute_result: null });
     expect(gateTripped([f], "high")).toBe(false);
