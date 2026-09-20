@@ -833,15 +833,30 @@ function mapPipAuditSeverity(severity: string | null): string {
 
 // ── Parse linter output ──────────────────────────────────────────────────────
 
-function parseLinterJsonOutput(stdout: string): DeterministicFinding[] | null {
+export function parseLinterJsonOutput(stdout: string): DeterministicFinding[] | null {
   try {
     const data = JSON.parse(stdout);
+    if (!Array.isArray(data)) {
+      return null;
+    }
+    if (data.length === 0) {
+      return null;
+    }
+
     const findings: DeterministicFinding[] = [];
 
-    // ESLint format
-    if (Array.isArray(data)) {
+    // Disambiguate by payload shape, not by `Array.isArray` alone: both
+    // formats are top-level arrays, so two sequential `Array.isArray`
+    // branches make the second one unreachable and silently drop flat-array
+    // findings (see issue #85).
+    //
+    // ESLint format: per-file results with a nested `messages` array.
+    const isEslintFormat = data.some(
+      (item) => item != null && typeof item === "object" && Array.isArray(item.messages),
+    );
+    if (isEslintFormat) {
       for (const fileResult of data) {
-        for (const msg of fileResult.messages ?? []) {
+        for (const msg of fileResult?.messages ?? []) {
           findings.push({
             title: msg.message ?? "Lint issue",
             severity: mapEslintSeverity(msg.severity),
@@ -858,26 +873,25 @@ function parseLinterJsonOutput(stdout: string): DeterministicFinding[] | null {
       return findings.length > 0 ? findings : null;
     }
 
-    // Ruff format
-    if (Array.isArray(data)) {
-      // Ruff outputs a flat array of violations
-      for (const result of data) {
-        findings.push({
-          title: result.message ?? "Lint issue",
-          severity: mapRuffSeverity(result.severity ?? ""),
-          category: "maintainability",
-          file: result.filename ?? result.path ?? "",
-          line: result.location?.row ?? result.line ?? 0,
-          snippet: result.message ?? "",
-          source: "ruff",
-          ruleId: result.code?.value ?? result.code ?? "unknown",
-          reference: result.url ?? undefined,
-        });
-      }
-      return findings.length > 0 ? findings : null;
+    // Flat violation format: Ruff (`--output-format=json`), SwiftLint
+    // (`--reporter json`), and other linters that emit one top-level entry
+    // per violation instead of per file.
+    for (const result of data) {
+      if (result == null || typeof result !== "object") continue;
+      const message = result.message ?? result.reason;
+      findings.push({
+        title: message ?? "Lint issue",
+        severity: mapRuffSeverity(result.severity ?? ""),
+        category: "maintainability",
+        file: result.filename ?? result.path ?? result.file ?? "",
+        line: result.location?.row ?? result.line ?? 0,
+        snippet: message ?? "",
+        source: "linter",
+        ruleId: result.code?.value ?? result.code ?? result.rule_id ?? "unknown",
+        reference: result.url ?? undefined,
+      });
     }
-
-    return null;
+    return findings.length > 0 ? findings : null;
   } catch {
     return null;
   }
