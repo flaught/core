@@ -100,8 +100,7 @@ jobs:
               --head HEAD \
               --output findings.json \
               --pr-description-file .flaught-pr-intent.txt \
-              --github-inline \
-              --quiet
+              --github-inline
           else
             echo "No GROQ_API_KEY (fork PR) — running deterministic-only and emitting a context bundle for the privileged LLM half."
             flaught review \
@@ -110,8 +109,7 @@ jobs:
               --base "origin/${PR_BASE_REF}" \
               --head HEAD \
               --output findings.json \
-              --pr-description-file .flaught-pr-intent.txt \
-              --quiet
+              --pr-description-file .flaught-pr-intent.txt
           fi
           EXIT_CODE=$?
           echo "exit_code=$EXIT_CODE" >> "$GITHUB_OUTPUT"
@@ -136,8 +134,7 @@ jobs:
               --base "origin/${PR_BASE_REF}" \
               --head HEAD \
               --no-llm \
-              --pr-description-file .flaught-pr-intent.txt \
-              --quiet > review-body.md 2>/dev/null \
+              --pr-description-file .flaught-pr-intent.txt > review-body.md 2>/dev/null \
               || [ ! -s review-body.md ]; then
               echo "Review could not be rendered." > review-body.md
             fi
